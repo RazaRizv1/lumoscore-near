@@ -180,6 +180,12 @@ if (!ADMIN) {
 if (!ADMIN) {
   const OURS = (h) => h === 'lumoscore.com' || h.endsWith('.lumoscore.com');
   for (const f of files) {
+    // SELF-HOSTED THIRD-PARTY BUNDLES ARE NOT OUR MARKUP. This rule exists to catch a transform re-run
+    // after _nofollow.js; nothing of ours writes into assets/vendor/. NEAR Connect's bundle carries a
+    // "powered by" footer template with a GitHub link, which the library never renders here
+    // (footerBranding: null in browser/nearconnect.js) and which a crawler never sees as a page link.
+    // Editing a vendored file to satisfy a check would make it differ from the published package.
+    if (/(^|[\\/])assets[\\/]vendor[\\/]/.test(rel(f))) continue;
     const s = readPage(f);
     let n = 0, sample = '';
     for (const tag of (s.match(/<a\b[^>]*>/gi) || [])) {
