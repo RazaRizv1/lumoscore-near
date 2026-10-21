@@ -82,6 +82,8 @@ const CHAIN = [
   // The header wallet chip: NEAR's name and mark, and only a NEAR session counts as connected (the
   // combined site shares localStorage across chains). Patches inherited lx-whead in place.
   '_nearwhead',
+  // LUMOS discount pieces hidden until LUMOS is minted on NEAR (deferred). Delete this line to turn them on.
+  '_nearlumosdeferred',
   // Last until there is anything else: it only touches <a> tags pointing off-site, and any later pass
   // that rebuilds a page key from the design hands those tags back without rel="nofollow".
   '_nofollow',
