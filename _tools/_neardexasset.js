@@ -37,7 +37,16 @@ const B = String.fromCharCode(92);
 const ID = 'lx-neardexasset';
 const CSS_ID = 'lx-neardexasset-css';
 const page = fs.readFileSync(__dirname + '/browser/dexasset.js', 'utf8');
-if (page.indexOf('</' + 'script') >= 0) { console.error('  browser/dexasset.js contains a closing script tag — aborting'); process.exit(1); }
+// Market SWAP, after dexasset.js in the same block (RAZA approved wiring it 2026-10-21): nearswap.js is the
+// engine (Rhea routing, 0.2% fee to FEE_ACCOUNT in the same transaction, registration first when needed)
+// and dxaswap.js drives the design's swap pane with it. Nothing signs on its own — a person approves every
+// transaction in their own wallet — and the CTA stays "coming soon" for any input token the fee account is
+// not registered on.
+const swapEngine = fs.readFileSync(__dirname + '/browser/nearswap.js', 'utf8');
+const swapPane = fs.readFileSync(__dirname + '/browser/dxaswap.js', 'utf8');
+for (const [n, src] of [['dexasset.js', page], ['nearswap.js', swapEngine], ['dxaswap.js', swapPane]]) {
+  if (src.indexOf('</' + 'script') >= 0) { console.error('  browser/' + n + ' contains a closing script tag — aborting'); process.exit(1); }
+}
 
 const CSS = [
   'html:not(.lxn-dxa) #dxaPanelFilters,html:not(.lxn-dxa) #mdxaPanelFilters,html:not(.lxn-dxa) #dxaPanel .panel-foot,'
@@ -52,7 +61,7 @@ const CSS = [
 if (CSS.indexOf(B) >= 0) { console.error('  stylesheet carries a backslash — aborting'); process.exit(1); }
 
 const STYLE = '<style id="' + CSS_ID + '">\n' + CSS + '\n</style>';
-const SCRIPT = '<script id="' + ID + '">\n' + page + '\n</' + 'script>';
+const SCRIPT = '<script id="' + ID + '">\n' + page + '\n' + swapEngine + '\n' + swapPane + '\n</' + 'script>';
 
 function stripStyle(h, id) {
   const open = '<style id="' + id + '">', close = '</style>';

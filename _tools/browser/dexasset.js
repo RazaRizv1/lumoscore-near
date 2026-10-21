@@ -2026,10 +2026,17 @@
   //
   // Deliberately NOT touched: "Slippage tolerance" is a user setting rather than a quote, and the
   // trading-fee row is owned by the fee layer and already reads correctly.
+  // Once browser/dxaswap.js has booted it owns the swap pane's figures; a later repaint here (a reload of the
+  // page data) must not put em dashes back over a live quote.
+  function swapOwned(n) {
+    try { return !!(window.__lxnDxaSwapState && window.__lxnDxaSwapState().booted && n.closest('.dxa-pane-swap, .mdxa-pane-swap')); }
+    catch (e) { return false; }
+  }
   function setSumRow(label, value) {
     var rows = $$('.dxa-tsum-row, .mdxa-tsum');
     for (var i = 0; i < rows.length; i++) {
       var kids = rows[i].children;
+      if (swapOwned(rows[i])) continue;
       if (kids.length < 2) continue;
       if ((kids[0].textContent || '').trim().toLowerCase() !== label) continue;
       var v = kids[kids.length - 1];
@@ -2049,7 +2056,7 @@
     var p = d && d.price != null && isFinite(d.price) ? +d.price : null;
     $$('[class*="dxa-trade-frow"]').forEach(function (row) {
       var k = row.children[0], v = row.children[row.children.length - 1];
-      if (!k || !v || k === v) return;
+      if (!k || !v || k === v || swapOwned(row)) return;
       var key = (k.textContent || '').trim().toLowerCase(), phone = /mdxa-/.test(row.className);
       var txt = null;
       if (/^you pay/.test(key)) txt = (phone ? 'Bal: ' : 'Balance: ') + '—';
@@ -2071,6 +2078,8 @@
     $$('.dxa-tsum-row .mono, .mdxa-tsum .mono').forEach(function (v) { v.classList.add('lxp'); });
     $$('.dxa-trade-cta, .mdxa-trade-cta').forEach(function (b) {
       var limit = !!(b.closest && b.closest('.dxa-pane-limit, .mdxa-pane-limit'));
+      // The swap button belongs to browser/dxaswap.js (window.lxnSwap) whenever it is on the page.
+      if (!limit && window.lxnSwap) return;
       var t = limit ? 'Limit orders on NEAR are coming soon' : 'Swaps on NEAR are coming soon';
       // lx-gate swaps this button to "Connect wallet" while no wallet is connected and, on connect,
       // RESTORES what it saved in data-lxorig / data-lxdis -- which it saved before this ran, i.e. the
