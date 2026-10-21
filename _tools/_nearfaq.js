@@ -30,6 +30,17 @@ const FAQ = {
     ['A locked issuer has given up its own signing keys, so no more of the asset can ever be minted and the supply you can see is final. An unlocked issuer can still mint at any time.',
      'A green padlock means the token’s contract can no longer be changed and no more of it can be minted, so the supply you see is final. A red padlock means someone still holds full control of the contract. No padlock means we could not confirm either way.'],
   ],
+  // Pools (2026-10-21, with the Pools port). Only the two answers that name XLM and trustlines change; the
+  // rest is chain-neutral. Pool creation and deposits are not built on NEAR yet, and the answers say so
+  // rather than describe a flow the page does not have.
+  'lumoscore-amm': [
+    ['Choose Create pool, pick two assets and an amount of each. The ratio sets the opening price, so match the market rate. Keep spare XLM: a new pool position is a trustline and locks 0.5 XLM of reserve.',
+     'On NEAR, pools live on Rhea Finance: a new pool takes two tokens and an amount of each, and the ratio sets the opening price, so match the market rate. Keep a little NEAR spare for gas and storage deposits. Creating pools from LumosCore on NEAR is coming soon.'],
+  ],
+  'lumoscore-amm-pool': [
+    ['Use Add liquidity on this page: enter an amount for either asset and the other side fills in at the pool’s ratio. A first position also opens a trustline, which locks 0.5 XLM, so keep a little spare.',
+     'Adding liquidity from LumosCore on NEAR is coming soon. In a Rhea pool you deposit every token at the pool’s current ratio, and a first deposit pays a small NEAR storage deposit, so keep a little NEAR spare.'],
+  ],
 };
 
 const BASE = (k) => k.replace(/-(dark|light|mobile)\.html$/, '').replace(/\.html$/, '');

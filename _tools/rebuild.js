@@ -52,6 +52,18 @@ const CHAIN = [
   // NEAR answers for inherited FAQs, on pages whose NEAR feature exists. After every pass that rebuilds
   // a page from the design, or the Stellar answers come back with it.
   '_nearfaq',
+  // Pools: strips Stellar's lx-ammdata from EVERY page key (125 of 126 carry it), injects lx-nearpools on
+  // the Pools list and lx-nearcreatepool wherever the Create Pool dialog can open. After _nearfaq and every
+  // pass that rebuilds a page from the design, or the Stellar layer comes back with it.
+  '_nearpools',
+  // The Market Overview's mock figures, blanked in markup. After _nearpools: it guards on the list ids and
+  // must see the page with lx-ammdata (whose strings name the same classes) already gone.
+  '_nearpoolsmock',
+  // Pool detail page: injects lx-nearpooldetail where #tvlChart lives.
+  '_nearpooldetail',
+  // The detail page's mock pool id / price / participant pills and its /pools/stellar crumb, blanked in
+  // markup. After _nearpooldetail, as on XRPL; independent of it otherwise.
+  '_nearpooldetailmock',
   // Last until there is anything else: it only touches <a> tags pointing off-site, and any later pass
   // that rebuilds a page key from the design hands those tags back without rel="nofollow".
   '_nofollow',
