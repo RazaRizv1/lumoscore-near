@@ -41,6 +41,17 @@ const FAQ = {
     ['Use Add liquidity on this page: enter an amount for either asset and the other side fills in at the pool’s ratio. A first position also opens a trustline, which locks 0.5 XLM, so keep a little spare.',
      'Adding liquidity from LumosCore on NEAR is coming soon. In a Rhea pool you deposit every token at the pool’s current ratio, and a first deposit pays a small NEAR storage deposit, so keep a little NEAR spare.'],
   ],
+  // The wallet's first answer described Stellar's claimable balances, which NEAR does not have (the tab
+  // is hidden), so the question becomes the NEAR concept a reader actually meets: registration. Send
+  // adds the recipient's registration in the same transaction (browser/send.js), which is what it says.
+  'lumoscore-wallet': [
+    ['What are claimable payments?', 'Why does a token need registering before it can be received?'],
+    ['A payment someone has sent that is waiting for you to accept, used when it cannot be delivered straight away, usually because you do not hold a trustline for that asset yet. Add the trustline and claim it.',
+     'A NEAR token keeps a record for every account that holds it, and that record needs a small storage deposit, about 0.00125 NEAR. When you send a token to someone who has never held it, LumosCore adds their registration to the same transaction.'],
+    ['How do I add or remove a trustline?', 'How do tokens appear in my wallet?'],
+    ['In Wallet, use Add asset with the code and issuer, or add it from search. To remove one its balance must be zero, so send or swap the remainder first, and that releases the 0.5 XLM it was holding.',
+     'Every token your NEAR account holds shows up in Wallet on its own. Receiving a token for the first time registers your account with its contract for that small storage deposit, which comes back if you unregister once the balance is zero.'],
+  ],
 };
 
 const BASE = (k) => k.replace(/-(dark|light|mobile)\.html$/, '').replace(/\.html$/, '');
