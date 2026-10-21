@@ -19,6 +19,7 @@
 //   i  contract id      n  symbol        nm name          logo  data:/https: url or ''
 //   p  price in NEAR    d  24h change %  v  24h volume NEAR   t  liquidity NEAR   x  24h trades
 //   hi / lo  day range (not available from these sources: null)    vf  1 = curated    st 1 = stablecoin
+//   dc decimals (the wallet turns raw balances into amounts with it, and Send builds exact amounts)
 // Volume, trades and liquidity are the token's MAIN pair's — the same thing Stellar's table shows (an
 // asset against its main market), not a sum over every pool. 24h change is reported only when the token
 // is the BASE of that pair, since that is the side the change describes; otherwise null, not a guess.
@@ -97,7 +98,7 @@ async function build() {
     if (!(usd > 0)) continue;                          // no live price: not listed rather than $0
     const s = agg[c.i] || { v: 0, t: 0, x: 0, d: null };
     const p = usd / nearUsd;
-    rows.push({ i: c.i, n: c.s, nm: c.n, logo: c.logo || '', st: c.st ? 1 : 0, vf: 1,
+    rows.push({ i: c.i, n: c.s, nm: c.n, logo: c.logo || '', st: c.st ? 1 : 0, vf: 1, dc: c.d,
       p, d: s.d, v: s.v / nearUsd, t: s.t / nearUsd, x: s.x, cg: c.cg || '', hi: null, lo: null });
   }
   rows.sort((a, b) => b.v - a.v);
@@ -114,8 +115,8 @@ export async function marketBody(context) {
   // The cache outlives a deployment, so the key carries the answer's SHAPE version: a new deploy that
   // changes what a row holds must not serve the previous version's answer for two minutes. Bump it
   // whenever the row shape changes (v3: rows carry cg; history is fetched by the page).
-  const fresh = new Request('https://lumoscore.internal/lxapi/nearmarket/v3/fresh');
-  const kept = new Request('https://lumoscore.internal/lxapi/nearmarket/v3/kept');
+  const fresh = new Request('https://lumoscore.internal/lxapi/nearmarket/v4/fresh');
+  const kept = new Request('https://lumoscore.internal/lxapi/nearmarket/v4/kept');
 
   const hit = await cache.match(fresh);
   if (hit) return await hit.json();

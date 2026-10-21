@@ -64,6 +64,14 @@ const CHAIN = [
   // The detail page's mock pool id / price / participant pills and its /pools/stellar crumb, blanked in
   // markup. After _nearpooldetail, as on XRPL; independent of it otherwise.
   '_nearpooldetailmock',
+  // Wallet page: strips Stellar's wallet, phone-wallet, claimable, open-orders, swap and fee-tier layers
+  // from the wallet keys, blanks the design's mock figures, gates Open orders, injects lx-nearwallet
+  // (wallet.js + prices.js + send.js). After every pass that rebuilds a page from the design.
+  '_nearwallet',
+  // Dashboard: strips Stellar's stats, price panel, product boxes, swap/orders and fee-tier layers from the
+  // dashboard keys, fixes their Stellar markup and lx-dashqa's routes, injects lx-neardash. Independent of
+  // _nearwallet (different page keys).
+  '_neardash',
   // Last until there is anything else: it only touches <a> tags pointing off-site, and any later pass
   // that rebuilds a page key from the design hands those tags back without rel="nofollow".
   '_nofollow',
