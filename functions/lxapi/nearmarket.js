@@ -29,6 +29,11 @@ const KEEP = 86400;                     // seconds the last good answer survives
 const WNEAR = 'wrap.near';
 const PRICES = 'https://indexer.ref.finance/list-token-price';
 const PAIRS = 'https://api.dexscreener.com/tokens/v1/near/';
+// DAY HIGH / LOW AND THE 7D TREND are NOT built here. Their only usable source is CoinGecko's 7-day
+// hourly series, and CoinGecko answers 429 to Cloudflare (measured on staging 2026-10-21, as it does for
+// Stellar's xlm.js). So each row carries its CoinGecko id (cg) and the PAGE asks CoinGecko once from the
+// visitor's own connection — the precedent Stellar's asset pages set — see loadHist in browser/trade.js.
+// Rhea's token-price-report was checked and rejected: it had RHEA flat at half its traded price.
 
 function json(body, status, maxAge) {
   return new Response(JSON.stringify(body), { status: status || 200, headers: {
@@ -91,8 +96,9 @@ async function build() {
     const usd = +((prices[c.i] || {}).price || 0);
     if (!(usd > 0)) continue;                          // no live price: not listed rather than $0
     const s = agg[c.i] || { v: 0, t: 0, x: 0, d: null };
+    const p = usd / nearUsd;
     rows.push({ i: c.i, n: c.s, nm: c.n, logo: c.logo || '', st: c.st ? 1 : 0, vf: 1,
-      p: usd / nearUsd, d: s.d, v: s.v / nearUsd, t: s.t / nearUsd, x: s.x, hi: null, lo: null });
+      p, d: s.d, v: s.v / nearUsd, t: s.t / nearUsd, x: s.x, cg: c.cg || '', hi: null, lo: null });
   }
   rows.sort((a, b) => b.v - a.v);
   return { ok: true, src: 'Rhea Finance indexer, DexScreener', usd: nearUsd,
@@ -101,8 +107,11 @@ async function build() {
 
 export async function onRequestGet(context) {
   const cache = caches.default;
-  const fresh = new Request('https://lumoscore.internal/lxapi/nearmarket/fresh');
-  const kept = new Request('https://lumoscore.internal/lxapi/nearmarket/kept');
+  // The cache outlives a deployment, so the key carries the answer's SHAPE version: a new deploy that
+  // changes what a row holds must not serve the previous version's answer for two minutes. Bump it
+  // whenever the row shape changes (v3: rows carry cg; history is fetched by the page).
+  const fresh = new Request('https://lumoscore.internal/lxapi/nearmarket/v3/fresh');
+  const kept = new Request('https://lumoscore.internal/lxapi/nearmarket/v3/kept');
 
   const hit = await cache.match(fresh);
   if (hit) return json(await hit.json());

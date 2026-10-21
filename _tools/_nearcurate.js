@@ -87,13 +87,25 @@ function safeLogo(icon) {
   if (ranked[0] !== 'wrap.near') ranked.unshift('wrap.near');
   const pick = ranked.slice(0, MAX);
 
+  // CoinGecko's id for each token, from its own platform map (platform "near-protocol"), so the market
+  // endpoint can ask for the day's high/low and a 7-day series in one call. Tokens CoinGecko does not
+  // list keep no id, and their two columns stay em dashes.
+  const cgBy = {};
+  try {
+    for (const c of await getJson('https://api.coingecko.com/api/v3/coins/list?include_platform=true')) {
+      const a = c.platforms && c.platforms['near-protocol'];
+      if (a) cgBy[String(a).toLowerCase()] = c.id;
+    }
+  } catch (e) { console.warn('  coingecko map unavailable: ' + e.message); }
+
   const out = [];
   for (const id of pick) {
     let md;
     try { md = await view(id, 'ft_metadata', {}); } catch (e) { console.warn('  skip ' + id + ': no ft_metadata'); continue; }
     const sym = String(md.symbol || '').slice(0, 16);
     out.push({ i: id, s: sym, n: String(md.name || sym).slice(0, 48), d: +md.decimals || 0,
-      logo: safeLogo(md.icon), st: STABLES.has(sym.toUpperCase()) ? 1 : 0, v: Math.round(vol[id] || 0) });
+      logo: safeLogo(md.icon), st: STABLES.has(sym.toUpperCase()) ? 1 : 0, v: Math.round(vol[id] || 0),
+      cg: cgBy[id.toLowerCase()] || '' });
     await sleep(120);
   }
   fs.writeFileSync(OUT, JSON.stringify({ generated: new Date().toISOString(), rule: 'rhea 24h volume x rhea whitelist',

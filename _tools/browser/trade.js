@@ -422,10 +422,10 @@
     var hl = el('div', 'dex-mk-hl');
     var r1 = el('div', 'row');
     r1.appendChild(el('span', 'lab', 'H'));
-    r1.appendChild(el('span', 'v-h', xrp(t.hi)));
+    r1.appendChild(el('span', 'v-h', histPending(t) ? '' : xrp(t.hi)));
     var r2 = el('div', 'row');
     r2.appendChild(el('span', 'lab', 'L'));
-    r2.appendChild(el('span', 'v-l', xrp(t.lo)));
+    r2.appendChild(el('span', 'v-l', histPending(t) ? '' : xrp(t.lo)));
     hl.appendChild(r1); hl.appendChild(r2);
     c6.appendChild(hl);
     tr.appendChild(c6);
@@ -1500,8 +1500,87 @@
     });
   }
 
-  // No 7-day series source for NEAR yet: each row keeps its percentage (or its em dash).
-  function loadSparks(rows) { fillPct(); }
+  // ---- day high / low and the 7-day curve, from CoinGecko, asked BY THE PAGE -----------------------
+  //
+  // CoinGecko answers 429 to Cloudflare's shared servers (measured on staging 2026-10-21), so the edge
+  // cannot ask for this; the visitor's own connection can, once per page load, which is what Stellar's
+  // asset pages already do. Rows carry their CoinGecko id (cg); a token CoinGecko does not list has
+  // none, and its two cells end as em dashes. Cached 10 minutes in localStorage, so a reload or a
+  // second tab draws immediately and makes no call at all.
+  //
+  // NO FLASH: while the one call is in flight, a row that WILL get figures shows its high/low and 7D
+  // cells empty — never an em dash that then turns into a number (GUARDRAILS B).
+  var HIST = { state: 'idle' };
+  var HIST_KEY = 'lumos.nearHist.v1', HIST_TTL = 600000;
+  var CG_HIST = 'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&sparkline=true&per_page=250&ids=';
+
+  // Each token's 7-day hourly series re-priced IN NEAR by dividing by NEAR's own series point for point
+  // (aligned from the newest end). From it: the day's high and low (last 24 points), the week's change,
+  // and a ~42-point curve. Malformed input yields no entry, never a partial one.
+  function nearHistory(list) {
+    var out = {}, by = {};
+    if (!list || !list.length) return out;
+    for (var i = 0; i < list.length; i++) {
+      var m = list[i];
+      if (m && m.id && m.sparkline_in_7d && m.sparkline_in_7d.price && m.sparkline_in_7d.price.length) by[m.id] = m.sparkline_in_7d.price;
+    }
+    var near = by.near;
+    if (!near || near.length < 48) return out;
+    for (var id in by) {
+      if (id === 'near') continue;
+      var tok = by[id], n = Math.min(tok.length, near.length), r = [];
+      if (n < 48) continue;
+      for (var k = 0; k < n; k++) {
+        var a = +tok[tok.length - n + k], b = +near[near.length - n + k];
+        if (a > 0 && b > 0) r.push(a / b);
+      }
+      if (r.length < 48) continue;
+      var day = r.slice(-24), s = [], step = Math.max(1, Math.floor(r.length / 42));
+      for (var j = 0; j < r.length; j += step) s.push(+r[j].toPrecision(6));
+      s.push(+r[r.length - 1].toPrecision(6));
+      out[id] = { hi: Math.max.apply(null, day), lo: Math.min.apply(null, day), w: (r[r.length - 1] / r[0] - 1) * 100, s: s };
+    }
+    return out;
+  }
+  function applyHist(d, h) {
+    for (var i = 0; i < d.rows.length; i++) {
+      var t = d.rows[i], x = t.cg && h[t.cg];
+      if (!x) continue;
+      // the live price belongs inside the day's range even when the hourly series has not caught up
+      t.hi = Math.max(x.hi, t.p); t.lo = Math.min(x.lo, t.p); t.w = x.w; t.s = x.s;
+    }
+  }
+  function loadHist(d, after) {
+    try {
+      var c = JSON.parse(localStorage.getItem(HIST_KEY) || 'null');
+      if (c && c.h && Date.now() - c.ts < HIST_TTL) { applyHist(d, c.h); HIST.state = 'done'; after(); return; }
+    } catch (e) {}
+    var ids = ['near'];
+    for (var i = 0; i < d.rows.length; i++) if (d.rows[i].cg && ids.indexOf(d.rows[i].cg) < 0) ids.push(d.rows[i].cg);
+    HIST.state = 'pending';
+    fetch(CG_HIST + ids.map(encodeURIComponent).join(','))
+      .then(function (r) { if (!r.ok) throw new Error('coingecko ' + r.status); return r.json(); })
+      .then(function (j) {
+        var h = nearHistory(j);
+        applyHist(d, h);
+        try { localStorage.setItem(HIST_KEY, JSON.stringify({ ts: Date.now(), h: h })); } catch (e) {}
+      })
+      .catch(function () {})
+      .then(function () { HIST.state = 'done'; after(); });
+  }
+  function histPending(t) { return HIST.state === 'pending' && !!(t && t.cg) && t.hi == null; }
+
+  // Draw what each row carries. While the history call is in flight, the cells stay empty; once it
+  // settles, every row without a curve gets its percentage or its em dash.
+  function loadSparks(rows) {
+    var byId = {}, series = {};
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i];
+      if (r && r.s && r.s.length > 1) { byId[r.i] = r; series[r.i] = r.s; }
+    }
+    paintSparks(series, byId);
+    if (HIST.state !== 'pending') fillPct();
+  }
 
   function paintSparks(series, byId) {
     for (var id in series) {
@@ -1722,6 +1801,11 @@
       buildDenToggle(h, d);
       wireSearch(h, d);
       wireSort();
+      // History first: from the cache it lands synchronously and the first paint already has it;
+      // from the network the page paints now with those cells empty and repaints when it settles.
+      var histSync = true;
+      loadHist(d, function () { if (!histSync) renderPage(h, d, pageNo); });
+      histSync = false;
       renderPage(h, d, 1);
 
       var grid = $('#dexMoverGrid') || $('#mdxMoverList');
