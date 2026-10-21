@@ -45,6 +45,10 @@ const CHAIN = [
   // Trade market table: strips Stellar's lx-dexmain, disables the design's sample-data renderer through
   // its own guard, drops the phone's Stellar verified-map merge, injects lx-neartrade.
   '_neartrade',
+  // Trade-Asset page (/trade/near/<contract id>): strips Stellar's lx-dxadata, adds a head stylesheet that
+  // gates the design's remaining Aptos mock, injects lx-neardexasset. After _neartrade, whose rows link
+  // here; independent of it otherwise (different page keys).
+  '_neardexasset',
   // Last until there is anything else: it only touches <a> tags pointing off-site, and any later pass
   // that rebuilds a page key from the design hands those tags back without rel="nofollow".
   '_nofollow',

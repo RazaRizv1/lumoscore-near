@@ -105,7 +105,11 @@ async function build() {
     near24, at: Date.now(), rows };
 }
 
-export async function onRequestGet(context) {
+// The market answer itself, cache first — exported so /lxapi/neartoken reads the SAME figures for a token
+// this table lists (and the same cache entry, so a token page costs the market no extra upstream calls).
+// Resolves with the body (fresh, or the last good one marked stale); throws only when there has never
+// been an answer to fall back on.
+export async function marketBody(context) {
   const cache = caches.default;
   // The cache outlives a deployment, so the key carries the answer's SHAPE version: a new deploy that
   // changes what a row holds must not serve the previous version's answer for two minutes. Bump it
@@ -114,17 +118,26 @@ export async function onRequestGet(context) {
   const kept = new Request('https://lumoscore.internal/lxapi/nearmarket/v3/kept');
 
   const hit = await cache.match(fresh);
-  if (hit) return json(await hit.json());
+  if (hit) return await hit.json();
 
   try {
     const body = await build();
     const put = (req, ttl) => cache.put(req, new Response(JSON.stringify(body), {
       headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=' + ttl } }));
     context.waitUntil(Promise.all([put(fresh, TTL), put(kept, KEEP)]));
-    return json(body);
+    return body;
   } catch (e) {
     const old = await cache.match(kept);
-    if (old) { const b = await old.json(); b.stale = true; return json(b, 200, 15); }
+    if (old) { const b = await old.json(); b.stale = true; return b; }
+    throw e;
+  }
+}
+
+export async function onRequestGet(context) {
+  try {
+    const body = await marketBody(context);
+    return body.stale ? json(body, 200, 15) : json(body);
+  } catch (e) {
     // The upstream's own words ride along (a status line, no secrets): "unavailable" alone sent the
     // first staging check looking in the wrong place.
     return json({ ok: false, error: 'market data unavailable', why: String((e && e.message) || e).slice(0, 200), rows: [] }, 200, 0);
