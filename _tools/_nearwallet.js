@@ -3,6 +3,8 @@
 // describe the same design this build carries, and each rule below is that file's rule with NEAR names.
 //
 // The browser code is READ FROM FILES and injected verbatim, never assembled as strings here:
+//   browser/nearcore.js the NEAR reads (balances, token metadata, NearBlocks activity) -- window.lxnCore,
+//                      shared with the Account page and the header search so there is one implementation
 //   browser/wallet.js  balances (FastNEAR), the asset list on both layouts, activity (NearBlocks), the
 //                      runtime Open orders tab bar (Claimable is not built on NEAR), the hero chart
 //   browser/prices.js  prices and the Total Portfolio from /lxapi/nearmarket
@@ -26,7 +28,7 @@
 //                  STRIPPED with it.
 //   lx-qrlib       the QR generator Receive draws with. KEPT (its "horizon" match is the word horizontal).
 //   lx-searchassets  the header search (stellar.expert, /lxapi/assetsearch). NOT touched here: it is on
-//                  every page of the fork, so replacing it is its own workstream, not the wallet's.
+//                  every page of the fork, and _nearsearch.js replaces it everywhere.
 //
 // Idempotent: every block is stripped by id before it is added again, and the markup rules only match
 // the design's mock text, which the first run has already replaced.
@@ -36,13 +38,14 @@ const { stripById } = require(__dirname + '/stripscript.js');
 const B = String.fromCharCode(92);
 
 const ID = 'lx-nearwallet';
+const core = fs.readFileSync(__dirname + '/browser/nearcore.js', 'utf8');
 const page = fs.readFileSync(__dirname + '/browser/wallet.js', 'utf8');
 const px = fs.readFileSync(__dirname + '/browser/prices.js', 'utf8');
 const wr = fs.readFileSync(__dirname + '/browser/send.js', 'utf8');
-for (const src of [page, px, wr]) {
+for (const src of [core, page, px, wr]) {
   if (src.indexOf('</' + 'script') >= 0) { console.error('  a source file contains a closing script tag — aborting'); process.exit(1); }
 }
-const SCRIPT = '<script id="' + ID + '">\n' + page + '\n' + px + '\n' + wr + '\n</' + 'script>';
+const SCRIPT = '<script id="' + ID + '">\n' + core + '\n' + page + '\n' + px + '\n' + wr + '\n</' + 'script>';
 
 const STRIP = ['lx-walletdata', 'lx-mobwallet', 'lx-wclaim', 'lx-qorders', 'lx-swapcalc', 'lx-feerate'];
 

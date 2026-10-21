@@ -72,6 +72,13 @@ const CHAIN = [
   // dashboard keys, fixes their Stellar markup and lx-dashqa's routes, injects lx-neardash. Independent of
   // _nearwallet (different page keys).
   '_neardash',
+  // Account page: strips Stellar's lx-accdata (and lx-feerate there), injects lx-nearaccount (nearcore.js +
+  // account.js), NEAR markup for the balance label, badge title and phone crumb.
+  '_nearaccount',
+  // Header search on every page: strips lx-searchassets and lx-spico everywhere, injects lx-nearsearch
+  // wherever the panel is, retitles the panel heading. After every pass that rebuilds a page from the
+  // design, or the Stellar search comes back with it.
+  '_nearsearch',
   // Last until there is anything else: it only touches <a> tags pointing off-site, and any later pass
   // that rebuilds a page key from the design hands those tags back without rel="nofollow".
   '_nofollow',
