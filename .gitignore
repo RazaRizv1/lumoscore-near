@@ -1,0 +1,20 @@
+# The design containers: ~200MB, and the real source of truth for every page.
+# Gitignored to match the Stellar and XRPL projects -- which also means a revert restores the
+# tools and NOT these. Back them up before any transform that deletes rather than adds.
+lumoscore-near-*.html
+node_modules/
+
+# Secrets. Never written into a file in this repo.
+.env
+.env.*
+!.env.example
+*.key
+_containers_backup/
+
+# wrangler build cache -- holds the Cloudflare account id/name, not source
+.wrangler/
+
+# Build output. Rebuild it with the documented chain, never from a checkout:
+#   node _tools/rebuild.js && node _tools/extract_site.js near
+dist/
+.deploy/

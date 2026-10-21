@@ -1,0 +1,15 @@
+{
+  "name": "lumoscore-near",
+  "private": true,
+  "version": "0.1.0",
+  "description": "LumosCore on NEAR Protocol. Separate project on purpose, like C:/LumosCore-XRPL: it READS C:/LumosCore (the Stellar base, and the shared Functions in shared-functions.json) and never writes it.",
+  "scripts": {
+    "rebuild": "node _tools/rebuild.js",
+    "rebuild:base": "node _tools/rebuild.js --base",
+    "build": "node C:/LumosCore/_tools/shared_functions.js . && node _tools/extract_site.js near",
+    "build:root": "node C:/LumosCore/_tools/shared_functions.js . && node _tools/extract_site.js near --root",
+    "predeploy": "node C:/LumosCore/_tools/shared_functions.js . --check && node _tools/predeploy_check.js",
+    "sync:functions": "node C:/LumosCore/_tools/shared_functions.js .",
+    "idem": "node _tools/idempotence_check.js"
+  }
+}
