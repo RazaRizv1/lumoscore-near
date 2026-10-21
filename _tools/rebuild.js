@@ -83,7 +83,7 @@ const CHAIN = [
   // combined site shares localStorage across chains). Patches inherited lx-whead in place.
   '_nearwhead',
   // LUMOS discount pieces hidden until LUMOS is minted on NEAR (deferred). Delete this line to turn them on.
-  '_nearlumosdeferred',
+  '_nearlumosdeferred', '_nearlaunchpad',
   // Last until there is anything else: it only touches <a> tags pointing off-site, and any later pass
   // that rebuilds a page key from the design hands those tags back without rel="nofollow".
   '_nofollow',
