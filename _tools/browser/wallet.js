@@ -1344,8 +1344,8 @@
 
   // ---- Open orders and Claimable -------------------------------------------------------------------
   // Both tabs were driven by Stellar layers (lx-qorders, lx-wclaim) that queried horizon.stellar.org.
-  // Those are stripped on NEAR. NEAR limit orders are not built yet, so Open orders shows the design's
-  // empty state; Claimable is NEAR-less and not built (RAZA: hidden on NEAR), exactly as on XRPL.
+  // Those are stripped on NEAR. Open orders lists the account's Rhea DCL limit orders (paintOrders, via
+  // browser/neardcl.js) and cancels / collects them; Claimable is NEAR-less and not built (RAZA: hidden on NEAR), exactly as on XRPL.
   //
   // THE TABS ARE NOT IN THE MARKUP, which cost a deploy to learn. Reading the built page for
   // ".lx-wctab" found it and I took that for design markup — but every hit was a CSS rule and this
@@ -1514,10 +1514,220 @@
     } catch (e) {}
   }
 
+  // ---- NEAR limit orders (Rhea DCL, browser/neardcl.js) ----------------------------------------------
+  // list_active_orders, read-only. Each order is shown from its TOKEN's side against its quote: NEAR when
+  // either side is wNEAR, else a stablecoin, else whatever it buys. Selling the quote is a Buy of the token.
+  var QUOTES = ['wrap.near', '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
+    'usdt.tether-token.near', 'a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.factory.bridge.near'];
+  function qrank(id) { var i = QUOTES.indexOf(id); return i < 0 ? 99 : i; }
+  function metaOf(id) {
+    if (id === 'wrap.near') return Promise.resolve({ s: 'NEAR', d: 24 });
+    return C.tokenMeta(id).then(function (m) { return (m && !m.x) ? m : { s: C.short(id), d: null }; },
+      function () { return { s: C.short(id), d: null }; });
+  }
+  function shapeOrder(o, M) {
+    var buy = qrank(o.sell_token) < qrank(o.buy_token);
+    var tok = buy ? o.buy_token : o.sell_token, quo = buy ? o.sell_token : o.buy_token;
+    var mt = M[tok] || {}, mq = M[quo] || {}, ms = M[o.sell_token] || {};
+    var px = null;
+    var xy = String(o.pool_id).split('|');
+    var dx = M[xy[0]] && M[xy[0]].d, dy = M[xy[1]] && M[xy[1]].d;
+    if (dx != null && dy != null) {
+      var pxy = Math.pow(1.0001, +o.point) * Math.pow(10, dx - dy);     // token_x in token_y
+      px = xy[0] === tok ? pxy : 1 / pxy;                                // token in quote
+    }
+    var D = window.lxnDcl, dec = ms.d;
+    var orig = dec != null ? Number(D.fromUnits(o.original_amount, dec)) : null;
+    var remain = dec != null ? Number(D.fromUnits(o.remain_amount, dec)) : null;
+    var cancelled = dec != null ? Number(D.fromUnits(o.cancel_amount || '0', dec)) : 0;
+    var filled = (orig != null && remain != null) ? Math.max(0, orig - remain - cancelled) : null;
+    // Amount is the token, Total the quote, whichever side is sold.
+    var amt = null, tot = null;
+    if (orig != null && px > 0) { if (buy) { tot = orig; amt = orig / px; } else { amt = orig; tot = orig * px; } }
+    return {
+      id: o.order_id, buy: buy, tok: tok, quo: quo, sym: mt.s || C.short(tok), qsym: mq.s || C.short(quo),
+      px: px, amt: amt, tot: tot, orig: orig, filled: filled, ssym: ms.s || '',
+      collect: D.big(o.remain_amount) <= BigInt(0)
+    };
+  }
+  function orderLogo(id) {
+    if (id === 'wrap.near') return C.NEAR_LOGO;
+    var h = (window.__lxnData && window.__lxnData.held) || [];
+    for (var i = 0; i < h.length; i++) if (h[i].id === id && h[i].logo) return h[i].logo;
+    return '';
+  }
+  function orderRow(tpl, x) {
+    var row = tpl.cloneNode(true);
+    // data-oid is what the design's gate (.order-row:not([data-oid]){display:none}) waits for, and what
+    // the Cancel click reads: the DCL order id itself.
+    row.setAttribute('data-oid', x.id);
+    if (x.collect) row.setAttribute('data-collect', '1');
+    var nm = row.querySelector('.pair-text .name');
+    if (nm) plain(nm, x.sym + ' / ' + x.qsym);
+    var side = row.querySelector('.pair-text .side, .order-side');
+    if (side) {
+      side.className = (side.classList.contains('order-side') ? 'order-side' : 'side') + (x.buy ? ' buy' : ' sell');
+      plain(side, x.buy ? 'Buy' : 'Sell');
+      // The logo healer took "Buy" on a USDC row for a ticker slot and painted the USDC mark over it (it
+      // reads the symbol from the ROW). An empty [data-logo] child is its own "leave this alone" escape.
+      var esc = document.createElement('span');
+      esc.setAttribute('data-logo', '');
+      esc.style.display = 'none';
+      side.appendChild(esc);
+    }
+    var ico = row.querySelectorAll('.pair-ico .b');
+    for (var ik = 1; ik < ico.length; ik++) if (ico[ik].parentNode) ico[ik].parentNode.removeChild(ico[ik]);
+    if (ico[0]) {
+      var lg = orderLogo(x.tok);
+      plain(ico[0], lg ? '' : String(x.sym || '?').charAt(0).toUpperCase());
+      if (lg) {
+        ico[0].style.background = 'transparent';
+        var im = document.createElement('img');
+        im.alt = ''; im.src = lg;
+        im.style.cssText = 'width:100%;height:100%;object-fit:cover;border-radius:50%;display:block';
+        ico[0].appendChild(im);
+      }
+      // Same escape as the side pill: without it the healer stamped the QUOTE's logo (USDC) on a QTC row.
+      [ico[0], ico[0].parentNode].forEach(function (n) {
+        if (!n || n.querySelector(':scope > [data-logo=""]')) return;
+        var e2 = document.createElement('span');
+        e2.setAttribute('data-logo', '');
+        e2.style.display = 'none';
+        n.appendChild(e2);
+      });
+    }
+    var cols = row.querySelectorAll('.order-details .col');
+    var vals = [
+      x.px != null ? fmt(x.px, 6) + ' ' + x.qsym : '—',
+      x.amt != null ? fmt(x.amt, 6) + ' ' + x.sym : '—',
+      x.tot != null ? fmt(x.tot, 6) + ' ' + x.qsym : '—'
+    ];
+    for (var i = 0; i < cols.length && i < 3; i++) { var v = cols[i].querySelector('.v'); if (v) plain(v, vals[i]); }
+    // DCL keeps the original size, so the design's fill bar is real here (XRPL had to drop it).
+    var prog = row.querySelector('.order-progress-wrap');
+    if (prog) {
+      var pct = (x.orig > 0 && x.filled != null) ? Math.min(100, x.filled / x.orig * 100) : null;
+      var pl = prog.querySelectorAll('.pl span');
+      if (pct == null) { if (prog.parentNode) prog.parentNode.removeChild(prog); }
+      else {
+        if (pl[0]) plain(pl[0], (pct > 0 && pct < 1 ? '<1' : Math.round(pct)) + '% filled');
+        if (pl[1]) plain(pl[1], fmt(x.filled, 4) + ' / ' + fmt(x.orig, 4) + ' ' + x.ssym);
+        var fill = prog.querySelector('.order-progress-fill');
+        if (fill) fill.style.width = pct.toFixed(1) + '%';
+      }
+    }
+    var cb = row.querySelector('.order-cancel');
+    if (cb) {
+      // COLLECT is the same button (RAZA 2026-10-21): a fully filled order's proceeds wait in the contract
+      // until cancel_order with amount "0" sends them.
+      var phoneBtn = /order/i.test(cb.textContent || '');
+      plain(cb, x.collect ? 'Collect' : (phoneBtn ? 'Cancel Order' : 'Cancel'));
+      cb.removeAttribute('data-order'); cb.removeAttribute('data-side');
+    }
+    return row;
+  }
+
+  // CANCEL / COLLECT through the design's own confirmation dialog: #modalCancelOrder on desktop,
+  // #cancelModal on the phone. Its confirm button is replaced by a clean clone each time (one listener per
+  // opening would cancel the same order again on the next use), and nothing signs until the person
+  // approves in their wallet.
+  function cancelDialog(ids, describe, collectOnly) {
+    var m = document.getElementById('modalCancelOrder') || document.getElementById('cancelModal');
+    if (!m) return;
+    var desk = m.id === 'modalCancelOrder';
+    var title = document.getElementById(desk ? 'cancelOrderTitle' : 'cancelModalTitle');
+    var text = document.getElementById(desk ? 'cancelOrderText' : 'cancelModalText');
+    var det = document.getElementById(desk ? 'cancelOrderDetails' : 'cancelModalDetail');
+    var lbl = document.getElementById(desk ? 'cancelOrderBtnLabel' : 'cancelModalBtnLabel');
+    var keep = document.getElementById('cancelOrderKeepSuffix');
+    var go = document.getElementById(desk ? 'cancelOrderConfirm' : 'cancelModalConfirm');
+    if (!go) return;
+    var many = ids.length > 1;
+    if (title) title.textContent = collectOnly ? 'Collect this order?' : (many ? ('Cancel ' + ids.length + ' orders?') : 'Cancel this order?');
+    if (text) {
+      text.textContent = collectOnly
+        ? 'It has filled. Collecting sends what it bought to your wallet.'
+        : ((many ? 'Each order is cancelled by its own transaction, so your wallet will ask you to approve ' + ids.length + '. ' : '')
+          + 'What is left of the order comes back to your wallet, together with anything it has already bought.');
+    }
+    if (det) { det.textContent = describe || ''; det.style.display = describe ? '' : 'none'; }
+    if (lbl) lbl.textContent = collectOnly ? 'Collect' : (many ? ('Cancel all (' + ids.length + ')') : 'Cancel order');
+    if (keep) keep.textContent = '';
+    var fresh = go.cloneNode(true);
+    go.parentNode.replaceChild(fresh, go);
+    var flbl = fresh.querySelector('span') || fresh;
+    var orig = flbl.textContent;
+    fresh.addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      var who = addr();
+      if (!who) { flbl.textContent = 'Connect a NEAR wallet first'; return; }
+      fresh.disabled = true;
+      flbl.textContent = 'Checking…';
+      window.lxnDcl.buildCancel(who, ids).then(function (b) {
+        window.__lxnLastCancel = b;
+        flbl.textContent = b.txs.length > 1 ? ('Approve ' + b.txs.length + ' in your wallet…') : 'Confirm in wallet…';
+        return window.lxnDcl.sign(b.txs);
+      }).then(function () {
+        m.classList.remove('open', 'show', 'active');
+        document.body.style.overflow = '';
+        fresh.disabled = false; flbl.textContent = orig;
+        try { if (window.showToast) window.showToast(collectOnly ? 'Collected' : (many ? ids.length + ' orders cancelled' : 'Order cancelled')); } catch (x) {}
+        paintOrders(who);
+      }).catch(function (err) {
+        fresh.disabled = false;
+        var msg = (err && err.message) || '';
+        flbl.textContent = /reject|denied|cancel|closed/i.test(msg) ? 'Not approved — nothing was cancelled' : (msg || 'Could not cancel');
+      });
+    });
+    m.classList.add('open');
+    if (desk) document.body.style.overflow = 'hidden';
+  }
+  function wireCancels() {
+    if (window.__lxnCancels) return;
+    window.__lxnCancels = 1;
+    // WINDOW capture: ahead of the design's own mock handlers (which only delete the row and toast).
+    window.addEventListener('click', function (e) {
+      var t = e.target;
+      if (!t || !t.closest || !window.lxnDcl) return;
+      var one = t.closest('.order-cancel');
+      if (one) {
+        var row = one.closest('[data-oid]');
+        if (!row) return;
+        e.preventDefault(); e.stopImmediatePropagation();
+        var nm = ((row.querySelector('.pair-text .name') || {}).textContent || '').trim();
+        var sd = ((row.querySelector('.pair-text .side, .order-side') || {}).textContent || '').trim();
+        cancelDialog([row.getAttribute('data-oid')], (sd ? sd + ' · ' : '') + nm, row.getAttribute('data-collect') === '1');
+        return;
+      }
+      var all = t.closest('#cancelAllBtn, .order-cancel-all, [data-cancel-all]');
+      if (all) {
+        var rows = [].slice.call(document.querySelectorAll('[data-oid]'));
+        e.preventDefault(); e.stopImmediatePropagation();
+        if (!rows.length) return;
+        cancelDialog(rows.map(function (r) { return r.getAttribute('data-oid'); }),
+          rows.length + ' open order' + (rows.length === 1 ? '' : 's'), false);
+      }
+    }, true);
+  }
+
   function paintOrders(me) {
-    // NO NEAR ORDER SOURCE YET: the panel resolves to the design's empty state, through the same path
-    // a real empty answer takes, so the gate, the counts and Cancel all behave exactly as they will.
-    Promise.resolve({ offers: [] })
+    wireCancels();
+    // Rhea DCL limit orders, read-only; metadata for both sides of every order before anything paints.
+    (window.lxnDcl ? window.lxnDcl.activeOrders(me) : Promise.resolve([]))
+      .then(function (list) {
+        var ids = {};
+        list.forEach(function (o) {
+          ids[o.sell_token] = 1; ids[o.buy_token] = 1;
+          String(o.pool_id).split('|').slice(0, 2).forEach(function (t) { ids[t] = 1; });
+        });
+        var keys = Object.keys(ids);
+        return Promise.all(keys.map(metaOf)).then(function (ms) {
+          var M = {};
+          keys.forEach(function (k, i) { M[k] = ms[i]; });
+          return { offers: list.map(function (o) { return shapeOrder(o, M); }) };
+        });
+      })
       .then(function (r) {
         var offers = r.offers || [];
         setTab('orders', offers.length);
@@ -1598,8 +1808,19 @@
           reveal(block);
           return;
         }
+        offers.forEach(function (x) { block.appendChild(orderRow(rowT, x)); });
         reveal(block);
-      }).catch(function () { /* leave the design's block rather than empty it on a dropped request */ });
+      }).catch(function () {
+        // A dropped read is not "no orders": say so, rather than leave the design's mock or claim none.
+        var block = $('.lx-wcpanel-orders .orders-block') || $('.lx-wcpanel-orders .orders-stack')
+          || $('.orders-block') || $('.orders-stack');
+        if (!block) return;
+        var t = block.querySelector('.order-row, .order-card');
+        if (t && !window.__lxOrdTpl) window.__lxOrdTpl = t.cloneNode(true);
+        block.innerHTML = '';
+        block.appendChild(el('div', 'lx-wcnote', 'Could not read open orders from Rhea right now.'));
+        reveal(block);
+      });
   }
 
   // ---- Activity ------------------------------------------------------------------------------------

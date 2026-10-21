@@ -42,10 +42,12 @@ const core = fs.readFileSync(__dirname + '/browser/nearcore.js', 'utf8');
 const page = fs.readFileSync(__dirname + '/browser/wallet.js', 'utf8');
 const px = fs.readFileSync(__dirname + '/browser/prices.js', 'utf8');
 const wr = fs.readFileSync(__dirname + '/browser/send.js', 'utf8');
-for (const src of [core, page, px, wr]) {
+// Rhea DCL limit orders: the Open orders tab reads, cancels and collects them through this engine.
+const dcl = fs.readFileSync(__dirname + '/browser/neardcl.js', 'utf8');
+for (const src of [core, dcl, page, px, wr]) {
   if (src.indexOf('</' + 'script') >= 0) { console.error('  a source file contains a closing script tag — aborting'); process.exit(1); }
 }
-const SCRIPT = '<script id="' + ID + '">\n' + core + '\n' + page + '\n' + px + '\n' + wr + '\n</' + 'script>';
+const SCRIPT = '<script id="' + ID + '">\n' + core + '\n' + dcl + '\n' + page + '\n' + px + '\n' + wr + '\n</' + 'script>';
 
 const STRIP = ['lx-walletdata', 'lx-mobwallet', 'lx-wclaim', 'lx-qorders', 'lx-swapcalc', 'lx-feerate'];
 

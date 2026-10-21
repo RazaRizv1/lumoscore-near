@@ -44,7 +44,13 @@ const page = fs.readFileSync(__dirname + '/browser/dexasset.js', 'utf8');
 // not registered on.
 const swapEngine = fs.readFileSync(__dirname + '/browser/nearswap.js', 'utf8');
 const swapPane = fs.readFileSync(__dirname + '/browser/dxaswap.js', 'utf8');
-for (const [n, src] of [['dexasset.js', page], ['nearswap.js', swapEngine], ['dxaswap.js', swapPane]]) {
+// LIMIT ORDERS + ORDER BOOK through Rhea's DCL contract (RAZA approved 2026-10-21; free, no LumosCore fee):
+// neardcl.js is the engine (pool lookup, the SDK's price/point math, the book, place/cancel/collect
+// transactions), dxalimit.js drives the design's Limit pane with it, dexasset.js paints the book from it.
+const dclEngine = fs.readFileSync(__dirname + '/browser/neardcl.js', 'utf8');
+const limitPane = fs.readFileSync(__dirname + '/browser/dxalimit.js', 'utf8');
+for (const [n, src] of [['dexasset.js', page], ['nearswap.js', swapEngine], ['dxaswap.js', swapPane],
+  ['neardcl.js', dclEngine], ['dxalimit.js', limitPane]]) {
   if (src.indexOf('</' + 'script') >= 0) { console.error('  browser/' + n + ' contains a closing script tag — aborting'); process.exit(1); }
 }
 
@@ -55,13 +61,22 @@ const CSS = [
     + 'html:not(.lxn-dxa-id) [class*="dxa-trade-ir"] input,html:not(.lxn-dxa-id) [class*="dxa-trade-cta"],'
     + 'html:not(.lxn-dxa-id) .mdxa-trade-frow .mono,html:not(.lxn-dxa-id) .mdxa-tsum .mono,'
     + 'html:not(.lxn-dxa-id) [class*="dxa-ob-head"] span,html:not(.lxn-dxa-id) [class*="dxa-ob-spread"] .mono{visibility:hidden}',
+  // The limit button waits for dxalimit.js to know whether this token has a DCL pool, so it never shows a
+  // label about to change. The fee row's 0.2% describes a charge a limit order does not make.
+  'html:not(.lxn-limit-ready) .dxa-pane-limit [class*="dxa-trade-cta"],'
+    + 'html:not(.lxn-limit-ready) .mdxa-pane-limit [class*="dxa-trade-cta"]{visibility:hidden}',
+  // The book holds the design's Aptos ladder until paintBook()/note() replace it and add .lxda in the same
+  // statement. The design gates only the desktop ids; the phone's are gated here.
+  '#mdxaObAsks:not(.lxda)>*,#mdxaObBids:not(.lxda)>*,#dxaObAsks:not(.lxda)>*,#dxaObBids:not(.lxda)>*{visibility:hidden}',
+  '.dxa-pane-limit .lx-feerow .lx-feehint,.mdxa-pane-limit .lx-feerow .lx-feehint{display:none!important}',
+  '.dxa-pane-limit .lx-feerow .lxn-limfee,.mdxa-pane-limit .lx-feerow .lxn-limfee{margin-left:auto}',
   '.mdxa-trade-asset.lxmt-chip[data-lxxc]::after{content:attr(data-lxxc)!important}',
   '.mdxa-trade-asset.lxmt-chip[data-lxxc]::before{background-image:var(--lxx-logo,none)!important}',
 ].join('\n');
 if (CSS.indexOf(B) >= 0) { console.error('  stylesheet carries a backslash — aborting'); process.exit(1); }
 
 const STYLE = '<style id="' + CSS_ID + '">\n' + CSS + '\n</style>';
-const SCRIPT = '<script id="' + ID + '">\n' + page + '\n' + swapEngine + '\n' + swapPane + '\n</' + 'script>';
+const SCRIPT = '<script id="' + ID + '">\n' + page + '\n' + swapEngine + '\n' + swapPane + '\n' + dclEngine + '\n' + limitPane + '\n</' + 'script>';
 
 function stripStyle(h, id) {
   const open = '<style id="' + id + '">', close = '</style>';

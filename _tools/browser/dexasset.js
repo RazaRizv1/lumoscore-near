@@ -312,11 +312,9 @@
     // THE HEADER AND STATS ARE LIFTED ONLY ONCE THEY HOLD THIS TOKEN (RAZA 2026-09-15: "Whenever i open any trade-asset
     // page, it shows this for split seconds then it fixes"). Lifting them here, before the token feed answered, put the
     // design's "USDC · 0x0409…f072 · circle.com · 4.2271 APT" on screen until paintHeader overwrote it. See liftIdentity().
-    var sels = ['#dxaObAsks', '#dxaObBids', '#mdxaObAsks', '#mdxaObBids'];
-    for (var i = 0; i < sels.length; i++) {
-      var nodes = document.querySelectorAll(sels[i]);
-      for (var j = 0; j < nodes.length; j++) nodes[j].classList.add('lxda');
-    }
+    // The ORDER BOOK is no longer lifted here: it now holds real rows (or a note) only once the DCL / pool
+    // read answers, and lifting it early showed the design's Aptos ladder ("4.243612 · 497.15") for the
+    // ~1s that read takes. paintBook() and note() lift it, each in the same statement as its content.
 
     // THE SECOND GATE FAMILY, which nothing in this file ever satisfied. A separate stylesheet hides
     // individual VALUES until they carry `.lxp`:
@@ -1979,20 +1977,161 @@
     }, true);
   }
 
-  // No NEAR order book yet: the headings name this page's units and the spread is an em dash.
-  function paintBookHead(asset) {
+  // The headings name this page's units; the spread is the top ask less the top bid, as XRPL prints it.
+  function paintBookHead(asset, b) {
     $$('.dxa-ob-head, .mdxa-ob-head').forEach(function (h) {
       var sp = h.querySelectorAll('span');
       if (sp[0]) plain(sp[0], 'Price (NEAR)');
       if (sp[1]) plain(sp[1], (h.className.indexOf('mdxa') >= 0 ? 'Amt (' : 'Amount (') + asset.code + ')');
       if (sp[2]) plain(sp[2], 'Depth (NEAR)');
     });
+    var ask = b && b.asks[0] ? b.asks[0].px : null, bid = b && b.bids[0] ? b.bids[0].px : null;
     $$('.dxa-ob-spread, .mdxa-ob-spread').forEach(function (s2) {
       var sp = s2.querySelectorAll('span');
-      if (sp[1]) plain(sp[1], '—');
-      if (sp[2]) plain(sp[2], '');
+      if (ask && bid) {
+        var diff = ask - bid, mid = (ask + bid) / 2;
+        if (sp[1]) plain(sp[1], xrpPx(diff) + ' NEAR');
+        if (sp[2]) plain(sp[2], '(' + (diff / mid * 100).toFixed(2) + '%)');
+      } else {
+        if (sp[1]) plain(sp[1], '—');
+        if (sp[2]) plain(sp[2], '');
+      }
     });
   }
+
+  // ---- THE ORDER BOOK ------------------------------------------------------------------------------
+  // A token with a Rhea DCL pool against wNEAR: its resting limit orders plus the pool's concentrated
+  // liquidity, bucketed by window.lxnDcl.book (browser/neardcl.js) -- one get_marketdepth call.
+  // A token without one: the curve of its largest classic Rhea pool against wNEAR (x*y=k, SIMPLE_POOL
+  // only -- a stable or rated pool is not that curve, and gets the empty state instead). Levels every
+  // 0.5% from the pool's price with the pool's fee included, so each row reads "this much moves the price
+  // this far". Rows: price in NEAR, amount in the token, depth the running total in NEAR.
+  // Refreshed every 30s while the page is visible: one call per refresh, never a burst.
+  var REFV1 = 'v2.ref-finance.near';
+  function curveBook(asset, dec) {
+    var S = window.lxnSwap;
+    if (!S) return Promise.resolve(null);
+    return S.pools().then(function (rows) {
+      var best = null;
+      rows.forEach(function (r) {
+        var ids = (r.tokens || []).map(function (t) { return t.i; });
+        if (ids.length !== 2 || ids.indexOf(asset.id) < 0 || ids.indexOf(WNEAR) < 0) return;
+        if (r.kind && r.kind !== 'SIMPLE_POOL') return;
+        if (!best || (r.liq || 0) > (best.liq || 0)) best = r;
+      });
+      if (!best) return null;
+      return S.callView(REFV1, 'get_pool', { pool_id: +best.id }).then(function (pl) {
+        if (!pl || pl.pool_kind !== 'SIMPLE_POOL') return null;
+        var ti = pl.token_account_ids.indexOf(asset.id), ni = pl.token_account_ids.indexOf(WNEAR);
+        if (ti < 0 || ni < 0) return null;
+        var x = Number(pl.amounts[ti]) / Math.pow(10, dec), y = Number(pl.amounts[ni]) / 1e24;
+        if (!(x > 0) || !(y > 0)) return null;
+        var k = x * y, p0 = y / x, f = (+pl.total_fee || 0) / 10000, asks = [], bids = [], ra = 0, rb = 0;
+        for (var i = 1; i <= 16; i++) {
+          var pu = p0 * (1 + 0.005 * i), pu0 = p0 * (1 + 0.005 * (i - 1));
+          var ta = Math.sqrt(k / pu0) - Math.sqrt(k / pu);           // token the pool gives up
+          var pxa = pu / (1 - f);
+          ra += ta * pxa;
+          asks.push({ px: pxa, amt: ta, sum: ra });
+          var pd = p0 * (1 - 0.005 * i), pd0 = p0 * (1 - 0.005 * (i - 1));
+          var tb = Math.sqrt(k / pd) - Math.sqrt(k / pd0);           // token the pool takes in
+          var pxb = pd * (1 - f);
+          rb += tb * pxb;
+          bids.push({ px: pxb, amt: tb, sum: rb });
+        }
+        return { asks: asks, bids: bids, curve: best.id, price: p0, fee: f };
+      });
+    });
+  }
+  function readBook(asset, d) {
+    var dec = d && d.decimals != null ? +d.decimals : null;
+    var D = window.lxnDcl;
+    if (!D || dec == null) return Promise.resolve(null);
+    return D.poolFor(asset.id).then(function (pool) {
+      if (pool) return D.book(pool, dec, { rows: 16, depth: 40 });
+      return curveBook(asset, dec);
+    });
+  }
+  // The best ask sits at the bottom of its panel, so the panel opens scrolled there (XRPL, RAZA
+  // 2026-10-17); re-pinned when the Orderbook tab reveals it, since a hidden panel has no height.
+  function pinAsks(node) {
+    if (!node) return;
+    var go = function () { if (!node.__lxAway) node.scrollTop = node.scrollHeight; };
+    go();
+    [0, 60, 250, 700].forEach(function (ms) { setTimeout(go, ms); });
+    if (node.__lxPin) return;
+    node.__lxPin = 1;
+    node.addEventListener('scroll', function () {
+      node.__lxAway = (node.scrollHeight - node.clientHeight - node.scrollTop) > 8;
+    }, { passive: true });
+    try { new ResizeObserver(go).observe(node); } catch (e) {}
+    if (!window.__lxObTabPin) {
+      window.__lxObTabPin = 1;
+      window.addEventListener('click', function (e) {
+        var t = e.target && e.target.closest && e.target.closest('.dxa-trade-tab,.mdxa-trade-tab');
+        if (!t) return;
+        [0, 60, 250, 700].forEach(function (ms) {
+          setTimeout(function () { pinAsks(document.getElementById('dxaObAsks') || document.getElementById('mdxaObAsks')); }, ms);
+        });
+      }, true);
+    }
+  }
+  function paintBook(node, list, side) {
+    if (!node) return;
+    node.innerHTML = '';
+    node.classList.add('lxda');
+    if (!list.length) {
+      var none = el('div', 'dxa-ob-row', 'No ' + (side === 'ask' ? 'asks' : 'bids') + ' on this book.');
+      none.setAttribute('data-logoed', '1');
+      none.style.cssText = 'opacity:.6;justify-content:center;grid-template-columns:1fr;text-align:center';
+      node.appendChild(none);
+      return;
+    }
+    var max = list[list.length - 1].sum || 1;
+    // Asks read from the spread outward: the cheapest sits at the bottom of the red block.
+    var seq = side === 'ask' ? list.slice().reverse() : list;
+    for (var i = 0; i < seq.length; i++) {
+      var r = seq[i];
+      var row = el('div', 'dxa-ob-row mdxa-ob-row ' + side);
+      row.setAttribute('data-logoed', '1');
+      row.appendChild(el('span', 'px', xrpPx(r.px)));
+      row.appendChild(el('span', 'am', amount(r.amt)));
+      row.appendChild(el('span', 'sm', amount(r.sum)));
+      var bar = el('span', 'bar');
+      bar.style.width = Math.max(1, Math.round((r.sum / max) * 100)) + '%';
+      row.appendChild(bar);
+      node.appendChild(row);
+    }
+    if (side === 'ask') pinAsks(node);
+  }
+  var BOOKT = null;
+  function loadBook(asset, d) {
+    if (!asset) return;
+    window.__lxnBookReload = function () {
+      return readBook(asset, window.__lxnAssetData || d).then(function (b) {
+        if (!b) {
+          window.__lxnBook = null;
+          note('No Rhea DCL pool for this token, so there is no order book.');
+          paintBookHead(asset, null);
+          return;
+        }
+        window.__lxnBook = b;
+        paintBook($('#dxaObAsks') || $('#mdxaObAsks'), b.asks, 'ask');
+        paintBook($('#dxaObBids') || $('#mdxaObBids'), b.bids, 'bid');
+        paintBookHead(asset, b);
+        try { window.dispatchEvent(new CustomEvent('lxn:book')); } catch (e) {}
+      });
+    };
+    var run = function () {
+      window.__lxnBookReload().catch(function () {
+        if (!window.__lxnBook) note('Could not read the order book right now.');
+      });
+    };
+    run();
+    clearInterval(BOOKT);
+    BOOKT = setInterval(function () { if (document.visibilityState === 'visible') run(); }, 30000);
+  }
+
 
   function note(text) {
     var a = $('#dxaObAsks') || $('#mdxaObAsks');
@@ -2080,6 +2219,7 @@
       var limit = !!(b.closest && b.closest('.dxa-pane-limit, .mdxa-pane-limit'));
       // The swap button belongs to browser/dxaswap.js (window.lxnSwap) whenever it is on the page.
       if (!limit && window.lxnSwap) return;
+      if (limit && window.lxnDcl) return;                 // browser/dxalimit.js owns the limit button
       var t = limit ? 'Limit orders on NEAR are coming soon' : 'Swaps on NEAR are coming soon';
       // lx-gate swaps this button to "Connect wallet" while no wallet is connected and, on connect,
       // RESTORES what it saved in data-lxorig / data-lxdis -- which it saved before this ran, i.e. the
@@ -2169,7 +2309,7 @@
     var asset = fromUrl();
     window.__lxnAssetRef = asset;
     lift();
-    note('No order book for NEAR tokens yet.');
+    if (!asset) note('No order book for this page.');
     watchPanel();
     paintMobileOnly();
     // The structural gates (the exchanges panel and its footer) lift now: watchPanel has already
@@ -2195,7 +2335,11 @@
       setTabCount(/exchanges/i, '—');
       setTabCount(/holders/i, '—');
       syncPanel();
-      if (!window.__lxnAssetData) { setTabCount(/pools/i, '—'); PERF.h1 = PERF.long = 'done'; paintPerf(null); return; }
+      if (!window.__lxnAssetData) {
+        setTabCount(/pools/i, '—'); PERF.h1 = PERF.long = 'done'; paintPerf(null);
+        if (asset) note('Could not read the order book right now.');
+        return;
+      }
       paintPerf(window.__lxnAssetData);
       paintChartHead(null);                               // price + 24h pill now; the range line with the chart
       // lx-mobtrade adds the phone's limit Total row on its own timer; name its chip once it exists.
@@ -2207,6 +2351,7 @@
       loadLongPerf(asset);
       poolCounts(window.__lxnAssetData);
       syncPanel();
+      loadBook(asset, window.__lxnAssetData);
     };
 
     if (!asset) { window.__lxnAssetMiss = 'nottoken'; finish(null); return; }
