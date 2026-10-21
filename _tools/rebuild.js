@@ -79,6 +79,9 @@ const CHAIN = [
   // wherever the panel is, retitles the panel heading. After every pass that rebuilds a page from the
   // design, or the Stellar search comes back with it.
   '_nearsearch',
+  // The header wallet chip: NEAR's name and mark, and only a NEAR session counts as connected (the
+  // combined site shares localStorage across chains). Patches inherited lx-whead in place.
+  '_nearwhead',
   // Last until there is anything else: it only touches <a> tags pointing off-site, and any later pass
   // that rebuilds a page key from the design hands those tags back without rel="nofollow".
   '_nofollow',
