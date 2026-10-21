@@ -36,6 +36,12 @@ const CHAIN = [
   // design (nothing does yet), or that work would hand the Stellar strings back.
   '_nearseo',
   '_nearcopy',
+  // NEAR wallet connect: strips Stellar's connect flow, adds near to the design's wallet table, injects
+  // lx-nearconnect. After _nearengine, whose LOCAL_CHAIN/ORDER the chooser screen reads.
+  '_nearconnect',
+  // The header chip's wallet mark: NEAR wallet artwork, and lumos.network "near" believed before the
+  // address's first letter (which read root.near as an XRPL r-address).
+  '_nearwalletlogo',
   // Last until there is anything else: it only touches <a> tags pointing off-site, and any later pass
   // that rebuilds a page key from the design hands those tags back without rel="nofollow".
   '_nofollow',
