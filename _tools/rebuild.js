@@ -29,6 +29,13 @@ const CHAIN = [
   // First: every later NEAR layer asks the engine which chain the page is, and before this it
   // answered "stellar" on /near urls.
   '_nearengine',
+  // Removes only Stellar layers that draw nothing (see its header for what is deliberately left).
+  // Removes by id, so its position is not load-bearing.
+  '_nearstripstellar',
+  // Titles/descriptions, then shared visible wording. After anything that rebuilds a page from the
+  // design (nothing does yet), or that work would hand the Stellar strings back.
+  '_nearseo',
+  '_nearcopy',
   // Last until there is anything else: it only touches <a> tags pointing off-site, and any later pass
   // that rebuilds a page key from the design hands those tags back without rel="nofollow".
   '_nofollow',
