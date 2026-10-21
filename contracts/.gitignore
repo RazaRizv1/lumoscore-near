@@ -1,1 +1,3 @@
 target/
+test/keys/
+test/node_modules/
