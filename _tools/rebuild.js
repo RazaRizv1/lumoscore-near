@@ -42,6 +42,9 @@ const CHAIN = [
   // The header chip's wallet mark: NEAR wallet artwork, and lumos.network "near" believed before the
   // address's first letter (which read root.near as an XRPL r-address).
   '_nearwalletlogo',
+  // Trade market table: strips Stellar's lx-dexmain, disables the design's sample-data renderer through
+  // its own guard, drops the phone's Stellar verified-map merge, injects lx-neartrade.
+  '_neartrade',
   // Last until there is anything else: it only touches <a> tags pointing off-site, and any later pass
   // that rebuilds a page key from the design hands those tags back without rel="nofollow".
   '_nofollow',
