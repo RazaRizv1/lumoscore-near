@@ -26,6 +26,9 @@ const ROOT = path.join(__dirname, '..');
 const STELLAR = 'C:' + path.sep + 'LumosCore';
 
 const CHAIN = [
+  // First: every later NEAR layer asks the engine which chain the page is, and before this it
+  // answered "stellar" on /near urls.
+  '_nearengine',
   // Last until there is anything else: it only touches <a> tags pointing off-site, and any later pass
   // that rebuilds a page key from the design hands those tags back without rel="nofollow".
   '_nofollow',
