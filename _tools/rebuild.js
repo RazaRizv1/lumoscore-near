@@ -49,6 +49,9 @@ const CHAIN = [
   // gates the design's remaining Aptos mock, injects lx-neardexasset. After _neartrade, whose rows link
   // here; independent of it otherwise (different page keys).
   '_neardexasset',
+  // NEAR answers for inherited FAQs, on pages whose NEAR feature exists. After every pass that rebuilds
+  // a page from the design, or the Stellar answers come back with it.
+  '_nearfaq',
   // Last until there is anything else: it only touches <a> tags pointing off-site, and any later pass
   // that rebuilds a page key from the design hands those tags back without rel="nofollow".
   '_nofollow',

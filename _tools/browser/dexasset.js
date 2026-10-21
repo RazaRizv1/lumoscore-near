@@ -192,7 +192,8 @@
     if (v >= 1e18) return (v / 1e18).toFixed(2) + 'Qi';
     if (v >= 1e15) return (v / 1e15).toFixed(2) + 'Qa';
     if (v >= 1e12) return (v / 1e12).toFixed(2) + 'T';
-    if (v >= 1e9) return (v / 1e9).toFixed(2) + 'B';
+    // A unit is chosen by what the figure ROUNDS to: 999,999,999 read "1000.00M" under a 1e9 cut.
+    if (v >= 9.995e8) return (v / 1e9).toFixed(2) + 'B';
     if (v >= 1e6) return (v / 1e6).toFixed(2) + 'M';
     // A TRADE OF 0.00132 ATOM IS NOT "0" (seen on the exchanges rows 2026-09-16: "0 ATOM · 1 XRP"). Two decimal places
     // rounded every small holding to zero, so the AMOUNT column denied that the trade had a size at all.
@@ -395,6 +396,8 @@
     if (v == null || !isFinite(v)) return null;
     if (v === 0) return '$0';
     if (v < 0.01) return '$' + v.toPrecision(3);
+    // UNDER A DOLLAR, THREE SIGNIFICANT FIGURES: two decimals printed RHEA at $0.0765 as "$0.08".
+    if (v < 1) return '$' + v.toPrecision(3);
     if (v < 1000) return '$' + v.toFixed(2);
     if (v < 1e6) return '$' + Math.round(v).toLocaleString('en-US');
     if (v < 1e9) return '$' + (v / 1e6).toFixed(2) + 'M';

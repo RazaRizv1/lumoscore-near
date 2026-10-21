@@ -1,0 +1,55 @@
+// NEAR answers for the FAQs inherited from Stellar, page by page, as each NEAR page is built.
+//
+// The FAQ ships in two places on a page — the visible lx-faq cards and the FAQPage JSON-LD that
+// mirrors them for search engines — and both carry the same sentences. Each pair below replaces one
+// exact Stellar string with its NEAR one EVERYWHERE in the page key, so the two copies cannot drift
+// apart. Exact strings, decided one by one, never a regex over "Stellar"; a page is listed here only
+// once its NEAR feature exists, so no answer describes something NEAR does not have yet.
+//
+// Every pair must match on every page it is listed for, or the build aborts (the design moved and an
+// answer would silently stay Stellar's). Idempotent: an already-replaced page matches the NEAR text
+// and counts as done.
+const fs = require('fs');
+const { read, getContents } = require(__dirname + '/lib.js');
+const B = String.fromCharCode(92);
+
+// base page name (without -dark/-light/-mobile) -> [[stellar text, near text], ...]
+const FAQ = {
+  'lumoscore-dex-asset': [
+    ['What does the issuer address mean?', 'What does the contract address mean?'],
+    ['Every Stellar asset except XLM is created by an account, and that account’s address is the issuer. It is the asset’s real identity: two tokens can both call themselves USDC and be entirely unrelated.',
+     'Every NEAR token is a smart contract, and its account name, such as usdt.tether-token.near, is the token’s real identity. Two tokens can both call themselves USDC and be entirely unrelated; the contract is how you tell them apart.'],
+    ['What is a trustline?', 'What is token registration?'],
+    ['A trustline is your account’s permission to hold a given asset, and Stellar will not deliver a token you have not opted into. Each one locks 0.5 XLM of your reserve, released when you remove it.',
+     'Before a NEAR account can hold a token, it registers with that token’s contract by paying a small storage deposit, about 0.00125 NEAR. The deposit comes back if you unregister once your balance is zero.'],
+    ['From real trades on the Stellar DEX: what the asset last traded at against XLM, read from the network rather than quoted by us. The dollar figure converts that at the live XLM rate, so the two can disagree.',
+     'From Rhea Finance, NEAR’s main exchange: the token’s dollar price from Rhea’s own price feed, shown in NEAR at NEAR’s live rate. The 24-hour figures come from the token’s most active trading pair.'],
+    ['LumosCore charges 0.2% per trade, reduced to 0.1% if you hold at least 250,000 LUMOS. On top of that Stellar itself charges a network fee of a small fraction of a cent.',
+     'LumosCore charges 0.2% per trade. On top of that NEAR itself charges a network fee of a small fraction of a cent.'],
+    ['What is a locked issuer address?', 'What does the padlock next to the contract mean?'],
+    ['A locked issuer has given up its own signing keys, so no more of the asset can ever be minted and the supply you can see is final. An unlocked issuer can still mint at any time.',
+     'A green padlock means the token’s contract can no longer be changed and no more of it can be minted, so the supply you see is final. A red padlock means someone still holds full control of the contract. No padlock means we could not confirm either way.'],
+  ],
+};
+
+const BASE = (k) => k.replace(/-(dark|light|mobile)\.html$/, '').replace(/\.html$/, '');
+const tally = {};
+for (const dev of ['desktop', 'mobile']) {
+  const file = 'lumoscore-near-' + dev + '.html';
+  const data = read(file);
+  const { json, s, e } = getContents(data);
+  for (const key of Object.keys(json)) {
+    const pairs = FAQ[BASE(key)];
+    if (!pairs || typeof json[key] !== 'string') continue;
+    let h = json[key];
+    pairs.forEach(([from, to], i) => {
+      const n = h.split(from).length - 1;
+      if (n) h = h.split(from).join(to);
+      else if (h.indexOf(to) < 0) { console.error('near faq ABORT: ' + file + ' ' + key + ' — not found: ' + from.slice(0, 70)); process.exit(1); }
+      tally[key] = (tally[key] || 0) + n;
+    });
+    json[key] = h;
+  }
+  fs.writeFileSync(file, data.slice(0, s) + JSON.stringify(json).split('</').join('<' + B + '/') + data.slice(e), 'utf8');
+}
+console.log('near faq: ' + Object.keys(tally).length + ' page key(s); replacements ' + JSON.stringify(tally));

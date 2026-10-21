@@ -60,6 +60,8 @@
     if (v === 0) return '$0';
     if (v < 0.000001) return '$' + tiny(v);
     if (v < 0.01) return '$' + v.toPrecision(3);
+    // UNDER A DOLLAR, THREE SIGNIFICANT FIGURES: two decimals printed RHEA at $0.0765 as "$0.08".
+    if (v < 1) return '$' + v.toPrecision(3);
     if (v < 1000) return '$' + v.toFixed(2);
     if (v < 1e6) return '$' + (v / 1e3).toFixed(1) + 'K';
     return '$' + (v / 1e6).toFixed(1) + 'M';
