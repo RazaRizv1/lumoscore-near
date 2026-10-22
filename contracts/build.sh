@@ -6,4 +6,5 @@ set -euo pipefail
 cd "$(dirname "$0")"
 (cd token && cargo near build non-reproducible-wasm --no-abi)
 (cd factory && cargo near build non-reproducible-wasm --no-abi)
-sha256sum token/target/near/lumoscore_token.wasm factory/target/near/lumoscore_factory.wasm
+(cd router && cargo near build non-reproducible-wasm --no-abi)
+sha256sum token/target/near/lumoscore_token.wasm factory/target/near/lumoscore_factory.wasm router/target/near/lumoscore_router.wasm
