@@ -16,6 +16,9 @@ const B = String.fromCharCode(92);
 
 const ID = 'lx-near-lumosdeferred';
 const STYLE = '<style id="' + ID + '">.lx-feebanner-wrap,.lx-feetier,.lx-rv-lumos{display:none!important}</style>';
+// Once LUMOS is on NEAR (the one switch, _tools/near-lumos.js), this stops hiding and REMOVES its own style,
+// so flipping the switch back and forth is clean either way.
+const { NEAR_LUMOS } = require(__dirname + '/near-lumos.js');
 
 let pages = 0;
 for (const dev of ['desktop', 'mobile']) {
@@ -28,10 +31,11 @@ for (const dev of ['desktop', 'mobile']) {
     if (h.indexOf('lx-feebanner-wrap') < 0 && h.indexOf('lx-feetier') < 0 && h.indexOf('lx-rv-lumos') < 0) continue;
     const a = h.indexOf('<style id="' + ID + '">');
     if (a >= 0) h = h.slice(0, a) + h.slice(h.indexOf('</style>', a) + 8);
-    h = h.replace('</head>', STYLE + '</head>');
+    if (!NEAR_LUMOS) h = h.replace('</head>', STYLE + '</head>');
     json[k] = h;
     pages++;
   }
   fs.writeFileSync(file, data.slice(0, s) + JSON.stringify(json).split('</').join('<' + B + '/') + data.slice(e), 'utf8');
 }
-console.log('near lumos deferred: discount pieces hidden on ' + pages + ' page key(s)');
+console.log('near lumos deferred: discount pieces ' + (NEAR_LUMOS ? 'SHOWN (LUMOS on NEAR: ' + NEAR_LUMOS + ')' : 'hidden')
+  + ' on ' + pages + ' page key(s)');

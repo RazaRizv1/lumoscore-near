@@ -4,22 +4,24 @@
 // reads data-href / data-adcode), so only two exact strings change:
 //   * the pair label  LUMOS / XLM  ->  LUMOS / NEAR
 //   * the click target. LUMOS is not minted on NEAR yet ("we will do that before release"), so until then
-//     "Buy LUMOS" keeps going to Stellar's LUMOS page, the one place it can be bought today. Fill in
-//     NEAR_LUMOS with the NEAR contract when it is minted and the card points at /trade/near/<contract>.
+//     "Buy LUMOS" keeps going to Stellar's LUMOS page, the one place it can be bought today. Set NEAR_LUMOS
+//     in _tools/near-lumos.js when it is minted and the card points at /trade/near/<contract>.
 //
 // Idempotent: a page already carrying the NEAR label and the current target matches nothing and counts 0.
 const fs = require('fs');
 const { read, getContents } = require(__dirname + '/lib.js');
 const B = String.fromCharCode(92);
 
-const NEAR_LUMOS = '';   // e.g. 'lumos.lumoscore.near' once minted on NEAR
+const { NEAR_LUMOS } = require(__dirname + '/near-lumos.js');   // the one switch: '' until LUMOS is minted on NEAR
 
 const STELLAR_HREF = 'data-href="/trade/stellar/LUMOS-GB5T2EQC2VDG2XEYQ5C2CQJ2SCB5RFPPWALUU2GQ3R5HUEGOZST55B6S"';
 const HREF = NEAR_LUMOS ? 'data-href="/trade/near/' + encodeURIComponent(NEAR_LUMOS) + '"' : STELLAR_HREF;
 const PAIRS = [
   ['<span class="lxad-pair">LUMOS / XLM<', '<span class="lxad-pair">LUMOS / NEAR<'],
 ];
-if (HREF !== STELLAR_HREF) PAIRS.push([STELLAR_HREF, HREF]);
+// The card's target is SET to what the switch says on every run, whatever it was before, so turning the
+// switch off again (or pointing it at a test token) can never leave a stale link behind.
+const CARD = /(<div class="lxad" )data-href="[^"]*"/g;
 
 let pages = 0, n = 0;
 for (const dev of ['desktop', 'mobile']) {
@@ -34,6 +36,9 @@ for (const dev of ['desktop', 'mobile']) {
       if (c) { h = h.split(from).join(to); n += c; }
       else if (h.indexOf(to) < 0) { console.error('near ad ABORT: ' + k + ' — not found: ' + from); process.exit(1); }
     }
+    let cards = 0;
+    h = h.replace(CARD, function (m, open) { cards++; return open + HREF; });
+    if (cards !== 1) { console.error('near ad ABORT: ' + k + ' — expected one .lxad card, found ' + cards); process.exit(1); }
     json[k] = h;
     pages++;
   }

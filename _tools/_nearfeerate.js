@@ -11,9 +11,14 @@ const { read, getContents } = require(__dirname + '/lib.js');
 const B = String.fromCharCode(92);
 
 const OLD = 'lx-feerate', ID = 'lx-nearfeerate';
-const src = fs.readFileSync(__dirname + '/browser/feerate.js', 'utf8');
+// The NEAR LUMOS contract, '' until LUMOS is minted on NEAR (the one switch, _tools/near-lumos.js).
+const { NEAR_LUMOS } = require(__dirname + '/near-lumos.js');
+if (NEAR_LUMOS && !/^[a-z0-9._-]{2,64}$/.test(NEAR_LUMOS)) { console.error('  near-lumos.js: "' + NEAR_LUMOS + '" is not a NEAR account id — aborting'); process.exit(1); }
+let src = fs.readFileSync(__dirname + '/browser/feerate.js', 'utf8');
 if (src.indexOf('</' + 'script') >= 0) { console.error('  browser/feerate.js contains a closing script tag — aborting'); process.exit(1); }
-if (!/RATE = 0\.002/.test(src)) { console.error('  browser/feerate.js: expected RATE = 0.002 — aborting'); process.exit(1); }
+if (!/RATE = 0\.002/.test(src) || !/LOW = 0\.001/.test(src)) { console.error('  browser/feerate.js: expected RATE = 0.002 and LOW = 0.001 — aborting'); process.exit(1); }
+if (src.split("'__NEAR_LUMOS__'").length !== 2) { console.error('  browser/feerate.js: expected one __NEAR_LUMOS__ placeholder — aborting'); process.exit(1); }
+src = src.split("'__NEAR_LUMOS__'").join("'" + NEAR_LUMOS + "'");
 const SCRIPT = '<script id="' + ID + '">\n' + src + '\n</' + 'script>';
 
 function swap(h, id) {

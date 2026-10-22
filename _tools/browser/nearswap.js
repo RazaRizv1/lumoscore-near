@@ -39,6 +39,10 @@
   // nowhere else.
   var FEE_ACCOUNT = 'fees-lumoscore.near';
   var FEE_BPS = 20;                                   // 0.2% of the input
+  // 0.1% for a holder of 250,000+ LUMOS, as on Stellar and XRPL. The tier is published by browser/feerate.js
+  // in window.__lxFeeRate, which stays 0.002 for everyone until LUMOS is live on NEAR (_tools/near-lumos.js).
+  // Only the two known rates are honoured, so a stray value can never zero the fee.
+  function feeBps() { return window.__lxFeeRate === 0.001 ? 10 : FEE_BPS; }
   var SLIP_BPS = 50;                                  // 0.5%, the figure the design displays
 
   var REF = 'v2.ref-finance.near';
@@ -119,7 +123,7 @@
     return f ? (w + '.' + f) : w;
   }
   function toNum(raw, dec) { return Number(fromUnits(raw, dec)); }
-  function feeOf(raw) { return (big(raw) * BigInt(FEE_BPS) / BigInt(10000)).toString(); }
+  function feeOf(raw) { return (big(raw) * BigInt(feeBps()) / BigInt(10000)).toString(); }
   function minOut(raw, slipBps) {
     var s = slipBps == null ? SLIP_BPS : slipBps;
     return (big(raw) * BigInt(10000 - s) / BigInt(10000)).toString();
@@ -386,7 +390,7 @@
   }
 
   window.lxnSwap = {
-    FEE_BPS: FEE_BPS, SLIP_BPS: SLIP_BPS, REF: REF, WNEAR: WNEAR, USDC: USDC, NET_FEE_EST: NET_FEE_EST,
+    get FEE_BPS() { return feeBps(); }, SLIP_BPS: SLIP_BPS, REF: REF, WNEAR: WNEAR, USDC: USDC, NET_FEE_EST: NET_FEE_EST,
     feeAccount: feeAccount, feeReady: feeReady, feeOf: feeOf, minOut: minOut,
     toUnits: toUnits, fromUnits: fromUnits, toNum: toNum, big: big,
     tokenInfo: tokenInfo, remember: remember, meta: function (id) { return META[id] || null; },
