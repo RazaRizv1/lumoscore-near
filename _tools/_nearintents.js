@@ -46,7 +46,7 @@ const B = String.fromCharCode(92);
 const ID = 'lx-nearnibridge';
 const STRIP = ['lx-cctp-js', 'lx-lz-js', 'lx-nearintents', 'lx-bridge3js', 'lx-bridgefee', 'lx-feerate'];
 
-const swap = fs.readFileSync(__dirname + '/browser/nearswap.js', 'utf8');
+const swap = require(__dirname + '/near-router.js').stamp(fs.readFileSync(__dirname + '/browser/nearswap.js', 'utf8'));
 let page = fs.readFileSync(__dirname + '/browser/nibridge.js', 'utf8');
 for (const [n, src] of [['nearswap.js', swap], ['nibridge.js', page]]) {
   if (src.indexOf('</' + 'script') >= 0) { console.error('  browser/' + n + ' contains a closing script tag — aborting'); process.exit(1); }

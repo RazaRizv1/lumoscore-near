@@ -45,6 +45,21 @@
   function feeBps() { return window.__lxFeeRate === 0.001 ? 10 : FEE_BPS; }
   var SLIP_BPS = 50;                                  // 0.5%, the figure the design displays
 
+  // ---- THE ROUTER (contracts/router) ------------------------------------------------------------------
+  // With a router, the fee is taken ONLY if Rhea fills the swap: one ft_transfer_call to the router, which
+  // swaps the rest with the output sent straight to the user and either pays the fee or hands everything
+  // back. Stamped from _tools/near-router.js at build time; '' (or an unstamped placeholder) = no router,
+  // and the swap is today's two actions (fee transfer + ft_transfer_call to Rhea). A localhost-only
+  // override exists for capture tests, like the fee account's.
+  var ROUTER_STAMP = '__NEAR_ROUTER__';
+  function router() {
+    try {
+      var t = window.__lxnRouterForTest;
+      if (typeof t === 'string' && t && /^(localhost|127\.0\.0\.1)$/.test(location.hostname)) return t;
+    } catch (e) {}
+    return /^[a-z0-9._-]{2,64}$/.test(ROUTER_STAMP) && ROUTER_STAMP.indexOf('__') !== 0 ? ROUTER_STAMP : '';
+  }
+
   var REF = 'v2.ref-finance.near';
   var WNEAR = 'wrap.near';
   var USDC = '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1';
@@ -263,19 +278,28 @@
   // Is the fee account registered on the token the user PAYS with? Definite answers are cached for the
   // page session; a failed read is not cached and answers null ("could not ask").
   var FEE_REG = {};
-  function feeReady(fromId) {
-    var c = contractOf(fromId), acct = feeAccount();
+  function regReady(c, acct, what) {
     var k = acct + '|' + c;
-    if (!acct) return Promise.resolve(false);
     if (FEE_REG[k] === true || FEE_REG[k] === false) return Promise.resolve(FEE_REG[k]);
     if (FEE_REG[k] && FEE_REG[k].then) return FEE_REG[k];
     var p = storageOf(c, acct).then(function (sb) {
       FEE_REG[k] = !!sb;
-      if (!sb) try { console.warn('[lxnSwap] fee account ' + acct + ' is not registered on ' + c + ' -- swaps from it stay disabled'); } catch (e) {}
+      if (!sb) try { console.warn('[lxnSwap] ' + what + ' ' + acct + ' is not registered on ' + c + ' -- swaps from it stay disabled'); } catch (e) {}
       return FEE_REG[k];
     }, function () { delete FEE_REG[k]; return null; });
     FEE_REG[k] = p;
     return p;
+  }
+  // With a router, the router must be registered on the input token too: the user's tokens go to it first.
+  function feeReady(fromId) {
+    var c = contractOf(fromId), acct = feeAccount(), rt = router();
+    if (!acct) return Promise.resolve(false);
+    var checks = [regReady(c, acct, 'fee account')];
+    if (rt) checks.push(regReady(c, rt, 'router'));
+    return Promise.all(checks).then(function (r) {
+      if (r.indexOf(null) >= 0) return null;
+      return r.indexOf(false) < 0;
+    });
   }
 
   // Raw balance the account can spend in this token. Native NEAR is the account balance less the storage
@@ -329,19 +353,29 @@
           actions.push({ type: 'FunctionCall', params: { methodName: 'near_deposit', args: {}, gas: '10' + TGAS, deposit: q.amount } });
           used += 10;
         }
-        actions.push({ type: 'FunctionCall', params: { methodName: 'ft_transfer',
-          args: { receiver_id: acct, amount: q.fee, memo: 'LumosCore platform fee 0.2%' }, gas: '30' + TGAS, deposit: '1' } });
-        used += 30;
+        var rt = router();
         var acts = q.hops.map(function (h, i) {
           var a = { pool_id: +h.pool.id, token_in: h.tin, token_out: h.tout };
-          if (i === 0) a.amount_in = q.net;
+          // Through the router the first hop names no amount: Rhea then swaps exactly what the router
+          // forwards, so a rounding difference can never leave part of it unused (which would read as a refund).
+          if (i === 0 && !rt) a.amount_in = q.net;
           a.min_amount_out = i === q.hops.length - 1 ? q.min : '0';
           return a;
         });
-        var msg = { force: 0, actions: acts, skip_unwrap_near: !outNative };
-        actions.push({ type: 'FunctionCall', params: { methodName: 'ft_transfer_call',
-          args: { receiver_id: REF, amount: q.net, msg: JSON.stringify(msg) },
-          gas: String(Math.min(270, MAX_TX_GAS - used)) + TGAS, deposit: '1' } });
+        if (rt) {
+          // ONE action: the gross amount to the router, which takes the fee only if the swap fills.
+          actions.push({ type: 'FunctionCall', params: { methodName: 'ft_transfer_call',
+            args: { receiver_id: rt, amount: q.amount, msg: JSON.stringify({ fee_bps: feeBps(), actions: acts, skip_unwrap_near: !outNative }) },
+            gas: String(MAX_TX_GAS - used) + TGAS, deposit: '1' } });
+        } else {
+          actions.push({ type: 'FunctionCall', params: { methodName: 'ft_transfer',
+            args: { receiver_id: acct, amount: q.fee, memo: 'LumosCore platform fee ' + (feeBps() / 100) + '%' }, gas: '30' + TGAS, deposit: '1' } });
+          used += 30;
+          var msg = { force: 0, actions: acts, skip_unwrap_near: !outNative };
+          actions.push({ type: 'FunctionCall', params: { methodName: 'ft_transfer_call',
+            args: { receiver_id: REF, amount: q.net, msg: JSON.stringify(msg) },
+            gas: String(Math.min(270, MAX_TX_GAS - used)) + TGAS, deposit: '1' } });
+        }
         txs.push({ signerId: me, receiverId: inC, actions: actions });
         var dep = BigInt(0);
         if (needOut) dep += big(m[0]);
@@ -390,7 +424,7 @@
   }
 
   window.lxnSwap = {
-    get FEE_BPS() { return feeBps(); }, SLIP_BPS: SLIP_BPS, REF: REF, WNEAR: WNEAR, USDC: USDC, NET_FEE_EST: NET_FEE_EST,
+    get FEE_BPS() { return feeBps(); }, get ROUTED() { return !!router(); }, SLIP_BPS: SLIP_BPS, REF: REF, WNEAR: WNEAR, USDC: USDC, NET_FEE_EST: NET_FEE_EST,
     feeAccount: feeAccount, feeReady: feeReady, feeOf: feeOf, minOut: minOut,
     toUnits: toUnits, fromUnits: fromUnits, toNum: toNum, big: big,
     tokenInfo: tokenInfo, remember: remember, meta: function (id) { return META[id] || null; },

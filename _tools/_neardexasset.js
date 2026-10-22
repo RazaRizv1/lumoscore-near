@@ -42,7 +42,7 @@ const page = fs.readFileSync(__dirname + '/browser/dexasset.js', 'utf8');
 // and dxaswap.js drives the design's swap pane with it. Nothing signs on its own — a person approves every
 // transaction in their own wallet — and the CTA stays "coming soon" for any input token the fee account is
 // not registered on.
-const swapEngine = fs.readFileSync(__dirname + '/browser/nearswap.js', 'utf8');
+const swapEngine = require(__dirname + '/near-router.js').stamp(fs.readFileSync(__dirname + '/browser/nearswap.js', 'utf8'));
 const swapPane = fs.readFileSync(__dirname + '/browser/dxaswap.js', 'utf8');
 // LIMIT ORDERS + ORDER BOOK through Rhea's DCL contract (RAZA approved 2026-10-21; free, no LumosCore fee):
 // neardcl.js is the engine (pool lookup, the SDK's price/point math, the book, place/cancel/collect

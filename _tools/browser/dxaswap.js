@@ -277,7 +277,9 @@
       var v = S().verdict(x.res), gm = meta(x.q.to), pm = meta(x.q.from);
       if (v.ok === false) {
         stop(v.why === 'refunded'
-          ? 'Rhea did not fill the swap (the price moved). Your ' + pm.code + ' came back; the ' + (S().FEE_BPS / 100) + '% platform fee was kept.'
+          ? (S().ROUTED
+            ? 'Rhea did not fill the swap (the price moved). All of your ' + pm.code + ' came back, the platform fee included.'
+            : 'Rhea did not fill the swap (the price moved). Your ' + pm.code + ' came back; the ' + (S().FEE_BPS / 100) + '% platform fee was kept.')
           : 'The swap failed on chain. Check your wallet activity.');
         return;
       }
