@@ -30,7 +30,11 @@ const DEAD_HERE = ['lx-swapcalc', 'lx-qorders'];
 // a non-sample value and sets html.lxn-ltp; if no real value ever arrives it stays hidden rather than show the
 // sample. A <style> in <head> is parsed before first paint.
 const CSS_ID = 'lx-nearlumospage-css';
-const STYLE = '<style id="' + CSS_ID + '">html:not(.lxn-ltp) .price-native{visibility:hidden}</style>';
+// The USD figure beside it did the same, "$0" for 0.7s before the real price (second run): gated on
+// html.lxn-ltu, set once it is non-zero. Scoped with :has() to the price block that holds .lx-pricemeta,
+// because .price alone is too generic a class to hide.
+const STYLE = '<style id="' + CSS_ID + '">html:not(.lxn-ltp) .price-native{visibility:hidden}'
+  + 'html:not(.lxn-ltu) div:has(> .lx-pricemeta) > .price{visibility:hidden}</style>';
 function stripStyle(h) {
   const open = '<style id="' + CSS_ID + '">';
   for (;;) { const i = h.indexOf(open); if (i < 0) return h; h = h.slice(0, i) + h.slice(h.indexOf('</style>', i) + 8); }

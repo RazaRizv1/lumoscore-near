@@ -55,6 +55,12 @@
       var pt = (pn.textContent || '').trim();
       if (/\d/.test(pt) && !/^≈\s*0\.00043\s/.test(pt)) document.documentElement.classList.add('lxn-ltp');
     }
+    // The USD price beside it: revealed once it is a non-zero figure ("$0" is lx-ltdata's interim value).
+    var meta = document.querySelector('.lx-pricemeta');
+    var usd = meta && meta.parentElement && meta.parentElement.querySelector(':scope > .price');
+    if (usd && !document.documentElement.classList.contains('lxn-ltu')) {
+      if (/[1-9]/.test(usd.textContent || '')) document.documentElement.classList.add('lxn-ltu');
+    }
     document.querySelectorAll('.rmid, .pair-name').forEach(function (e) {
       if (e.children.length) return;
       var t = e.textContent || '';
