@@ -7,12 +7,13 @@
 <!--
   ONE-OFF OPERATOR TOOL, NOT PART OF THE SITE. Served only by _tools/admin/serve-admin.js on localhost.
 
-  The NEAR swap pays LumosCore's 0.2% fee in the token the user sells, to FEE_ACCOUNT. NEAR only delivers a
-  token to an account registered with that token's contract, so the fee account must be registered on every
-  curated token first; until it is, the swap button stays "coming soon" for that token (nearswap.js
-  feeReady). This page lets the fee account register ITSELF: connect fees-lumoscore.near, and the wallet
-  asks you to approve storage_deposit {account_id: fees-lumoscore.near, registration_only: true} on each
-  missing token, paying each token's own storage_balance_bounds.min (about 0.00125 NEAR).
+  The NEAR swap pays LumosCore's 0.2% fee in the token the user sells, to the fee account; with the swap
+  router on, the user's tokens pass through router.lumoscore.near first. NEAR only delivers a token to an
+  account registered with that token's contract, so BOTH must be registered on every curated token; until
+  they are, the swap button stays "coming soon" for that token (nearswap.js feeReady). Pick the account to
+  register, connect ANY wallet to pay, and the wallet asks you to approve storage_deposit {account_id:
+  <that account>, registration_only: true} on each missing token, paying each token's own
+  storage_balance_bounds.min (about 0.00125 NEAR).
 
   Nothing is signed by this page. Every batch is approved in your own wallet. Re-run it any time: it only
   ever asks for tokens that are still missing.
@@ -36,8 +37,13 @@
 </head>
 <body>
 <main>
-  <h1>Register the fee account on every curated token</h1>
-  <p>Fee account: <b id="acct"></b>. Connect <b>that account</b> in your NEAR wallet. Each token costs its own small storage deposit, paid from the connected account.</p>
+  <h1>Register LumosCore's accounts on every curated token</h1>
+  <p>Account to register:
+    <select id="target">
+      <option value="fees-lumoscore.near">fees-lumoscore.near (fee account)</option>
+      <option value="router.lumoscore.near">router.lumoscore.near (swap router)</option>
+    </select>
+    — <b id="acct"></b>. Connect <b>any</b> NEAR wallet to pay: each token costs its own small storage deposit, paid from the connected account.</p>
 
   <div class="card">
     <div><b>1.</b> Wallet:
@@ -67,10 +73,18 @@
 <script src="/vendor/near-connect-0.11.4.min.js"></script>
 <script>
 (function () {
-  var FEE_ACCOUNT = 'fees-lumoscore.near';
+  // The account being registered (fee account or swap router). Any connected wallet may pay: a token's
+  // storage_deposit can be made on behalf of any account.
   var RPC = 'https://free.rpc.fastnear.com';
   var $ = function (id) { return document.getElementById(id); };
-  $('acct').textContent = FEE_ACCOUNT;
+  var TARGET = $('target').value;
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  $('acct').textContent = TARGET;
+  $('target').onchange = function () {
+    TARGET = $('target').value; $('acct').textContent = TARGET;
+    missing = []; $('tbl').innerHTML = ''; $('summary').textContent = 'press Check registrations for ' + TARGET;
+    $('go').disabled = true;
+  };
   function log(s) { $('log').textContent += s + '\n'; }
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
@@ -99,9 +113,8 @@
       wallet = await connector.connect({ walletId: $('wallet').value });
       var accts = await wallet.getAccounts({ network: 'mainnet' });
       me = accts && accts[0] && accts[0].accountId || '';
-      $('who').innerHTML = me === FEE_ACCOUNT ? '<span class="ok">connected as ' + me + '</span>'
-        : '<span class="bad">connected as ' + (me || '?') + ' — connect ' + FEE_ACCOUNT + ' instead</span>';
-      $('go').disabled = !(me === FEE_ACCOUNT && missing.length);
+      $('who').innerHTML = me ? '<span class="ok">paying from ' + esc(me) + '</span>' : '<span class="bad">no account returned</span>';
+      $('go').disabled = !(me && missing.length);
     } catch (e) { $('who').innerHTML = '<span class="bad">' + (e && e.message || e) + '</span>'; }
   };
 
@@ -113,25 +126,25 @@
       for (var i = 0; i < tokens.length; i++) {
         var t = tokens[i], reg = null, min = null, err = '';
         try {
-          reg = await view(t.i, 'storage_balance_of', { account_id: FEE_ACCOUNT });
+          reg = await view(t.i, 'storage_balance_of', { account_id: TARGET });
           if (!reg) { var b = await view(t.i, 'storage_balance_bounds', {}); min = String(b && b.min || ''); if (!/^[0-9]+$/.test(min)) throw new Error('no storage minimum'); }
         } catch (e) { err = e.message; }
         if (!reg && !err) { missing.push({ i: t.i, s: t.s, min: min }); cost += BigInt(min); }
         if (reg) done++;
-        rows += '<tr><td>' + t.s + '</td><td class="mono">' + t.i + '</td><td>'
-          + (reg ? '<span class="ok">registered</span>' : err ? '<span class="bad">' + err + '</span>' : '<span class="muted">missing · ' + (Number(min) / 1e24) + ' NEAR</span>') + '</td></tr>';
+        rows += '<tr><td>' + esc(t.s) + '</td><td class="mono">' + esc(t.i) + '</td><td>'
+          + (reg ? '<span class="ok">registered</span>' : err ? '<span class="bad">' + esc(err) + '</span>' : '<span class="muted">missing · ' + (Number(min) / 1e24) + ' NEAR</span>') + '</td></tr>';
         $('summary').textContent = 'checked ' + (i + 1) + ' of ' + tokens.length + '…';
         await sleep(300);
       }
       $('tbl').innerHTML = rows;
-      $('summary').textContent = done + ' registered · ' + missing.length + ' missing · ' + (Number(cost) / 1e24).toFixed(5) + ' NEAR to register them';
+      $('summary').textContent = TARGET + ': ' + done + ' registered · ' + missing.length + ' missing · ' + (Number(cost) / 1e24).toFixed(5) + ' NEAR to register them';
     } catch (e) { $('summary').textContent = 'Check failed: ' + e.message; }
     $('check').disabled = false;
-    $('go').disabled = !(me === FEE_ACCOUNT && missing.length);
+    $('go').disabled = !(me && missing.length);
   };
 
   $('go').onclick = async function () {
-    if (me !== FEE_ACCOUNT || !missing.length) return;
+    if (!me || !missing.length) return;
     $('go').disabled = true;
     var size = +$('batch').value || 10;
     // wrap.near and USDC first: every NEAR-paid swap needs wrap.near, and USDC is the busiest market.
@@ -141,7 +154,7 @@
       var part = queue.slice(k, k + size);
       var txs = part.map(function (m) {
         return { signerId: me, receiverId: m.i, actions: [{ type: 'FunctionCall', params: { methodName: 'storage_deposit',
-          args: { account_id: FEE_ACCOUNT, registration_only: true }, gas: '30000000000000', deposit: m.min } }] };
+          args: { account_id: TARGET, registration_only: true }, gas: '30000000000000', deposit: m.min } }] };
       });
       log('Batch ' + (k / size + 1) + ': asking your wallet to approve ' + part.length + ' registration(s): ' + part.map(function (m) { return m.s; }).join(', '));
       try {

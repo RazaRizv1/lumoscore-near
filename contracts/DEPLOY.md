@@ -37,5 +37,24 @@ contract's 16 KB limit; sha256 a6ec9f04…bd81, made from /assets/tokens/lumos.p
    the attached deposit over storage goes to fees-lumoscore.near).
 5. Mint:
    near contract call-function as-transaction lumoscore.near create_reserved_token file-args C:/LumosCore-NEAR/contracts/lumos-mint-args.json prepaid-gas '150.0 Tgas' attached-deposit '1.75 NEAR' sign-as lumoscore.near network-config mainnet sign-with-keychain send
-6. Then in the build: set NEAR_LUMOS = 'lumos.lumoscore.near' in _tools/_nearad.js, and do the rest of the
-   LUMOS-on-NEAR switch (fee tier, Rewards, the LUMOS page) recorded in the NEAR scope notes.
+6. Then in the build: set NEAR_LUMOS = 'lumos.lumoscore.near' in _tools/near-lumos.js (the one switch: card
+   link, 0.1% fee tier, discount pieces, LUMOS page), rebuild, and check the token page before deploying.
+
+## The swap router (fee only when the swap succeeds)
+
+contracts/router/target/near/lumoscore_router.wasm, sha256 71d4a5ed904b5881d842eeed514b76ecf459db33f1a2ed6976e8ef679fd12f17
+(2026-10-22: 11/11 unit tests; testnet 18/18 against Ref 1.9.19, plus the page's NEAR-input shape at 280 TGas).
+It relies on Rhea's swap_out_recipient (probed on testnet; mainnet runs the newer 1.9.20).
+
+Init args (router-init-args.json): owner lumoscore.near, fee_account fees-lumoscore.near, rhea v2.ref-finance.near,
+max_fee_bps 20 (the router refuses any fee above 0.2%).
+
+7. Create the router account from lumoscore.near, funded for its code (~1.53 NEAR) plus a margin:
+   near account create-account fund-myself router.lumoscore.near '1.7 NEAR' autogenerate-new-keypair save-to-keychain sign-as lumoscore.near network-config mainnet sign-with-keychain send
+8. Deploy + initialise:
+   near contract deploy router.lumoscore.near use-file C:/LumosCore-NEAR/contracts/router/target/near/lumoscore_router.wasm with-init-call new file-args C:/LumosCore-NEAR/contracts/router-init-args.json prepaid-gas '30.0 Tgas' attached-deposit '0 NEAR' network-config mainnet sign-with-keychain send
+9. Register the router on every curated token: the operator page (`node _tools/admin/serve-admin.js`,
+   http://localhost:8160/feereg.html), choose "router.lumoscore.near" as the account to register. Any connected
+   wallet can pay (about 0.00125 NEAR per token, ~0.09 NEAR for all). The fee account must stay registered too.
+10. Then in the build: set NEAR_ROUTER = 'router.lumoscore.near' in _tools/near-router.js, rebuild, deploy.
+    Swaps from a token the router is not registered on stay "coming soon" until it is.
