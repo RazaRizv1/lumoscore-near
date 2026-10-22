@@ -25,6 +25,17 @@ const PAGE = /^lumoscore-lumos-token(-dark|-light|-mobile)?\.html$/;
 // lx-ltdata stays: it draws the Stellar LUMOS figures, and its one use of their globals is guarded.
 const DEAD_HERE = ['lx-swapcalc', 'lx-qorders'];
 
+// The price line ships as the design's sample "≈ 0.00043 XLM" and lx-ltdata replaces it ~1.5s later with the
+// real figure — a flash (monitor bot, 2026-10-22). Hidden from first paint until browser/nearlumospage.js sees
+// a non-sample value and sets html.lxn-ltp; if no real value ever arrives it stays hidden rather than show the
+// sample. A <style> in <head> is parsed before first paint.
+const CSS_ID = 'lx-nearlumospage-css';
+const STYLE = '<style id="' + CSS_ID + '">html:not(.lxn-ltp) .price-native{visibility:hidden}</style>';
+function stripStyle(h) {
+  const open = '<style id="' + CSS_ID + '">';
+  for (;;) { const i = h.indexOf(open); if (i < 0) return h; h = h.slice(0, i) + h.slice(h.indexOf('</style>', i) + 8); }
+}
+
 let injected = 0, labels = 0, stripped = 0;
 for (const dev of ['desktop', 'mobile']) {
   const file = 'lumoscore-near-' + dev + '.html';
@@ -32,13 +43,16 @@ for (const dev of ['desktop', 'mobile']) {
   const { json, s, e } = getContents(data);
   for (const key of Object.keys(json)) {
     if (!PAGE.test(key) || typeof json[key] !== 'string') continue;
-    let h = stripById(json[key], ID).html;
+    let h = stripStyle(stripById(json[key], ID).html);
     const before = h;
     h = h.split('<div class="price-native">≈ 0.00043 APT').join('<div class="price-native">≈ 0.00043 XLM')
          .split('<div class="pair-name">LUMOS / APT').join('<div class="pair-name">LUMOS / XLM');
     if (h !== before) labels++;
     if (!NEAR_LUMOS) {
       for (const id of DEAD_HERE) { const r = stripById(h, id); h = r.html; stripped += r.removed; }
+      const hi = h.indexOf('</' + 'head>');
+      if (hi < 0) { console.error('ABORT ' + key + ': no closing head'); process.exit(1); }
+      h = h.slice(0, hi) + STYLE + h.slice(hi);
       const bi = h.lastIndexOf('</' + 'body>');
       if (bi < 0) { console.error('ABORT ' + key + ': no closing body'); process.exit(1); }
       h = h.slice(0, bi) + SCRIPT + h.slice(bi);

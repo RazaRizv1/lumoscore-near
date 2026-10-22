@@ -48,6 +48,13 @@
       var t = e.textContent || '';
       if (/\bNEAR\b/.test(t)) e.textContent = t.replace(/\bNEAR\b/g, 'XLM');
     });
+    // The price line is hidden from first paint (_nearlumospage.js) until it carries a real figure, not the
+    // design's sample "≈ 0.00043 XLM".
+    var pn = document.querySelector('.price-native');
+    if (pn && !document.documentElement.classList.contains('lxn-ltp')) {
+      var pt = (pn.textContent || '').trim();
+      if (/\d/.test(pt) && !/^≈\s*0\.00043\s/.test(pt)) document.documentElement.classList.add('lxn-ltp');
+    }
     document.querySelectorAll('.rmid, .pair-name').forEach(function (e) {
       if (e.children.length) return;
       var t = e.textContent || '';
