@@ -124,8 +124,13 @@ impl Factory {
     }
 
     fn validate(&self, a: &TokenArgs) {
-        require!(valid_prefix(&a.prefix), "Bad prefix: 2-32 of a-z 0-9, single hyphens between");
         require!(!RESERVED.contains(&a.prefix.as_str()), "That name is reserved");
+        self.validate_shape(a);
+    }
+
+    /// Everything but the reserved-name rule, which create_reserved_token alone may skip.
+    fn validate_shape(&self, a: &TokenArgs) {
+        require!(valid_prefix(&a.prefix), "Bad prefix: 2-32 of a-z 0-9, single hyphens between");
         require!(valid_symbol(&a.symbol), "Bad symbol: 2-12 of A-Z 0-9, starting with a letter");
         require!(valid_name(&a.name), "Bad name: 1-48 characters, no leading/trailing spaces");
         require!(a.decimals <= 24, "Decimals must be 0-24");
@@ -146,41 +151,23 @@ impl Factory {
     fn storage_cost(a: &TokenArgs) -> NearToken {
         env::storage_byte_cost().saturating_mul(Self::storage_bytes(a) as u128)
     }
-}
 
-#[near]
-impl Factory {
-    #[init]
-    pub fn new(owner_id: AccountId, fee_account: AccountId, min_fee: U128) -> Self {
-        Self {
-            owner_id,
-            fee_account,
-            min_fee: NearToken::from_yoctonear(min_fee.0),
-            paused: false,
-            tokens: Vector::new(b"t"),
-        }
-    }
-
-    // ---- launch ------------------------------------------------------------------------------------
-
-    #[payable]
-    pub fn create_token(&mut self, args: TokenArgs) -> Promise {
-        require!(!self.paused, "Launches are paused");
-        self.validate(&args);
+    /// One receipt: create `<prefix>.<factory>`, fund its storage, deploy, mint the supply to `owner`.
+    /// `payer` gets the whole deposit back if any of it fails; on success, deposit − storage goes to the
+    /// fee account.
+    fn launch(&self, args: TokenArgs, owner: AccountId, payer: AccountId, fee_floor: NearToken) -> Promise {
         require!(env::prepaid_gas() >= MIN_PREPAID, "Attach at least 100 TGas");
-
         let token_id: AccountId = format!("{}.{}", args.prefix, env::current_account_id())
             .parse()
             .unwrap_or_else(|_| env::panic_str("Bad token account id"));
         let storage = Self::storage_cost(&args);
         let deposit = env::attached_deposit();
-        let required = storage.saturating_add(self.min_fee);
+        let required = storage.saturating_add(fee_floor);
         require!(
             deposit >= required,
             format!("Attach at least {} yoctoNEAR", required.as_yoctonear())
         );
 
-        let owner = env::predecessor_account_id();
         let init = serde_json::to_vec(&json!({
             "owner_id": owner,
             "total_supply": args.total_supply,
@@ -204,8 +191,43 @@ impl Factory {
             .then(
                 Self::ext(env::current_account_id())
                     .with_static_gas(GAS_CALLBACK)
-                    .on_token_created(token_id, owner, U128(deposit.as_yoctonear()), U128(storage.as_yoctonear())),
+                    .on_token_created(token_id, owner, payer, U128(deposit.as_yoctonear()), U128(storage.as_yoctonear())),
             )
+    }
+}
+
+#[near]
+impl Factory {
+    #[init]
+    pub fn new(owner_id: AccountId, fee_account: AccountId, min_fee: U128) -> Self {
+        Self {
+            owner_id,
+            fee_account,
+            min_fee: NearToken::from_yoctonear(min_fee.0),
+            paused: false,
+            tokens: Vector::new(b"t"),
+        }
+    }
+
+    // ---- launch ------------------------------------------------------------------------------------
+
+    #[payable]
+    pub fn create_token(&mut self, args: TokenArgs) -> Promise {
+        require!(!self.paused, "Launches are paused");
+        self.validate(&args);
+        let me = env::predecessor_account_id();
+        self.launch(args, me.clone(), me, self.min_fee)
+    }
+
+    /// OWNER ONLY: launch under a RESERVED name — LumosCore's own tokens, LUMOS first
+    /// (`lumos.lumoscore.near`, to be minted on NEAR before release). Same fixed-supply token and the same
+    /// keyless account as any launch; the supply goes to `owner_id` (e.g. a treasury), not the caller.
+    /// No LumosCore fee: the deposit only has to cover the new account's storage. Works while paused.
+    #[payable]
+    pub fn create_reserved_token(&mut self, args: TokenArgs, owner_id: AccountId) -> Promise {
+        self.assert_owner();
+        self.validate_shape(&args);
+        self.launch(args, owner_id, env::predecessor_account_id(), NearToken::from_yoctonear(0))
     }
 
     #[private]
@@ -213,6 +235,7 @@ impl Factory {
         &mut self,
         token_id: AccountId,
         owner_id: AccountId,
+        payer_id: AccountId,
         deposit: U128,
         storage: U128,
         #[callback_result] result: Result<(), PromiseError>,
@@ -234,14 +257,14 @@ impl Factory {
             ));
             true
         } else {
-            Promise::new(owner_id.clone()).transfer(NearToken::from_yoctonear(deposit.0)).detach();
+            Promise::new(payer_id.clone()).transfer(NearToken::from_yoctonear(deposit.0)).detach();
             env::log_str(&format!(
                 "EVENT_JSON:{}",
                 json!({
                     "standard": "lumoscore_launch",
                     "version": "1.0.0",
                     "event": "token_refunded",
-                    "data": [{ "token_id": token_id, "owner_id": owner_id, "amount": deposit }]
+                    "data": [{ "token_id": token_id, "owner_id": owner_id, "payer_id": payer_id, "amount": deposit }]
                 })
             ));
             false
@@ -416,6 +439,7 @@ mod tests {
         let ok = f.on_token_created(
             "solar.lumoscore.near".parse().unwrap(),
             accounts(1),
+            accounts(1),
             U128(3_000),
             U128(1_000),
             Ok(()),
@@ -438,6 +462,7 @@ mod tests {
         let ok = f.on_token_created(
             "solar.lumoscore.near".parse().unwrap(),
             accounts(1),
+            accounts(1),
             U128(3_000),
             U128(1_000),
             Err(PromiseError::Failed),
@@ -445,5 +470,82 @@ mod tests {
         assert!(!ok);
         assert!(f.get_tokens(None, None).is_empty());
         assert!(get_logs()[0].contains("\"token_refunded\"") && get_logs()[0].contains("\"amount\":\"3000\""));
+    }
+
+    fn lumos() -> TokenArgs {
+        TokenArgs {
+            prefix: "lumos".to_string(),
+            name: "LumosCore".to_string(),
+            symbol: "LUMOS".to_string(),
+            decimals: 18,
+            total_supply: U128(1_000_000_000 * 10u128.pow(18)),
+            icon: None,
+        }
+    }
+
+    #[test]
+    fn owner_may_launch_a_reserved_name_without_the_fee() {
+        let (mut ctx, mut f) = setup();
+        let storage = Factory::storage_cost(&lumos());
+        // exactly the storage: no min_fee is owed on the owner's path
+        testing_env!(ctx.predecessor_account_id(accounts(0)).attached_deposit(storage).build());
+        f.create_reserved_token(lumos(), "treasury.near".parse().unwrap());
+    }
+
+    #[test]
+    fn owner_path_works_while_paused() {
+        let (mut ctx, mut f) = setup();
+        testing_env!(ctx.predecessor_account_id(accounts(0)).build());
+        f.set_paused(true);
+        testing_env!(ctx.attached_deposit(NearToken::from_near(3)).build());
+        f.create_reserved_token(lumos(), "treasury.near".parse().unwrap());
+    }
+
+    #[test]
+    #[should_panic(expected = "Owner only")]
+    fn reserved_path_is_owner_only() {
+        let (mut ctx, mut f) = setup();
+        testing_env!(ctx.predecessor_account_id(accounts(1)).attached_deposit(NearToken::from_near(5)).build());
+        f.create_reserved_token(lumos(), accounts(1));
+    }
+
+    #[test]
+    #[should_panic(expected = "That name is reserved")]
+    fn public_path_still_refuses_lumos() {
+        let (mut ctx, mut f) = setup();
+        testing_env!(ctx.predecessor_account_id(accounts(0)).attached_deposit(NearToken::from_near(5)).build());
+        f.create_token(lumos());
+    }
+
+    #[test]
+    #[should_panic(expected = "Bad symbol")]
+    fn reserved_path_still_checks_the_token_shape() {
+        let (mut ctx, mut f) = setup();
+        testing_env!(ctx.predecessor_account_id(accounts(0)).attached_deposit(NearToken::from_near(5)).build());
+        let mut a = lumos();
+        a.symbol = "lumos".to_string();
+        f.create_reserved_token(a, "treasury.near".parse().unwrap());
+    }
+
+    #[test]
+    fn failed_reserved_launch_refunds_the_payer_not_the_supply_owner() {
+        let (mut ctx, mut f) = setup();
+        testing_env!(
+            ctx.predecessor_account_id("lumoscore.near".parse().unwrap()).build(),
+            near_sdk::test_vm_config(),
+            near_sdk::RuntimeFeesConfig::test(),
+            Default::default(),
+            vec![PromiseResult::Failed],
+        );
+        f.on_token_created(
+            "lumos.lumoscore.near".parse().unwrap(),
+            "treasury.near".parse().unwrap(),
+            accounts(0),
+            U128(3_000),
+            U128(3_000),
+            Err(PromiseError::Failed),
+        );
+        let log = &get_logs()[0];
+        assert!(log.contains("\"payer_id\":\"alice\"") && log.contains("\"owner_id\":\"treasury.near\""), "{log}");
     }
 }
