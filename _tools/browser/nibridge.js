@@ -1299,16 +1299,22 @@
   }, true);
 
   // ---- recent transactions -------------------------------------------------------------------------
-  // PER BROWSER, AND SAID SO. Each send records itself under TX_KEY; NEAR history is not scanned for our
-  // `lx:ni` fees yet (the XRPL build recovers its rows from the ledger; the NEAR equivalent would need
-  // an indexer that returns ft_transfer memos, which nothing here reads today).
+  // Each send records itself under TX_KEY in this browser; recoverFromChain() adds the account's earlier
+  // bridges from the chain, as the XRPL build does from its ledger.
   var TX_PER = 25, TX_PAGE = 1;
   function txRecords() {
     var list = [];
     try { list = JSON.parse(localStorage.getItem(TX_KEY) || '[]'); } catch (e) { list = []; }
-    return (Array.isArray(list) ? list : []).filter(function (r) { return r && r.hash; })
+    if (!Array.isArray(list)) list = [];
+    // A hash this browser recorded wins over the recovered copy: it also knows what the quote promised.
+    var have = {};
+    list.forEach(function (r) { if (r && r.hash) have[r.hash] = 1; });
+    (RECOVERED || []).forEach(function (r) { if (!have[r.hash]) list.push(r); });
+    return list.filter(function (r) { return r && r.hash; })
       .map(function (r) {
-        return { at: r.at, hash: r.hash, sent: r.inAmt, sentSym: r.srcSym || '', recv: r.out,
+        // A refunded or failed transfer delivered nothing: the quote's figure would read as received.
+        var none = r.status === 'REFUNDED' || r.status === 'FAILED';
+        return { at: r.at, hash: r.hash, sent: r.inAmt, sentSym: r.srcSym || '', recv: none ? null : r.out,
           recvSym: r.sym || '', place: NI_CHAIN[r.chain] || '', from: r.from || '', to: r.to || '' };
       })
       .sort(function (a, b) { return (b.at || 0) - (a.at || 0); });
@@ -1761,6 +1767,93 @@
     try { document.title = 'Bridge from NEAR to ' + (n || 35) + ' Networks | LumosCore'; } catch (e) {}
   }
 
+  // ---- history recovered from the chain -------------------------------------------------------------
+  // A bridge from NEAR is ONE transaction from the user carrying two token transfers: the 0.2% fee to
+  // FEE_ACCT (memo lx:ni) and the deposit to a 64-hex 1Click deposit account. NearBlocks lists an account's
+  // token transfers with the other party and the transaction hash (CORS open, so each visitor spends their
+  // own rate limit, not our Cloudflare IP's), which is enough to recognise that shape without reading
+  // memos. 1Click's status for the deposit account then CONFIRMS it (no quote back means it was not ours)
+  // and supplies the destination. A swap's fee transaction pairs FEE_ACCT with v2.ref-finance.near, so it
+  // never matches. Native NEAR is wrapped in the same transaction: a wrap.near MINT there means "NEAR".
+  // Not cached: a lookup that fails leaves the browser's own rows, never an empty history.
+  var RECOVERED = [];
+  var NB = 'https://api.nearblocks.io/v1/account/';
+  var FEE_ACCT = 'fees-lumoscore.near';
+  function nbPages(me, pages) {
+    var all = [], cursor = '';
+    function next(k) {
+      if (k >= pages) return Promise.resolve(all);
+      return fetch(NB + encodeURIComponent(me) + '/ft-txns?per_page=50' + (cursor ? '&cursor=' + encodeURIComponent(cursor) : ''))
+        .then(function (r) { if (!r.ok) throw new Error('nearblocks ' + r.status); return r.json(); })
+        .then(function (j) {
+          var rows = (j && Array.isArray(j.txns)) ? j.txns : [];
+          all = all.concat(rows);
+          cursor = j && j.cursor;
+          return (rows.length === 50 && cursor) ? next(k + 1) : all;
+        });
+    }
+    return next(0);
+  }
+  function bridgeTxs(me, events) {
+    var by = {};
+    events.forEach(function (e) {
+      if (!e || e.affected_account_id !== me || !e.transaction_hash || !e.ft) return;
+      if (e.outcomes && e.outcomes.status === false) return;
+      (by[e.transaction_hash] = by[e.transaction_hash] || []).push(e);
+    });
+    var out = [];
+    Object.keys(by).forEach(function (h) {
+      var fee = null, dep = null, mint = false;
+      by[h].forEach(function (e) {
+        var d = String(e.delta_amount || '');
+        if (e.cause === 'MINT' && e.ft.contract === 'wrap.near') mint = true;
+        if (d.charAt(0) !== '-') return;
+        if (e.involved_account_id === FEE_ACCT) fee = e;
+        else if (/^[0-9a-f]{64}$/.test(e.involved_account_id || '')) dep = e;
+      });
+      if (!fee || !dep || fee.ft.contract !== dep.ft.contract) return;
+      var dec = +dep.ft.decimals || 0;
+      var gross = (Number(String(fee.delta_amount).slice(1)) + Number(String(dep.delta_amount).slice(1))) / Math.pow(10, dec);
+      out.push({ hash: h, dep: dep.involved_account_id, at: Math.floor(Number(dep.block_timestamp) / 1e6),
+        inAmt: gross, srcSym: (mint && dep.ft.contract === 'wrap.near') ? 'NEAR' : (dep.ft.symbol || ''), from: me });
+    });
+    return out.sort(function (a, b) { return b.at - a.at; });
+  }
+  function recoverFromChain() {
+    var me = addr();
+    if (!me || !TOKENS || recoverFromChain.busyFor === me) return;
+    recoverFromChain.busyFor = me;
+    nbPages(me, 2).then(function (events) {
+      return bridgeTxs(me, events).slice(0, 20).reduce(function (p, c) {
+        return p.then(function (acc) {
+          return fetch(API + '?op=status&depositAddress=' + encodeURIComponent(c.dep))
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (j) {
+              var qr = j && j.quoteResponse, req = qr && qr.quoteRequest;
+              if (!req || !req.destinationAsset) return acc;
+              var t = null;
+              for (var i = 0; i < TOKENS.length; i++) if (TOKENS[i].assetId === req.destinationAsset) { t = TOKENS[i]; break; }
+              var sd = j.swapDetails || {}, q = qr.quote || {};
+              c.out = sd.amountOutFormatted || q.amountOutFormatted || null;
+              c.sym = t ? t.symbol : '';
+              c.chain = t ? t.blockchain : '';
+              c.to = req.recipient || '';
+              c.status = j.status || '';
+              acc.push(c);
+              return acc;
+            })
+            .catch(function () { return acc; });
+        });
+      }, Promise.resolve([]));
+    }).then(function (rows) {
+      if (addr() !== me) return;
+      RECOVERED = rows || [];
+      try { paintTxs(); } catch (_) {}
+    }).catch(function (e) {
+      try { console.warn('[bridge] history from chain unavailable: ' + ((e && e.message) || e)); } catch (_) {}
+    }).then(function () { recoverFromChain.busyFor = ''; });
+  }
+
   function load() {
     if (!$('.br-netbox') && !$('.br-steps')) return;
     paintSource();
@@ -1843,6 +1936,7 @@
       window.__lxnNiChains = Object.keys(BY_CHAIN);
       window.__lxnNiOrigins = ORIGINS.map(function (o) { return o.symbol; });
       try { paintSourceAsset(); checkFee(); title(wireDestinations()); paintSteps(); setCta(); } catch (_) {}
+      try { recoverFromChain(); } catch (_) {}
       return loadBalances().then(function () { paintSource(); paintSteps(); });
     });
     loadBalances().then(function () { try { paintSteps(); } catch (_) {} });
