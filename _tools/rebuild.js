@@ -31,7 +31,7 @@ const CHAIN = [
   '_nearengine',
   // Removes only Stellar layers that draw nothing (see its header for what is deliberately left).
   // Removes by id, so its position is not load-bearing.
-  '_nearstripstellar',
+  '_nearstripstellar', '_nearfeerate',
   // Titles/descriptions, then shared visible wording. After anything that rebuilds a page from the
   // design (nothing does yet), or that work would hand the Stellar strings back.
   '_nearseo',

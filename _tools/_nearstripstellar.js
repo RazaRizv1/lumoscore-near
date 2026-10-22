@@ -27,6 +27,17 @@ const B = String.fromCharCode(92);
 
 const DEAD = ['lx-poolwarm', 'lx-actbeacon'];
 
+// CONTENT PAGES ONLY (about, blog, docs, mcp, privacy, support, terms, whitepaper), 2026-10-22: these carry
+// Stellar's swap / open-orders / claimable / wallet layers although they draw none of that UI, exactly as
+// the XRPL fork found on its 28 content pages (_xrplstripstellar.js). Each layer fired Horizon requests on
+// every view, and lx-swapcalc / lx-qorders / lx-wclaim define window.lxSign, a live STELLAR signer that
+// routes to Freighter, Rabet, xBull and others and pulls freighter-api from esm.sh at run time. Proven
+// UI-neutral by comparing each page's visible text before and after (identical).
+// Not on wallet, lumos-token, rewards or list-token: those pages DO draw this UI and are handled with
+// their replacement (list-token: the NEAR listing payment; lumos-token / rewards: the LUMOS-deferred work).
+const CONTENT_DEAD = ['lx-swapcalc', 'lx-qorders', 'lx-wclaim', 'lx-walletdata', 'lx-mobwallet'];
+const CONTENT = /^lumoscore-(about|blog|blog-post|docs-[a-z0-9-]+|mcp|privacy|support|terms|whitepaper)(-mobile|-dark|-light)?\.html$/;
+
 let files = 0, pages = 0;
 const per = {};
 
@@ -40,7 +51,7 @@ for (const dev of ['desktop', 'mobile']) {
     if (typeof json[key] !== 'string') continue;
     let h = json[key];
     let touched = 0;
-    for (const id of DEAD) {
+    for (const id of CONTENT.test(key) ? DEAD.concat(CONTENT_DEAD) : DEAD) {
       const r = stripById(h, id);
       h = r.html;
       if (r.removed) { per[id] = (per[id] || 0) + r.removed; touched += r.removed; }
