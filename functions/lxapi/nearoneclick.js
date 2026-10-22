@@ -128,11 +128,12 @@ async function call(env, path, init) {
   return { status: r.status, body };
 }
 
-// The origin's contract: nep141:<contract>. Only that plain form is accepted -- 1Click also lists a few
-// NEAR tokens as `1cs_v1:near:nep141:…` (ZEC, QTC on 2026-10-22), whose deposit is not a plain ft_transfer
-// as far as anything here has verified, so they are not offered.
+// The origin's contract: nep141:<contract>, or 1Click's `1cs_v1:near:nep141:<contract>` form (ZEC and QTC on
+// 2026-10-22). Verified the same day that the latter deposits exactly like the plain form: a live quote
+// for 1cs_v1:near:nep141:zec.omft.near returned a 64-hex NEAR deposit account and no memo, so it is an
+// ft_transfer of the contract's token like any other. (Its plain nep141: id is refused by /quote.)
 function originContract(t) {
-  const m = /^nep141:(.+)$/.exec(String((t && t.assetId) || ''));
+  const m = /^(?:1cs_v1:near:)?nep141:(.+)$/.exec(String((t && t.assetId) || ''));
   return m ? m[1] : '';
 }
 
@@ -151,8 +152,15 @@ async function tokens(env) {
     .filter((t) => t && CHAINS[t.blockchain] && !/DEPRECATED/i.test(t.symbol || ''))
     .map(shape);
   const curated = new Map((CURATED || []).map((c) => [c.i, c]));
-  const origins = r.body
-    .filter((t) => t && t.blockchain === 'near' && CURATED_IDS.has(originContract(t)))
+  // One origin per contract: 1Click lists some tokens more than once (ZEC twice on 2026-10-22). A plain
+  // nep141: entry wins over a 1cs_v1 one for the same contract.
+  const byContract = new Map();
+  for (const t of r.body) {
+    if (!t || t.blockchain !== 'near' || !CURATED_IDS.has(originContract(t))) continue;
+    const k = originContract(t), had = byContract.get(k);
+    if (!had || (/^1cs_v1:/.test(had.assetId) && /^nep141:/.test(t.assetId))) byContract.set(k, t);
+  }
+  const origins = [...byContract.values()]
     .map((t) => {
       const c = curated.get(originContract(t)) || {};
       const o = shape(t);
