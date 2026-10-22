@@ -81,6 +81,57 @@ function safeLogo(icon) {
     await sleep(2500);
   }
 
+  // 4. LENIENT ADDITIONS (RAZA, 2026-10-21, for every chain: "just filter out scams", $25K liquidity is enough,
+  //    memes welcome; a DEX's vetted flag is never a gate). Any token holding >= $25K of liquidity across ALL
+  //    NEAR DEXes and pool types (DexScreener, which sees Rhea DCL and the launchpad DEXes that Rhea's own
+  //    indexer does not) with some 24h volume joins, whitelisted by Rhea or not. Candidates: every token
+  //    Rhea prices. Additive: nothing that passes 1-2 is dropped for being under $25K.
+  //    Measured 2026-10-22: 46 NEAR tokens clear $25K this way; 5 of them were not on the list.
+  const LIQ_MIN = 25000, VOL_MIN = 100;
+  const prices = await getJson('https://indexer.ref.finance/list-token-price');
+  const cand = Object.keys(prices).filter((i) => /^[a-z0-9._-]{2,64}$/.test(i));
+  // The tokens already curated are asked about too, so the sticky rule below has their liquidity.
+  let prev = [];
+  try { prev = JSON.parse(fs.readFileSync(OUT, 'utf8')).tokens || []; } catch (e) { prev = []; }
+  for (const t of prev) if (cand.indexOf(t.i) < 0) cand.push(t.i);
+  const seen = new Set(), liq = {}, dsVol = {};
+  let failed = 0;
+  for (let k = 0; k < cand.length; k += 30) {
+    let rows = [];
+    // A batch lost to rate limiting would silently drop every token in it, so it is retried harder and
+    // counted; the run refuses to write a list if any batch is still missing.
+    try { rows = await getJson('https://api.dexscreener.com/tokens/v1/near/' + cand.slice(k, k + 30).map(encodeURIComponent).join(','), 6); }
+    catch (e) { failed++; rows = []; }
+    for (const p of Array.isArray(rows) ? rows : []) {
+      if (seen.has(p.pairAddress)) continue;   // a pair comes back once per side's chunk
+      seen.add(p.pairAddress);
+      const L = +((p.liquidity || {}).usd || 0), V = +((p.volume || {}).h24 || 0);
+      for (const t of [p.baseToken, p.quoteToken]) {
+        if (!t || !t.address) continue;
+        liq[t.address] = (liq[t.address] || 0) + L;
+        dsVol[t.address] = (dsVol[t.address] || 0) + V;
+      }
+    }
+    await sleep(250);
+  }
+  if (failed) throw new Error(failed + ' DexScreener batch(es) failed after retries — not writing a partial list');
+  const lenient = Object.keys(liq).filter((id) => liq[id] >= LIQ_MIN && dsVol[id] >= VOL_MIN && !EXCLUDE.has(id));
+  const added = lenient.filter((id) => !white.has(id) || !(id in vol));
+  for (const id of lenient) { white.add(id); vol[id] = Math.max(vol[id] || 0, dsVol[id]); }
+  console.log('lenient pass: ' + lenient.length + ' token(s) hold >= $25K on some NEAR DEX; ' + added.length + ' new to the ranking');
+
+  // 5. STICKY. A refresh must not quietly un-curate a token because today's top-100 pools moved: a curated
+  //    token stays until a person EXCLUDEs it, unless its liquidity on every NEAR DEX is under $1K (dead).
+  const DEAD = 1000;
+  const kept = [], dead = [];
+  for (const t of prev) {
+    if (EXCLUDE.has(t.i)) continue;
+    if ((liq[t.i] || 0) < DEAD) { dead.push(t.s + ' ' + t.i); continue; }
+    white.add(t.i);
+    if (!(t.i in vol)) { vol[t.i] = Math.max(dsVol[t.i] || 0, 0); kept.push(t.s); }
+  }
+  if (kept.length) console.log('sticky: kept ' + kept.length + ' previously curated token(s) outside today\'s ranking: ' + kept.join(', '));
+  if (dead.length) console.log('dropped as dead (< $1K liquidity on every NEAR DEX): ' + dead.join(' | '));
   const ranked = Object.keys(vol).filter((id) => white.has(id) && !EXCLUDE.has(id))
     .sort((a, b) => vol[b] - vol[a]);
   if (ranked.indexOf('wrap.near') > 0) ranked.splice(ranked.indexOf('wrap.near'), 1);
@@ -108,7 +159,7 @@ function safeLogo(icon) {
       cg: cgBy[id.toLowerCase()] || '' });
     await sleep(120);
   }
-  fs.writeFileSync(OUT, JSON.stringify({ generated: new Date().toISOString(), rule: 'rhea 24h volume x rhea whitelist',
+  fs.writeFileSync(OUT, JSON.stringify({ generated: new Date().toISOString(), rule: 'rhea 24h volume x (rhea whitelist OR >= $25K liquidity on any NEAR DEX)',
     REVIEW: 'not yet reviewed by a person', tokens: out }, null, 1) + '\n');
   console.log('curated: ' + out.length + ' token(s) -> ' + path.basename(OUT));
   out.slice(0, 15).forEach((t, k) => console.log('  #' + (k + 1) + ' ' + t.s.padEnd(10) + ' ' + t.i.padEnd(52) + ' $' + t.v + (t.logo ? '' : '  (no logo)')));
