@@ -10,7 +10,9 @@ Init args (factory-init-args.json):
 - fee_account  fees-lumoscore.near
 - min_fee      0.5 NEAR              floor for direct contract calls; the page charges max(min_fee, $5 in NEAR)
 
-1. Fund lumoscore.near with ~7 NEAR (≈3.3 locked for code storage, ~3 spare for refunds, rest gas).
+1. Fund lumoscore.near with ~4 NEAR (≈3.3 locked for code storage, ~0.3 spare for instant refunds, rest gas).
+   Below ~3.4 NEAR the deploy itself fails. If a failed launch ever finds the spare short, refund by hand
+   with lumoscore.near's full-access key (the page pre-checks the name, so failures should be rare).
 2. Give the CLI a key for lumoscore.near (interactive; your seed phrase or wallet login stays on this PC):
    near account import-account network-config mainnet
 3. Deploy + initialise in one transaction:
