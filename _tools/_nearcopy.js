@@ -25,6 +25,9 @@ const PAIRS = [
   // The Trade hero.
   ['<h1>Explore the <em>Stellar</em> DEX</h1>',
    '<h1>Explore the <em>NEAR</em> DEX</h1>'],
+  // The phone's Trade heading: visually hidden, read aloud and indexed (found by the 2026-10-22 phone sweep).
+  ['<h1 class="page-title lx-sronly">Explore the <span class="hl">Stellar</span> DEX</h1>',
+   '<h1 class="page-title lx-sronly">Explore the <span class="hl">NEAR</span> DEX</h1>'],
   ['Discover, trade, and launch tokens on Stellar\'s decentralized exchange.',
    'Discover, trade, and launch tokens on NEAR.'],
   // The Pools strapline (desktop .dex-hero-sub, phone .page-subtitle.lx-sronly). browser/pools.js also
