@@ -7,23 +7,25 @@ Tick every box in order. A box that cannot be ticked stops the release; it is ne
 
 ---
 
-## A. Build work still open (Claude, before release) — BLOCKERS
+## A. Build work (Claude, before release) — DONE 2026-10-22, staging `21635cfd`
 
-Found by checking staging, 2026-10-22. Production users must be able to FIND NEAR, and search engines must see
-its pages. Today neither is true:
+Found while writing this checklist: production users could not FIND NEAR, and search engines saw 8 of its pages.
 
-- [ ] **Stellar's chain switcher does not list NEAR.** Stellar pages carry `ORDER=["stellar","xrpl"]` in `lx-mc`,
-      so from lumoscore.com nobody can switch to NEAR. XRPL is offered through its combine hook
-      (`C:\LumosCore-Deploy\chains\xrpl.js`, `afterStatic` + `checkRoutes`). NEAR needs the same in
-      `chains\near.js`. Arc and Hedera have the same gap, so agree one approach with those sessions first.
-      Never by editing C:\LumosCore.
-- [ ] **Stellar's "Choose a network" cards do not offer NEAR** (the Trade page has an XRPL card, no NEAR card).
-      Same hook, same rule.
-- [ ] **Sitemap: 8 NEAR urls vs 933 XRPL.** NEAR token and pool pages are missing. XRPL adds them through a
-      sitemap module (`functions/_xrplsitemap.js` wired by its hook). NEAR needs `functions/_nearsitemap.js` built
-      from the curated list and its pools, wired in `chains\near.js`, and the same for `llms.txt`.
-- [ ] **Chain-switch targets verified both ways** (the `checkRoutes` hook XRPL has): every NEAR page's Stellar
-      counterpart exists and vice versa.
+- [x] **Chain switcher offers NEAR everywhere.** `combine.js` `surfaces()` (agreed with the Arc and Hedera
+      sessions; opt-in `surface` per `chains/<id>.js`, patched in the OUTPUT only, every anchor asserted) adds NEAR
+      to `lx-mc` on every Stellar, Arc and Hedera page. Verified: Launch App → "Choose a network" lists Stellar,
+      XRP Ledger, NEAR, Arc; choosing NEAR lands on /trade/near. XRPL's own pages use their own two-chain
+      toggle (`lx-xrplchainswitch`), so they still offer only Stellar — NEAR is reached from Stellar's pages.
+- [x] **"Choose a network" cards offer NEAR** on the Trade, Pools, Bridge and Launchpad hubs (and "Upcoming" on
+      the LUMOS hub; none on Rewards, per RAZA). Verified on /trade: four cards, NEAR → /trade/near.
+- [x] **Sitemap: 127 NEAR urls** (was 8): 72 token pages + 47 Rhea pool pages (>= $25K liquidity), baked by
+      `_tools/_nearsitemapgen.js` into `functions/_nearsitemap.js` and wired by `chains/near.js`; NEAR's five
+      main routes are in /llms.txt. Re-run the generator after a curation change.
+- [x] **Chain-switch targets verified both ways** in every combine (`chains/near.js` `checkRoutes`): NEAR's 7
+      surface routes are NEAR pages, the 8 Stellar targets in NEAR's switcher are Stellar pages.
+
+**Production exposure follows the combine's command line:** a production `combine.js xrpl near --write` offers
+NEAR and nothing else; Arc and Hedera appear only when RAZA releases them and they are added to that command.
 
 ## B. On-chain setup (RAZA) — all commands in `contracts/DEPLOY.md`
 
