@@ -1,0 +1,478 @@
+[
+ {
+  "path": "/trade/near/17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/usdt.tether-token.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/qtc.omft.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/zec.omft.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/token.rhealab.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/batman-4.nearlytrade.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/dac17f958d2ee523a2206206994597c13d831ec7.factory.bridge.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/ikp.v2-launchpad.justhoot.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.factory.bridge.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/nearly-993927.nearlytrade.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/6b175474e89094c44da98b954eedeac495271d0f.factory.bridge.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/853d955acef822db058eb8505911ed77f175b99e.factory.bridge.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/hoot-8ecf65.launchpad.justhoot.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/aaaaaa20d9e0e2461697782ef11675f668207961.factory.bridge.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/wth-0b2227.launchpad.justhoot.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/three-de86d6.launchpad.justhoot.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/token.sweat",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/token.publicailab.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/dragon-3.nearlytrade.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/nomo.nearlytrade.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/lst.rhealab.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/token.0xshitzu.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/qcat-3.nearlytrade.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/diarhea.nearlytrade.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/blackdragon.tkn.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/linear-protocol.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/hoodl-95275b.launchpad.justhoot.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/shore-4lzt.launch.shoremarkets.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/kat.token0.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/meta-pool.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/ninu-4.nearlytrade.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/ai-8.nearlytrade.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/v2-nearx.stader-labs.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/nearagents.nearlytrade.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/npro.nearmobile.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/2260fac5e5542a773aa44fbcfedf7c193bc2c599.factory.bridge.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/gear.enleap.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/yuvi-6c041e37.qlyphs.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/singularty.nearlytrade.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/ftv2.nekotoken.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/staker1.msig1.trufin.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/spud-3.nearlytrade.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/trade-2.nearlytrade.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/22.contract.portalbridge.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/sol-0xd31e793eff8104551603bfac6e1222af303d4c5b.omdep.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/52a047ee205701895ee06a375492490ec9c597ce.factory.bridge.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/cfi.consumer-fi.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/eth.bridge.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/nbtc.bridge.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/jambo-1679.meme-cooking.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/apys.token.a11bd.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/ribbit-426.meme-cooking.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/xtoken.rhealab.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/token.v2.ref-finance.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/mpoo.nearlytrade.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/usmeme.tg",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/438e48ed4ce6beecf503d43b9dbd3c30d516e7fd.factory.bridge.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/nearai.aidols.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/nearsight.v2-launchpad.justhoot.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/mpdao-token.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/gnear-229.meme-cooking.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/d9c2d319cd7e6177336b0a9c93c21cb48d84fb54.factory.bridge.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/zolanear-1726.meme-cooking.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/xtoken.ref-finance.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2.factory.bridge.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/vote-1737.meme-cooking.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/poppy-0.meme-cooking-test.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/509a38b7a1cc0dcd83aa9d06214663d9ec7c7f4a.factory.bridge.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/meta-token.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/l000000.factory.shardsmarket.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/itlx.intellex_xyz.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/trade/near/claw-2.nearlytrade.near",
+  "priority": "0.7"
+ },
+ {
+  "path": "/pools/near/id/3514",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/3515",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/4512",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/1910",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/6458",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/6774",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/6494",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/6416",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/5462",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/5563",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/6724",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/6063",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/5469",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/6065",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/4525",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/79",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/4771",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/4",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/6679",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/5650",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/2",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/3688",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/852",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/2734",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/4179",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/3",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/6503",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/1923",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/4369",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/6518",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/3411",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/4276",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/3019",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/1207",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/3599",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/5720",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/5466",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/974",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/3020",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/5649",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/5494",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/0",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/4528",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/4314",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/6584",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/4243",
+  "priority": "0.6"
+ },
+ {
+  "path": "/pools/near/id/5391",
+  "priority": "0.6"
+ }
+]
