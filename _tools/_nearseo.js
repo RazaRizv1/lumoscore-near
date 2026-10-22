@@ -10,7 +10,6 @@
 //
 // DELIBERATELY ABSENT, so their Stellar copy stays visible and fixable rather than confidently wrong:
 //   lumoscore-lumos-token, lumoscore-rewards   LUMOS is not on NEAR yet (deferred until it is minted)
-//   lumoscore-bridge                           NEAR's bridge routes are not scoped
 //   lumoscore-mcp                              there is no NEAR MCP server
 //   lumoscore-list-token                       the listing fee on NEAR is not decided
 //   lumoscore-landing                          dropped by the combine; the landing page is Stellar's
@@ -33,6 +32,13 @@ const SEO = {
   'lumoscore-wallet': [
     'NEAR Wallet — Balances, Send and Receive | LumosCore',
     'View your NEAR and token balances, send and receive, and swap on NEAR. Non-custodial — you sign every transaction yourself.',
+  ],
+  // The bridge: NEAR Intents only (2026-10-22). Thirty-five is the destination count CHAINS in
+  // functions/lxapi/nearoneclick.js offers, and the page's runtime title restates it.
+  'lumoscore-bridge': [
+    'Bridge from NEAR to 35 Networks | LumosCore',
+    'Bridge NEAR, USDC, USDT and other NEAR tokens to Bitcoin, Ethereum, Solana and 30+ more networks with '
+      + 'NEAR Intents. One NEAR transaction, delivered as the destination chain’s own token.',
   ],
   'lumoscore-dex': [
     'Trade on NEAR — Swap and Limit Orders | LumosCore',
