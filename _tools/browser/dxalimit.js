@@ -164,9 +164,10 @@
       var id = s === 'sell' ? a.id : 'near', raw = acct.bal[id];
       if (raw == null || (s === 'sell' && dec == null)) text = pre + '—';
       else {
-        var n = s === 'sell' ? D().toNum(raw, dec) : D().toNum(SW() ? SW().maxSpend('near', raw) : raw, 24);
-        text = pre + fmt(n, 6) + ' ' + (s === 'sell' ? code() : 'NEAR');
-        canMax = n > 0;
+        // Floored from the raw units, like MAX: a rounded figure here would name, as available, more than is held.
+        var have = s === 'sell' ? fmtDown(raw, dec) : fmtDown(SW() ? SW().maxSpend('near', raw) : raw, 24);
+        text = pre + have + ' ' + (s === 'sell' ? code() : 'NEAR');
+        canMax = have !== '0';
       }
     }
     mark(frowMono(spendF), text);
@@ -233,6 +234,13 @@
     var i = s.indexOf('.');
     return i < 0 ? s : s.slice(0, i + 7).replace(/\.?0+$/, '');
   }
+  // A balance for display, floored to 6 places with the same trunc6 MAX fills with, so the Available line,
+  // the "You only have" message and the MAX figure can never disagree or overstate the balance.
+  function fmtDown(raw, d) {
+    var p = trunc6(D().fromUnits(raw, d)).split('.');
+    p[0] = p[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    return p.join('.');
+  }
 
   // Once per side, the page's live price -- the design ships "4.18", another chain's price typed in for you.
   function prefill(p) {
@@ -285,7 +293,7 @@
       var keep = D().big('50000000000000000000000');               // 0.05 NEAR for gas, as the swap keeps
       var needNear = D().big(pre.storage) + (o.sell === D().WNEAR ? D().big(o.sellRaw) : BigInt(0));
       if (o.sell !== D().WNEAR && D().big(o.sellRaw) > D().big(r[2])) {
-        throw new Error('You only have ' + fmt(D().toNum(r[2], dec), 6) + ' ' + code() + '.');
+        throw new Error('You only have ' + fmtDown(r[2], dec) + ' ' + code() + '.');
       }
       if (needNear + keep > nearBal) {
         throw new Error(o.sell === D().WNEAR
