@@ -77,6 +77,10 @@
 
   var from = null, to = null;                 // { id, code, dec, logo }
   var bal = {};                               // id -> raw spendable balance (before MAX's NEAR keep)
+  // id -> 1 when the last read FAILED. Kept apart from bal so "still reading" (bal null, no failure) and
+  // "could not read" (bal null, failed) are two states the button and the label can each say; cleared as
+  // each attempt starts, so an old failure never outlives a retry. Every open retries.
+  var balFail = {};
   var feeOk = {};                             // id -> true / false / null (unknown)
   var q = null, seq = 0, busy = false, timer = 0;
 
@@ -146,7 +150,8 @@
   function paintBalance(P) {
     if (!P.fromMeta || !from) return;
     var r = room(from.id);
-    plain(P.fromMeta, r == null ? 'Balance: —' : 'Balance: ' + show(r, from.dec) + ' ' + from.code);
+    plain(P.fromMeta, r != null ? 'Balance: ' + show(r, from.dec) + ' ' + from.code
+      : (balFail[from.id] ? 'Balance: unavailable' : 'Balance: —'));
     plain(P.toMeta, 'Estimated');
   }
   function paintPair(P) {
@@ -234,7 +239,7 @@
     if (!raw) return 'Enter an amount';
     if (feeOk[from.id] === false) return 'Swaps from ' + from.code + ' are not open yet';
     var r = room(from.id);
-    if (r == null) return 'Reading your balance…';
+    if (r == null) return balFail[from.id] ? 'Could not read your balance' : 'Reading your balance…';
     if (S().big(raw) > S().big(r)) return 'Not enough ' + from.code;
     if (!q) return 'Getting a quote…';
     if (!q.ok) return q.why || 'No route';
@@ -251,7 +256,10 @@
   function loadBal(id) {
     var who = me();
     if (!who || !id) return Promise.resolve();
-    return S().balance(who, id).then(function (raw) { bal[id] = String(raw); }, function () {});
+    balFail[id] = 0;
+    // A failed re-read drops the earlier figure: showing it beside "could not be read" contradicts itself, and
+    // a balance that could not be confirmed is not one to offer MAX on.
+    return S().balance(who, id).then(function (raw) { bal[id] = String(raw); }, function () { bal[id] = null; balFail[id] = 1; });
   }
   function checkFee(id) {
     if (feeOk[id] != null) return Promise.resolve();
@@ -265,6 +273,7 @@
       var P = parts(m);
       paintBalance(P);
       if (feeOk[f.id] === false) say(f.code + ' cannot be swapped here yet: the platform fee account is not registered on it.', 'muted');
+      else if (balFail[f.id]) say('Your ' + f.code + ' balance could not be read from the NEAR network. Close and reopen Swap to try again.', 'bad');
       setCta(P);
     });
   }
@@ -522,7 +531,9 @@
     if (i >= 0) v = v.slice(0, i + 1) + v.slice(i + 1).replace(/\./g, '');
     if (from && i >= 0 && v.length - i - 1 > from.dec) v = v.slice(0, i + 1 + from.dec);
     if (t.value !== v) t.value = v;
-    say('');
+    // A failed balance read keeps its explanation: typing does not make the balance any more readable.
+    if (from && balFail[from.id]) say('Your ' + from.code + ' balance could not be read from the NEAR network. Close and reopen Swap to try again.', 'bad');
+    else say('');
     q = null;
     setCta(P);
     requote();
