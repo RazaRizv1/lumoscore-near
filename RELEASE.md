@@ -52,6 +52,8 @@ Small amounts. Desktop AND a real phone (iPhone and Android): mobile wallets beh
 - [ ] Wallet page: balances match a NEAR explorer.
 - [ ] Swap NEAR → USDC (small). Output arrives; 0.2% reaches `fees-lumoscore.near` (with the router: memo `lx:sw`).
 - [ ] Swap a token → NEAR (output arrives as native NEAR).
+- [ ] Wallet → Swap dialog (live since 2026-10-24, one step like Stellar): a small swap each way; the fee and
+      minimum shown match what arrives; close and reopen clears it. Verified so far only with signing stubbed.
 - [ ] Limit order: place, see it in the book, cancel it. First order shows the ~0.5 NEAR order-book deposit.
 - [ ] Send a token to an account that never held it (registration added in the same transaction).
 - [ ] Bridge: a small NEAR → USDC (Base or Ethereum) via NEAR Intents. Delivered; the row appears under recent
