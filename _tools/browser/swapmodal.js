@@ -487,7 +487,6 @@
   window.addEventListener('click', function (e) {
     var t = e.target;
     if (!t || !t.closest) return;
-    if (t.closest('[data-open-modal="modalSwap"]')) { setTimeout(reset, 0); return; }
     var m = t.closest('#modalSwap');
     if (!m || !S()) return;
     prepare(m);
@@ -531,8 +530,19 @@
 
   // The dialog is build-time markup: prepare it as soon as the engine is there, so the design's APT mock is
   // never what opens even before the first click.
+  // Opening is watched on the dialog itself: the design adds .open, and its Swap buttons are wired by its
+  // own script (data-modal-wired, no data-open-modal on this page), so the class is the one signal every
+  // way in shares.
+  function watchOpen(m) {
+    var was = m.classList.contains('open');
+    new MutationObserver(function () {
+      var now = m.classList.contains('open');
+      if (now && !was) reset();
+      was = now;
+    }).observe(m, { attributes: true, attributeFilter: ['class'] });
+  }
   (function boot(n) {
-    if (S() && modal()) { reset(); return; }
+    if (S() && modal()) { reset(); watchOpen(modal()); return; }
     if (n < 80) setTimeout(function () { boot(n + 1); }, 100);
   })(0);
 })();
