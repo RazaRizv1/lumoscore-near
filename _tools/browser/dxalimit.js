@@ -212,16 +212,26 @@
   function fillMax(p) {
     var f = fields(p), ai = input(f[1]), a = asset();
     if (!ai || !a) return;
-    var price = num(input(f[0]) && input(f[0]).value), amt = NaN;
-    if (side(p) === 'sell') { if (acct.bal[a.id] != null && dec != null) amt = D().toNum(acct.bal[a.id], dec); }
+    var price = num(input(f[0]) && input(f[0]).value), out = '';
+    // MAX must never round above what is held. Neither plainIn nor a Number can promise that: a
+    // Number keeps ~16 significant digits of an 18-24 decimal balance (and may round it up), and
+    // plainIn's 12 significant digits drop the 6th decimal of any balance from a million up --
+    // 1,234,567.999999 filled as 1,234,568. So sell truncates the exact raw string, and buy, which
+    // has to divide by a price anyway, floors to 6 places and is printed without re-rounding.
+    if (side(p) === 'sell') { if (acct.bal[a.id] != null && dec != null) out = trunc6(D().fromUnits(acct.bal[a.id], dec)); }
     else if (price > 0 && acct.bal.near != null && SW()) {
       // Leave room for the DCL storage a first order adds.
       var room = D().big(SW().maxSpend('near', acct.bal.near));
       if (acct.reg === false) room -= D().big('500000000000000000000000');
-      amt = room > BigInt(0) ? D().toNum(room.toString(), 24) / price : 0;
+      var amt = room > BigInt(0) ? D().toNum(room.toString(), 24) / price : 0;
+      if (amt > 0) out = trunc6((Math.floor(amt * 1e6) / 1e6).toFixed(6));
     }
-    ai.value = amt > 0 ? plainIn(Math.floor(amt * 1e6) / 1e6) : '';
+    ai.value = (out && +out > 0) ? out : '';
     recalc(p);
+  }
+  function trunc6(s) {
+    var i = s.indexOf('.');
+    return i < 0 ? s : s.slice(0, i + 7).replace(/\.?0+$/, '');
   }
 
   // Once per side, the page's live price -- the design ships "4.18", another chain's price typed in for you.
