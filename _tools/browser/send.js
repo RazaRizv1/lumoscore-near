@@ -1020,6 +1020,9 @@
     });
   }
   function paintSwapSoon() {
+    // browser/swapmodal.js drives the dialog where it is loaded (the Wallet page); this placeholder is for
+    // any page that carries the markup without it.
+    if (window.__lxnSwapModal) return;
     $$('#modalSwap').forEach(function (m) {
       $$('.field-label .meta', m).forEach(function (x, i) {
         var t = i === 0 ? 'Balance: —' : 'Estimated';

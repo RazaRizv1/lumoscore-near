@@ -44,10 +44,16 @@ const px = fs.readFileSync(__dirname + '/browser/prices.js', 'utf8');
 const wr = fs.readFileSync(__dirname + '/browser/send.js', 'utf8');
 // Rhea DCL limit orders: the Open orders tab reads, cancels and collects them through this engine.
 const dcl = fs.readFileSync(__dirname + '/browser/neardcl.js', 'utf8');
-for (const src of [core, dcl, page, px, wr]) {
+// The Swap dialog: nearswap.js is the one swap engine (the Trade-Asset pane injects the same file, router
+// stamped the same way), swapmodal.js drives the design's #modalSwap with it. Both go BEFORE send.js, so
+// window.__lxnSwapModal is set before send.js's coming-soon painter first looks at the dialog.
+const swapEngine = require(__dirname + '/near-router.js').stamp(fs.readFileSync(__dirname + '/browser/nearswap.js', 'utf8'));
+const swapModal = fs.readFileSync(__dirname + '/browser/swapmodal.js', 'utf8');
+for (const src of [core, dcl, swapEngine, swapModal, page, px, wr]) {
   if (src.indexOf('</' + 'script') >= 0) { console.error('  a source file contains a closing script tag — aborting'); process.exit(1); }
 }
-const SCRIPT = '<script id="' + ID + '">\n' + core + '\n' + dcl + '\n' + page + '\n' + px + '\n' + wr + '\n</' + 'script>';
+const SCRIPT = '<script id="' + ID + '">\n' + core + '\n' + dcl + '\n' + swapEngine + '\n' + swapModal + '\n'
+  + page + '\n' + px + '\n' + wr + '\n</' + 'script>';
 
 const STRIP = ['lx-walletdata', 'lx-mobwallet', 'lx-wclaim', 'lx-qorders', 'lx-swapcalc', 'lx-feerate'];
 
