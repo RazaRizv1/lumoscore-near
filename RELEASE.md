@@ -77,8 +77,13 @@ Small amounts. Desktop AND a real phone (iPhone and Android): mobile wallets beh
 Production already carries Stellar + XRPL. Add ONLY NEAR — not Arc, not Hedera, not other sessions' unreleased work.
 
 1. [ ] Announce to the Arc and Hedera sessions: production deploy starting; hold staging deploys.
-2. [ ] `node C:\LumosCore-Deploy\combine.js xrpl near --write` (no arc, no hedera). Dry run (without --write)
-       passed on 2026-10-22: 12 generic fork rules, 85 of the 100 redirect rules Pages honours.
+2. [ ] **Empty `C:\LumosCore-Deploy\.deploy` first.** combine.js adds and overwrites but NEVER deletes, and
+       every staging build is four-way: without this, Arc's and Hedera's page folders and their Functions
+       (19 fork Functions, seen 2026-10-26) ride into production, unreachable only until a routing change.
+       Then `node C:\LumosCore-Deploy\combine.js xrpl near --write` (no arc, no hedera). Dry run (without
+       --write) passed on 2026-10-22: 12 generic fork rules, 85 of the 100 redirect rules Pages honours.
+       Check, which must print NOTHING: `ls C:/LumosCore-Deploy/.deploy/dist | grep -E "^(arc|hedera)$"` and
+       `ls C:/LumosCore-Deploy/.deploy/functions/lxapi | grep -E "^(arc|hedera)"`.
 3. [ ] Prove only the intended change ships — the deploy-only-your-change method: compare our own
        `<script id="lx-*">` blocks (sha1 per id) of every page in `.deploy/dist` against what lumoscore.com
        serves now. Stellar and XRPL pages: no differences except middleware-injected `lx-ld-core` and the
