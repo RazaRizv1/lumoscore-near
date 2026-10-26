@@ -487,7 +487,20 @@
     if (t.vf) nameEl.appendChild(vtick());
     nameRow.appendChild(nameEl);
     var sub2 = subLine(t);
-    if (sub2) nameRow.appendChild(el('span', 'mdx-mk-domain', sub2));
+    if (sub2) {
+      // ONE LINE, ELLIPSED. NEAR's subline is the contract account (token.rhealab.near, 83-127px), never
+      // a short domain, so beside a name in a ~140px row it cannot fit and drops below the name -- as 8
+      // of Stellar's 50 long domains do. What Stellar never shows is the chip's own text then breaking
+      // mid-account ("token.rhealab" / ".near"): measured 64-78px cards against Stellar's 49px wrapped
+      // card (staging cda04d5a, 375px). Kept to one line, a NEAR card is Stellar's two-line shape.
+      var dom = el('span', 'mdx-mk-domain', sub2);
+      // display:block: the chip is a flex box in the shared stylesheet, and text-overflow does nothing to the
+      // text of a flex container. Measured with this exact style: 69 of 71 cards at 49px (Stellar's wrapped
+      // card); the other two are BLACKDRAGON and NEARAGENTS, whose own long names wrap their tick.
+      dom.style.cssText = 'display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;min-width:0';
+      dom.title = sub2;
+      nameRow.appendChild(dom);
+    }
     meta.appendChild(nameRow);
     // THE PHONE IGNORED THE DENOMINATION AND DISAGREED WITH THE DESKTOP. This card hard-coded the
     // XRP price and the XRP-denominated change while the table honoured DEN, so at the same moment
