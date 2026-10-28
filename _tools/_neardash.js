@@ -4,6 +4,8 @@
 // price panel's current stylesheet). Browser code is read from files and injected verbatim:
 //   browser/dashtop.js    the NEAR price panel (.lx-xlmpanel), ported from the inherited lx-dashtop
 //   browser/dashboard.js  the stats strip, the four product boxes, Platform Activity's empty state
+//   browser/qorders.js    "Custom Swap / Orders" (#swapModal): Stellar's three-tab dialog on NEAR,
+//                         ported from the XRPL fork's browser/qorders.js
 //
 // INHERITED LAYERS ON THE DASHBOARD KEYS, measured 2026-10-21, and what happens to each:
 //   lx-realdata    Stellar stats + Platform Activity (Horizon, /lxapi/xlm, netstats, poolstats). Bails on a
@@ -13,8 +15,11 @@
 //   lx-dashboxes   the product boxes, from Stellar's curated list, /lxapi/poolstats, dexassets, pools,
 //                  assetsearch (all Stellar, all on every load): STRIPPED; dashboard.js fills the boxes.
 //   lx-swapcalc, lx-qorders, lx-feerate   Stellar swap / limit orders / fee tier behind #modalSwap and
-//                  #swapModal: STRIPPED. "Custom Swap / Orders" now routes to /trade/near (lx-dashqa's own
-//                  fallback for a page without a working dialog), so neither Stellar dialog opens here.
+//                  #swapModal: STRIPPED (every path through them reads Horizon and signs for Stellar).
+//                  Their STYLESHEETS stay — stripById only removes <script id="...">, so the
+//                  <style id="lx-swapcalc-css"> and <style id="lx-qorders-css"> blocks beside them
+//                  survive, and browser/qorders.js is written against exactly those classes. That is
+//                  why this fork's dialog cannot drift from lumoscore.com's: it brings no CSS at all.
 //   lx-dashqa      the Quick actions router: KEPT, its Stellar routes re-pointed (below).
 //   lx-dashblogdata  the LumosCore blog (/lxapi/blog) -- chain-neutral content: KEPT.
 //   lx-searchassets  the header search, on every page of the fork: not this workstream.
@@ -31,10 +36,26 @@ const ID = 'lx-neardash';
 const CSS_ID = 'lx-neardash-css';
 const top = fs.readFileSync(__dirname + '/browser/dashtop.js', 'utf8');
 const dash = fs.readFileSync(__dirname + '/browser/dashboard.js', 'utf8');
-for (const src of [top, dash]) {
+// THE DIALOG'S TWO ENGINES, because the dashboard key carries NEITHER (measured on the built page:
+// window.lxnCore and window.lxn are defined there, window.lxnSwap and window.lxnDcl are not — they
+// ship with the wallet, Trade-Asset and bridge pages). nearcore.js is NOT re-injected: it is already
+// on this key, and neither engine reads it. Both are IIFEs that return early on their own global
+// (`if (window.lxnSwap) return`, `if (window.lxnDcl) return`), so a page that gains them elsewhere
+// later is unharmed.
+//
+// nearswap.js GOES THROUGH stamp(). It carries a '__NEAR_ROUTER__' placeholder that near-router.js
+// replaces with the swap router's account id; today that value is '' and the placeholder survives,
+// which router() reads as "no router". Injecting the file raw would look identical NOW and quietly
+// skip the router on the day it is deployed — and stamp() also asserts the placeholder is there
+// exactly once, so a rename in nearswap.js fails this build instead of shipping a dead swap path.
+const dcl = fs.readFileSync(__dirname + '/browser/neardcl.js', 'utf8');
+const swapEngine = require(__dirname + '/near-router.js').stamp(fs.readFileSync(__dirname + '/browser/nearswap.js', 'utf8'));
+const qord = fs.readFileSync(__dirname + '/browser/qorders.js', 'utf8');
+for (const src of [top, dash, dcl, swapEngine, qord]) {
   if (src.indexOf('</' + 'script') >= 0) { console.error('  a source file contains a closing script tag — aborting'); process.exit(1); }
 }
-const SCRIPT = '<script id="' + ID + '">\n' + top + '\n' + dash + '\n</' + 'script>';
+const SCRIPT = '<script id="' + ID + '">\n' + top + '\n' + dash + '\n'
+  + dcl + '\n' + swapEngine + '\n' + qord + '\n</' + 'script>';
 // The panel's mark: the inherited sheet points it at Stellar's xlm.png. Three classes beat its two, so
 // source order between the sheets cannot decide it.
 const STYLE = '<style id="' + CSS_ID + '">.lx-xlmpanel .lx-xt-head .lx-xt-mark{'
@@ -49,13 +70,41 @@ const TEXT = [
   ['href="/trade/stellar"', 'href="/trade/near"'],
   ['href="/pools/stellar"', 'href="/pools/near"'],
   ['Platform Activity — Stellar', 'Platform Activity — NEAR'],
-  ['Launch tokens directly on the Stellar DEX.', 'Launch tokens directly on NEAR.'],
+  // RAZA 2026-10-28: match Stellar's shape, "on the <chain> DEX." — it read "directly on NEAR.",
+  // which was the only Quick-actions line that dropped the DEX. NEAR stays capitalised, as everywhere
+  // else in this fork.
+  ['Launch tokens directly on the Stellar DEX.', 'Launch tokens directly on the NEAR DEX.'],
   // the phone's shorter Quick actions copy
-  ['Launch tokens on the Stellar DEX.', 'Launch tokens on NEAR.'],
+  ['Launch tokens on the Stellar DEX.', 'Launch tokens on the NEAR DEX.'],
+  // HEAL the wording this transform itself wrote on an earlier run. Every rule above matches only the
+  // DESIGN'S original text, which is gone from a container the transform has already touched — so
+  // without these two, changing NEAR's own copy would need a full --base rebuild, and an incremental
+  // `node _tools/rebuild.js` would silently keep the old words. Both are no-ops on a fresh base.
+  ['Launch tokens directly on NEAR.', 'Launch tokens directly on the NEAR DEX.'],
+  ['Launch tokens on NEAR.', 'Launch tokens on the NEAR DEX.'],
   ['Trade pairs on Stellar DEX.', 'Trade pairs on NEAR.'],
-  // lx-dashqa: Custom Swap / Orders never opens a Stellar dialog here; it routes to the NEAR market.
-  ['if(t.indexOf("custom swap")===0)return document.querySelector("#swapModal");', 'if(t.indexOf("custom swap")===0)return null;'],
-  ['if(t.indexOf("custom swap")===0&&!document.querySelector("#swapModal"))return "/trade/stellar";', 'if(t.indexOf("custom swap")===0)return "/trade/near";'],
+  // The desktop card's subtitle. TRUE ON STELLAR, NOT HERE: a NEAR limit order rests in a Rhea DCL
+  // pool and those are paired against NEAR, so "any pair" promised something the dialog this card now
+  // opens refuses for most pairs. The same sentence, honest about this ledger — the wrong-chain-copy
+  // case where identical words are correct on one fork and wrong on another.
+  ['Swap instantly, or place a limit order on any pair.', 'Swap instantly, or place a limit order against NEAR.'],
+  // lx-dashqa: Custom Swap / Orders OPENS THE DIALOG, as the design wires it and as the XRPL fork
+  // leaves it (_xrpldash.js has no custom-swap rule at all). Only the no-dialog FALLBACK is re-pointed.
+  //
+  // RAZA 2026-10-28: "This pop up only opens up for a mini second and then redirect me to trade page."
+  // That was these two rules: the design's own handler opened #swapModal and the router then returned a
+  // url, so the dashboard navigated out from under the dialog it had just shown. They were right while
+  // #swapModal had no driver on this fork — opening the design's mock ("1 APT ≈ 0.118 USDC", a Swap
+  // button that prints success without touching a chain) would have been worse than leaving. Now
+  // browser/qorders.js drives it, so the card opens it.
+  ['if(t.indexOf("custom swap")===0&&!document.querySelector("#swapModal"))return "/trade/stellar";', 'if(t.indexOf("custom swap")===0&&!document.querySelector("#swapModal"))return "/trade/near";'],
+  // HEAL the two rules this transform wrote on earlier runs. The dashboard keys in both containers
+  // already carry them, and the forward rule above can never match those again — so without these an
+  // incremental `node _tools/rebuild.js` would keep routing the card away and the dialog would stay
+  // unreachable until a full --base rebuild. No-ops on a fresh base, and both are idempotent: the
+  // strings they write do not contain the strings they match.
+  ['if(t.indexOf("custom swap")===0)return null;', 'if(t.indexOf("custom swap")===0)return document.querySelector("#swapModal");'],
+  ['if(t.indexOf("custom swap")===0)return "/trade/near";', 'if(t.indexOf("custom swap")===0&&!document.querySelector("#swapModal"))return "/trade/near";'],
   ['if(t==="add liquidity"&&!document.querySelector("#createPoolModal"))return "/pools/stellar";', 'if(t==="add liquidity"&&!document.querySelector("#createPoolModal"))return "/pools/near";'],
 ];
 

@@ -12,9 +12,12 @@
 // It is INJECTED only where the thing it replaces lives:
 //   lx-nearpools        browser/pools.js + browser/mypositions.js, on the Pools list (desktop #poolsBody,
 //                       phone #panelAll). NOT on the $LUMOS page, whose #poolsBody is a different table.
-//   lx-nearcreatepool   browser/createpool.js, wherever the design's #createPoolModal can be opened (the
-//                       Pools pages and the dashboard). Without lx-ammdata, nothing else takes the clicks on
-//                       the dialog's asset pickers, and the design's nav shim answers them by leaving the page.
+//   lx-nearcreatepool   browser/createpool.js, on EVERY page carrying the design's #createPoolModal — the
+//                       Pools pages, the dashboard and the $LUMOS pages (eight keys, 2026-10-28). Without
+//                       lx-ammdata nothing else takes the clicks on the dialog's asset pickers, and the
+//                       design's nav shim answers them by leaving the page. The $LUMOS copy of the dialog
+//                       ships no .asset-dropdown, so the design's own is carried into it first; see the
+//                       carry-over block below.
 // The pool detail page is _nearpooldetail.js.
 //
 // INHERITED WRITERS ON THE POOLS LIST, inventoried on the NEAR containers 2026-10-21 (every <script> on the
@@ -64,13 +67,134 @@ function beforeBody(h, block, key) {
   return h.slice(0, bi) + block + h.slice(bi);
 }
 
-let files = 0, stripped = 0, injected = 0, cpInjected = 0;
+// ---- the asset dropdown, for the $LUMOS pages, whose copy of the dialog does not ship it ---------------
+//
+// The $LUMOS pages carry the SAME #createPoolModal and five of their own ways to open it, but their copy
+// has the two pickers WITHOUT the dropdown (measured 2026-10-28: 4,590 bytes against the Pools page's
+// 11,042, no .asset-dropdown, no .ad-list) and without its stylesheet rules. They were excluded from this
+// transform for that reason, which left a dialog that opens with dead pickers — and, with lx-ammdata
+// stripped, a click on one hands the design's nav shim a lxNavigate() that LEAVES THE PAGE.
+//
+// This is the XRPL fork's fix, ported (_xrplcreatepool.js, RAZA 2026-09-17: "Add liquidity popup: im
+// unable to select the asset 2" / "Lumos token page, add liqudity popup is breaking"). Nothing is
+// invented: the design's own dropdown is carried over from the page that HAS it, minus its mock Stellar
+// asset rows, and the rules are lifted verbatim from that page's stylesheet so the two copies cannot drift.
+const DD_ID = 'lx-cpdd';
+const DD_SELECTORS = /(^|,)\s*(\.asset-dropdown|\.ad-(search|search-input|list|item|ico|meta|tk|nm|bal))\b/;
+
+// The dialog's extent, by counting <div>s from its own tag — so nothing outside it is ever touched.
+function modalSlice(h) {
+  const at = h.indexOf('id="createPoolModal"');
+  if (at < 0) return null;
+  const start = h.lastIndexOf('<div', at);
+  if (start < 0) return null;
+  const re = /<div\b|<\/div>/g;
+  re.lastIndex = start;
+  let depth = 0, m;
+  while ((m = re.exec(h))) {
+    depth += m[0] === '</div>' ? -1 : 1;
+    if (depth === 0) return { start, end: m.index + m[0].length };
+  }
+  return null;
+}
+
+function dropdownFrom(h) {
+  const sl = modalSlice(h);
+  if (!sl) return null;
+  const seg = h.slice(sl.start, sl.end);
+  const at = seg.indexOf('<div class="asset-dropdown"');
+  if (at < 0) return null;
+  const re = /<div\b|<\/div>/g;
+  re.lastIndex = at;
+  let depth = 0, m, end = -1;
+  while ((m = re.exec(seg))) {
+    depth += m[0] === '</div>' ? -1 : 1;
+    if (depth === 0) { end = m.index + m[0].length; break; }
+  }
+  if (end < 0) return null;
+  // The mock rows go; the empty list stays, which is what createpool.js fills.
+  return seg.slice(at, end).replace(/(<div class="ad-list">)[\s\S]*?(<\/div>\s*<\/div>)$/, '$1$2');
+}
+
+function dropdownCss(h) {
+  const rules = [];
+  const re = /([^{}]+)\{([^{}]*)\}/g;
+  let m;
+  while ((m = re.exec(h))) {
+    const sel = m[1].trim();
+    const body = m[2];
+    if (sel.length > 300 || sel.indexOf('function') >= 0 || sel.indexOf('var ') >= 0) continue;
+    // THE ANCHOR COUNTS AS PART OF THE DROPDOWN. On XRPL the first attempt shipped without it and the
+    // dropdown DID open — `position:absolute;left:0;right:0;top:calc(100% + 4px)` with no positioned
+    // ancestor put it 1,440px wide, off the bottom of the page, which from the reader's side is
+    // indistinguishable from a dead button. The design anchors it with `.asset-field{position:relative}`,
+    // a selector that names none of the classes above, so it has to be matched on its own.
+    const isAnchor = /\.asset-field\b/.test(sel) && /position\s*:/.test(body);
+    if (!isAnchor && !DD_SELECTORS.test(sel)) continue;
+    rules.push(sel.replace(/\s+/g, ' ') + '{' + body.replace(/\s+/g, ' ').trim() + '}');
+  }
+  return rules.join('\n');
+}
+
+// stripById only removes <script id>, so the carried-over stylesheet needs its own removal or every
+// rebuild leaves another copy behind and the stale rules win on source order.
+function stripStyle(h, id) {
+  const open = '<' + 'style id="' + id + '">', close = '<' + '/' + 'style>';
+  for (;;) {
+    const i = h.indexOf(open);
+    if (i < 0) return h;
+    const j = h.indexOf(close, i + open.length);
+    if (j < 0) { console.error('  style id="' + id + '" has no closing tag — aborting'); process.exit(1); }
+    h = h.slice(0, i) + h.slice(j + close.length);
+  }
+}
+
+// Insert the block at the end of every asset field that has no dropdown of its own. A field ends after its
+// `.field-foot`, which holds only spans — so the first `</div>` after its MAX button is its own.
+function addDropdowns(h, block) {
+  const sl = modalSlice(h);
+  if (!sl) return { html: h, n: 0 };
+  let seg = h.slice(sl.start, sl.end);
+  if (seg.indexOf('asset-dropdown') >= 0) return { html: h, n: 0 };
+  let n = 0, from = 0;
+  for (;;) {
+    const f = seg.indexOf('<div class="field-foot">', from);
+    if (f < 0) break;
+    const mx = seg.indexOf('max-btn', f);
+    if (mx < 0) break;
+    const close = seg.indexOf('</div>', mx);
+    if (close < 0) break;
+    const at = close + '</div>'.length;
+    seg = seg.slice(0, at) + block + seg.slice(at);
+    from = at + block.length;
+    n++;
+  }
+  return { html: h.slice(0, sl.start) + seg + h.slice(sl.end), n };
+}
+
+let files = 0, stripped = 0, injected = 0, cpInjected = 0, dds = 0;
 for (const dev of ['desktop', 'mobile']) {
   const file = 'lumoscore-near-' + dev + '.html';
   let data;
   try { data = read(file); } catch (e) { console.error('  ' + file + ': missing — aborting'); process.exit(1); }
   const { json, s, e } = getContents(data);
   files++;
+
+  // The donor: whichever key in this container ships the dialog WITH its dropdown.
+  let donor = null;
+  for (const key of Object.keys(json)) {
+    if (typeof json[key] !== 'string') continue;
+    if (json[key].indexOf('id="createPoolModal"') < 0) continue;
+    const block = dropdownFrom(json[key]);
+    // Marked, so a later rebuild can tell this page's dropdown was carried over and still needs the sheet.
+    if (block) {
+      donor = {
+        block: block.replace('<div class="asset-dropdown"', '<div data-lxcpdd class="asset-dropdown"'),
+        css: dropdownCss(json[key])
+      };
+      break;
+    }
+  }
 
   for (const key of Object.keys(json)) {
     if (typeof json[key] !== 'string') continue;
@@ -85,7 +209,26 @@ for (const dev of ['desktop', 'mobile']) {
 
     const lumos = isLumosPage(h), list = hasList(h), modal = h.indexOf('id="createPoolModal"') >= 0;   // read before injecting
     if (list && !lumos) { h = beforeBody(h, SCRIPT, key); injected++; }
-    if (modal && !lumos) { h = beforeBody(h, CP_SCRIPT, key); cpInjected++; }
+    if (modal) {
+      // The $LUMOS pages are no longer skipped: they get the design's dropdown carried over first, and
+      // then the same driver as everywhere else. The Pools list layer above still skips them, because
+      // their #poolsBody is a different table.
+      h = stripStyle(h, DD_ID);
+      if (donor) {
+        const r = addDropdowns(h, donor.block);
+        // Carried over by an earlier run: the markup is already in the page, and the stylesheet just
+        // stripped has to go back, or the dropdown opens unstyled on the second build.
+        if (r.n || h.indexOf('data-lxcpdd') >= 0) {
+          h = r.html;
+          const hi = h.lastIndexOf('</' + 'head>');
+          const style = '<style id="' + DD_ID + '">' + donor.css + '</' + 'style>';
+          h = hi >= 0 ? h.slice(0, hi) + style + h.slice(hi) : style + h;
+          dds += r.n;
+        }
+      }
+      h = beforeBody(h, CP_SCRIPT, key);
+      cpInjected++;
+    }
 
     if (h !== before) json[key] = h;
   }
@@ -95,6 +238,7 @@ for (const dev of ['desktop', 'mobile']) {
 }
 
 console.log('near pools: stripped lx-ammdata from ' + stripped + ' page key(s); injected ' + ID + ' on ' + injected
-  + ' and ' + CP_ID + ' on ' + cpInjected + ' page key(s) across ' + files + ' container(s)');
+  + ' and ' + CP_ID + ' on ' + cpInjected + ' page key(s) across ' + files + ' container(s)'
+  + (dds ? '; carried the asset dropdown into ' + dds + ' field(s)' : ''));
 if (!injected) { console.error('  ! no page carried #poolsBody / #panelAll — nothing was wired'); process.exit(1); }
-if (!cpInjected) { console.error('  ! no page carried #createPoolModal — the dialog was not held'); process.exit(1); }
+if (!cpInjected) { console.error('  ! no page carried #createPoolModal — the dialog was not wired'); process.exit(1); }

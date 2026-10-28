@@ -33,6 +33,23 @@
   if (window.__lxnConnect) return;
   window.__lxnConnect = 1;
 
+  // DORMANT MODE. The combine injects this file into the OTHER build's pages that offer "Choose a
+  // network", so picking NEAR connects in place instead of jumping into /trade/near first. RAZA
+  // 2026-10-28: "the dashboard in the background automatically opens up when I even haven't connected
+  // any Wallet yet ... I can close the connect wallet pop up and able to use the lumoscore without
+  // wallet connected". Measured on production: choosing Stellar AND choosing XRP Ledger both stay on
+  // the landing page and only open the wallet picker — NEAR was the only chain that entered the app.
+  //
+  // Dormant means: own the NEAR network row and nothing else. boot() must not run (connectOnArrive is
+  // for arriving ON a NEAR page, and reconcile() would load the NEAR Connect library on a page that
+  // has no NEAR session), and the network-row branch must not take a click meant for another chain.
+  // The XRPL fork measured that exact failure when its layer claimed the page's connect UI: "picking
+  // Stellar would have opened the XRPL picker".
+  //
+  // wrapOpen() DOES run dormant, deliberately — it is what records which chain's wallet list is on
+  // screen, and the wallet-row handler below needs that to know a row is a NEAR row.
+  var DORMANT = !!window.__lxnNoBoot;
+
   var LIB = '/assets/vendor/near-connect-0.11.4.min.js';
   var MANIFEST = '/assets/vendor/near-wallets-manifest.json';
   var NET = 'near';
@@ -185,6 +202,10 @@
 
     var netId = row.getAttribute('data-lxnet');
     if (netId) {
+      // Dormant: this is another build's chooser. Claim the NEAR row only and let every other row
+      // reach that build's own handler untouched — stopImmediatePropagation here would silently
+      // break picking Stellar or XRP Ledger.
+      if (DORMANT && netId !== NET) return;
       e.preventDefault(); e.stopImmediatePropagation();
       if (row.classList.contains('lxw-soon')) return;
       // NEAR connects here, in the modal we are already in.
@@ -248,14 +269,36 @@
     });
   }
 
+  // open(): show NEAR's wallet list in whatever modal is already on screen. This is what the other
+  // build's chooser calls to connect NEAR IN PLACE instead of handing off to /trade/near — the same
+  // role window.lxc.open() plays for XRPL. It works dormant, which is the whole point, and it is the
+  // same three steps the netId===NET branch above runs on NEAR's own pages.
+  //
+  // Unlike XRPL's, this does NOT build or replace a modal: NEAR drives the design's own .lxw modal,
+  // so the caller must leave it open. The near entry in that modal's wallet table is written into
+  // NEAR's pages by _nearconnect.js, and into the other build's pages by chains/near.js.
+  function openNear() {
+    set('lumos.chain', NET);
+    try { if (window.lxAdoptChain) window.lxAdoptChain(NET); } catch (e) {}
+    wrapOpen();
+    try { if (window.lxwOpenWallet) window.lxwOpenWallet(NET); } catch (e) {}
+  }
+
   // For the signing workstreams: the connected wallet, loading the library only when asked.
   window.lxn = {
+    open: openNear,
     account: function () { var a = get('lumos.address'); return (get('lumos.chain') === NET && validAccount(a)) ? a : ''; },
     wallet: function () { return connector().then(function (c) { return c.wallet(get('lumos.transport') || undefined); }); },
     connector: connector,
     validAccount: validAccount
   };
 
+  // Dormant pages are another build's, where neither of these belongs: connectOnArrive() answers a
+  // hand-off that only lands on a NEAR page, and reconcile() would fetch the NEAR Connect library on a
+  // page with no NEAR session. lxn and the two click handlers above stay live, which is all the
+  // chooser needs. NEAR's own pages never set the flag, so nothing there changes.
   function boot() { connectOnArrive(); reconcile(); }
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
+  if (!DORMANT) {
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
+  }
 })();
