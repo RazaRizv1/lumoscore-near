@@ -1784,17 +1784,27 @@
       });
       if (!wrote) addrEl.insertBefore(document.createTextNode(addrTxt), addrEl.querySelector('.copy-i'));
       // THE PADLOCK. Green only when the contract is known to be immutable, red when it is known not to
-      // be (a full-access key can redeploy it), hidden when that cannot be told -- and zero keys alone
-      // cannot tell it, because a contract with no keys may still mint (see /lxapi/neartoken).
+      // be (a full-access key can redeploy it). Zero keys is GREY: the code cannot be replaced, but that
+      // alone does not fix the supply -- the code itself may still mint (see /lxapi/neartoken). RAZA
+      // 2026-10-29 asked for that case to be shown and said, not hidden. Hidden only when the key count
+      // itself could not be read.
       // The phone's chip carries the same two icons with no class: the lock is the first svg, the copy
       // icon the second.
       var svgs = addrEl.querySelectorAll('svg');
       var lock = addrEl.querySelector('.lock-i') || (svgs.length > 1 ? svgs[0] : null);
       if (lock) {
         var lk = d && d.lock ? d.lock.locked : null;
-        lock.style.display = lk == null ? 'none' : '';
-        lock.style.color = lk === true ? 'var(--green)' : 'var(--red,#ff5b5b)';
-        lock.setAttribute('aria-label', lk === true ? 'Contract cannot be changed' : 'Contract can be upgraded by its owner');
+        var noKeys = !!(d && d.lock && d.lock.keys === 0);
+        var tip = lk === true ? 'Contract cannot be changed'
+          : lk === false ? 'Contract can be upgraded by its owner'
+          : noKeys ? 'Code can\u2019t be changed; whether more can be minted is up to the contract' : '';
+        lock.style.display = tip ? '' : 'none';
+        lock.style.color = lk === true ? 'var(--green)' : lk === false ? 'var(--red,#ff5b5b)' : 'var(--text-soft,#8a8fa3)';
+        lock.setAttribute('aria-label', tip);
+        // A title on the svg itself, so hovering anywhere on the lock says it.
+        var tt = lock.querySelector('title');
+        if (!tt) { tt = document.createElementNS('http://www.w3.org/2000/svg', 'title'); lock.insertBefore(tt, lock.firstChild); }
+        tt.textContent = tip;
       }
       wireIssuerCopy();
     }
