@@ -58,8 +58,14 @@ const SCRIPT = '<script id="' + ID + '">\n' + top + '\n' + dash + '\n'
   + dcl + '\n' + swapEngine + '\n' + qord + '\n</' + 'script>';
 // The panel's mark: the inherited sheet points it at Stellar's xlm.png. Three classes beat its two, so
 // source order between the sheets cannot decide it.
+// `.lxo-retry` is the Orders tab's "Try again" button. The inherited lx-qorders-css DOES survive here
+// (see the note at the top of this file), but it is frozen at the Stellar build this fork was copied
+// from, and that sheet predates the button -- so the rule has to be carried here or it renders as a bare
+// browser control. Same selector and declarations as Stellar's, so a later re-inherit is a no-op.
 const STYLE = '<style id="' + CSS_ID + '">.lx-xlmpanel .lx-xt-head .lx-xt-mark{'
-  + 'background:url(/assets/networks/near.png) center/cover no-repeat,var(--surface-2)}</' + 'style>';
+  + 'background:url(/assets/networks/near.png) center/cover no-repeat,var(--surface-2)}'
+  + '.lxo-retry{margin-top:12px;height:30px;padding:0 15px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text);font:inherit;font-size:12.5px;font-weight:700;cursor:pointer;transition:color .12s ease,border-color .12s ease,background .12s ease}'
+  + '.lxo-retry:hover{color:var(--accent,#7c8cff);border-color:var(--accent,#7c8cff);background:rgba(124,140,255,.08)}</' + 'style>';
 
 const STRIP = ['lx-realdata', 'lx-dashtop', 'lx-dashboxes', 'lx-swapcalc', 'lx-qorders', 'lx-feerate'];
 const NEAR_IMG = '<img src="/assets/networks/near.png" style="width:100%;height:100%;object-fit:cover;display:block" alt="">';

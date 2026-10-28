@@ -1014,13 +1014,30 @@
     return '<div class="lxo-empty">' + title + (sub ? '<span class="sub">' + sub + '</span>' : '') + '</div>';
   }
 
+  // A dead end needs a way out. The old failure text told the user to reopen the tab, but the pane is
+  // built once (pane.__b), so reopening did not reliably re-run the load -- the advice did not work.
+  function failState() {
+    return '<div class="lxo-empty">Could not load your orders'
+      + '<span class="sub">The network did not answer in time. Your orders are safe — this only failed to read them.</span>'
+      + '<button type="button" class="lxo-retry" data-lxoretry="1">Try again</button></div>';
+  }
+
   function ordersUi() {
     var pane = $('#swapModal .lxo-pane[data-pane="orders"]');
     if (!pane || pane.__b) return;
     pane.__b = 1;
     pane.innerHTML = '<div class="lxo-list">' + emptyState('Loading…') + '</div>';
     pane.addEventListener('click', function (e) {
-      var b = e.target && e.target.closest ? e.target.closest('[data-off]') : null;
+      var t = e.target && e.target.closest ? e.target : null;
+      if (!t) return;
+      if (t.closest('[data-lxoretry]')) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        var l = oEl('.lxo-list');
+        if (l) l.innerHTML = emptyState('Loading…');
+        loadOrders();
+        return;
+      }
+      var b = t.closest('[data-off]');
       if (!b) return;
       e.preventDefault(); e.stopImmediatePropagation();
       cancelOrder(b);
@@ -1061,15 +1078,35 @@
     }, function () { return null; });
   }
 
+  // RAZA hit "Orders tab taking too long to load" on STELLAR 2026-10-28, and the faults behind it are
+  // shared by every fork of this dialog -- see _swapcalc.js for the measurements (the same request
+  // answering in 282ms and in 21.8s). NEAR's load is worse-shaped than Stellar's: activeOrders is
+  // followed by a metaOf call per token before anything paints, so the wait is two rounds deep.
+  var ordersSeq = 0;
   function loadOrders() {
     var list = oEl('.lxo-list');
     if (!list) return;
     var me = addr();
     if (!me) { list.innerHTML = emptyState('Connect a wallet', 'Your open orders across every pair will show here.'); return; }
     if (!D()) { list.innerHTML = emptyState('Limit orders are not available right now.'); return; }
+    var seq = ++ordersSeq;
+    // The paint must belong to the NEWEST load: a cancel reloads the list, so a slow request can outlive
+    // the one that replaced it, and the loser must not paint its stale list over the winner's.
+    function stale() { return seq !== ordersSeq || !oEl('.lxo-list'); }
+    // Only speaks up while a placeholder is showing -- with rows painted there is nothing to reassure
+    // anyone about, and the note would replace real data with a status message.
+    var slow = setTimeout(function () {
+      if (stale()) return;
+      var em = oEl('.lxo-empty');
+      if (em) em.innerHTML = 'Still loading…<span class="sub">NEAR is answering slowly. This can take up to half a minute.</span>';
+    }, 4000);
     D().activeOrders(me).then(function (raw) {
+      if (stale()) { clearTimeout(slow); return; }
       var rows = (raw || []).filter(function (o) { return !gone[String(o.order_id)]; });
       if (!rows.length) {
+        // cleared HERE and not at the top of this handler: the metaOf round below is the slow half, and
+        // the note has to survive into it. Left running, it would overwrite "No open orders" at 4s.
+        clearTimeout(slow);
         list.innerHTML = emptyState('No open orders', 'A limit order stays here until it fills or you cancel it.');
         return;
       }
@@ -1077,6 +1114,8 @@
       rows.forEach(function (o) { ids[o.sell_token] = 1; ids[o.buy_token] = 1; });
       var keys = Object.keys(ids);
       return Promise.all(keys.map(metaOf)).then(function (ms) {
+        clearTimeout(slow);
+        if (stale()) return;
         var M = {};
         keys.forEach(function (k, i) { M[k] = ms[i]; });
         list.innerHTML = '';
@@ -1136,7 +1175,15 @@
         }
       });
     }).catch(function () {
-      list.innerHTML = emptyState('Could not load your orders.', 'The NEAR network did not answer. Reopen this tab to try again.');
+      clearTimeout(slow);
+      if (stale()) return;
+      var el = oEl('.lxo-list');
+      if (!el) return;
+      // A FAILED REFRESH MUST NOT WIPE ROWS THAT ARE ALREADY ON SCREEN. This loader runs again after a
+      // cancel, with the list painted; wiping it tells the user their orders cannot be read when they
+      // are right there and correct. The toast carries the failure instead.
+      if (el.querySelector('.lxo-o')) { toast('Could not refresh your orders. The list below may be out of date.', true); return; }
+      el.innerHTML = failState();
     });
   }
 
