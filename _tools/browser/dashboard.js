@@ -45,13 +45,15 @@
 
   // ---- network stats ---------------------------------------------------------------------------------
   // lx-realdata's pill, verbatim in shape: `.status-pill.lx-vpill` with a coloured `.lx-pico` glyph and a
-  // `.lx-vpt` label/value pair. The fourth Stellar pill is Accounts, a running total NEAR's public indexes
-  // do not publish; NEAR's running total of transactions takes its slot under the same glyph family.
+  // `.lx-vpt` label/value pair, and the same four: Assets, Pools and Accounts are NETWORK-WIDE, as on
+  // Stellar (RAZA 2026-10-29: Assets and Pools showed LumosCore's curated 71 and 182, and Transactions sat
+  // where Accounts belongs). The Pools PRODUCT box below stays LumosCore's own list: it describes that page.
+  // Both come from /lxapi/nearstats, which reads NearBlocks at the edge.
   var PICO = {
     Assets: ['#f7b733', '<ellipse cx="14.8" cy="8.6" rx="4.4" ry="2.1"></ellipse><path d="M10.4 8.6v3.4c0 1.16 1.97 2.1 4.4 2.1s4.4-.94 4.4-2.1V8.6"></path><ellipse cx="9.2" cy="14.4" rx="4.4" ry="2.1"></ellipse><path d="M4.8 14.4v3.4c0 1.16 1.97 2.1 4.4 2.1s4.4-.94 4.4-2.1v-3.4"></path>'],
     Pools: ['#38bdf8', '<path d="M12 3.4l3.9 4.7a5.1 5.1 0 1 1-7.8 0z"></path><ellipse cx="12" cy="17.6" rx="7.4" ry="2.5"></ellipse><path d="M8.6 15.9c.9.5 2.1.8 3.4.8s2.5-.3 3.4-.8"></path>'],
     Trades: ['#a855f7', '<path d="M4.8 9.2h13.6M15.4 6.2l3 3-3 3"></path><path d="M19.2 14.8H5.6M8.6 11.8l-3 3 3 3"></path>'],
-    Transactions: ['#2dd4bf', '<rect x="4" y="5" width="16" height="14" rx="2"></rect><path d="M8 10h8M8 14h5"></path>']
+    Accounts: ['#2dd4bf', '<circle cx="12" cy="8.7" r="3.5"></circle><path d="M5.5 19.4a6.5 6.5 0 0 1 13 0"></path>']
   };
   function pill(lbl, val, tip) {
     var e = PICO[lbl];
@@ -67,22 +69,24 @@
     if (val === '—' || val === '…') v.classList.add('lx-pending');
     return p;
   }
-  var ST = { assets: null, pools: null, trades: null, txns: null };
+  var ST = { assets: null, pools: null, poolsSplit: '', trades: null, accounts: null, active: null, day: null };
   function paintStats() {
     var row = $('.status-row');
     if (!row) return;
     var net = row.querySelector('.lx-netcard');
     $$('.status-pill', row).forEach(function (p) { if (p !== net && p.parentNode) p.parentNode.removeChild(p); });
-    row.appendChild(pill('Assets', ST.assets == null ? '…' : count(ST.assets), 'Tokens listed on LumosCore for NEAR (the curated Trade list)'));
-    row.appendChild(pill('Pools', ST.pools == null ? '…' : count(ST.pools), 'Curated Rhea Finance liquidity pools on NEAR'));
+    row.appendChild(pill('Assets', ST.assets == null ? '…' : count(ST.assets), 'Every fungible token on NEAR (NearBlocks)'));
+    row.appendChild(pill('Pools', ST.pools == null ? '…' : count(ST.pools), 'Every pool on Rhea Finance, the main NEAR exchange'
+      + (ST.poolsSplit ? ': ' + ST.poolsSplit : '')));
     row.appendChild(pill('Trades', ST.trades == null ? '…' : count(ST.trades), 'Trades in the past 24 hours on the main market of every listed NEAR token'));
-    row.appendChild(pill('Transactions', ST.txns == null ? '…' : compact(ST.txns),
-      (ST.txns != null ? count(ST.txns) + ' — ' : '') + 'every transaction ever made on NEAR, a running total rather than a daily figure'));
+    row.appendChild(pill('Accounts', ST.accounts == null ? '…' : compact(ST.accounts),
+      (ST.accounts != null && isFinite(ST.accounts) ? count(ST.accounts) + ' — ' : '') + 'every account ever created on NEAR, a running total rather than a daily figure'
+      + (ST.active > 0 ? '. ' + count(ST.active) + ' were active on ' + ST.day + ' (UTC)' : '')));
     // The orphaned Stellar sheet holds `.status-row{opacity:0}` until its script raised it; that script is
     // gone, so the row is raised here -- and only once all four figures have answered (or failed to), so
     // the strip appears once, complete, rather than as "…" pills that change one by one. reveal() below is
     // the safety net if an answer never comes.
-    if (ST.assets != null && ST.pools != null && ST.trades != null && ST.txns != null) reveal();
+    if (ST.assets != null && ST.pools != null && ST.trades != null && ST.accounts != null) reveal();
   }
   function reveal() {
     var row = $('.status-row');
@@ -92,16 +96,17 @@
   }
   setTimeout(reveal, 8000);
 
-  function txTotal() {
+  // Network-wide figures, cached in the browser for 30 minutes on top of the edge's own 6 hours. A failed
+  // read is never stored, so the next visit asks again (and the pills say "—", not a stale or a zero).
+  function netStats() {
     try {
-      var c = JSON.parse(localStorage.getItem('lxn.neartxns') || 'null');
-      if (c && c.v > 0 && Date.now() - c.t < 1800000) return Promise.resolve(c.v);
+      var c = JSON.parse(localStorage.getItem('lxn.netstats') || 'null');
+      if (c && c.v && c.v.accounts > 0 && c.v.pools > 0 && Date.now() - c.t < 1800000) return Promise.resolve(c.v);
     } catch (e) {}
-    return j('https://api.nearblocks.io/v1/stats').then(function (d) {
-      var v = +(((d && d.stats) || [])[0] || {}).total_txns;
-      if (!(v > 0)) return null;
-      try { localStorage.setItem('lxn.neartxns', JSON.stringify({ v: v, t: Date.now() })); } catch (e) {}
-      return v;
+    return j('/lxapi/nearstats').then(function (d) {
+      if (!d || !d.ok || !(d.accounts > 0) || !(d.assets > 0) || !(d.pools > 0)) return null;
+      try { localStorage.setItem('lxn.netstats', JSON.stringify({ v: d, t: Date.now() })); } catch (e) {}
+      return d;
     }).catch(function () { return null; });
   }
 
@@ -134,13 +139,12 @@
     market().then(function (d) {
       if (!d) {
         ['tvol', 'tliq', 'tmkt'].forEach(function (k) { box(k, '—'); });
-        ST.assets = NaN; ST.trades = NaN;
+        ST.trades = NaN;
         paintStats();
         return;
       }
       var vol = 0, liq = 0, trades = 0;
       d.rows.forEach(function (r) { vol += +r.v || 0; liq += +r.t || 0; trades += +r.x || 0; });
-      ST.assets = d.rows.length;
       ST.trades = trades;
       paintStats();
       box('tvol', usd(vol * d.usd));
@@ -150,16 +154,19 @@
     j('/lxapi/nearpools').then(function (p) {
       var s = (p && p.ok && p.summary) || null;
       if (!s || !(p.usd > 0)) throw new Error('no pools');
-      ST.pools = s.pools;
-      paintStats();
       box('ppool', count(s.pools));
       box('ptvl', usd(s.liquidity * p.usd));
       box('pvol', usd(s.vol24 * p.usd));
     }).catch(function () {
-      ST.pools = NaN; paintStats();
       ['ppool', 'ptvl', 'pvol'].forEach(function (k) { box(k, '—'); });
     });
-    txTotal().then(function (v) { ST.txns = v == null ? NaN : v; paintStats(); });
+    netStats().then(function (v) {
+      ST.assets = v ? v.assets : NaN; ST.accounts = v ? v.accounts : NaN; ST.pools = v ? v.pools : NaN;
+      ST.poolsSplit = v && v.poolsClassic > 0 && v.poolsDcl > 0
+        ? count(v.poolsClassic) + ' classic and ' + count(v.poolsDcl) + ' concentrated-liquidity' : '';
+      ST.active = v ? v.active : null; ST.day = v ? v.day : null;
+      paintStats();
+    });
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', load);

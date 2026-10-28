@@ -868,11 +868,13 @@
     if (!el) return;
     el.innerHTML = '';
     var ic = document.createElement('span'); ic.className = 'lxq-ic';
-    if (a) paintIco(ic, a); else plain(ic, '?');
+    if (a) paintIco(ic, a);
     var cd = document.createElement('span'); cd.className = 'cv'; cd.setAttribute('data-logoed', '1');
-    cd.textContent = a ? a.code : 'Select';
+    // Empty reads "Select asset" with no badge, as Stellar's Limit pane does.
+    cd.textContent = a ? a.code : 'Select asset';
     var car = document.createElement('span'); car.className = 'car'; car.innerHTML = CHEVRON;
-    el.appendChild(ic); el.appendChild(cd); el.appendChild(car);
+    if (a) el.appendChild(ic);
+    el.appendChild(cd); el.appendChild(car);
   }
 
   // The pool behind the chosen pair. A definite answer (pool or none) is kept for the pair; a failed read
@@ -925,7 +927,7 @@
       } else recv.textContent = '—';
     }
 
-    if (!lim.s || !lim.b) { limNote('Choose what to sell and what to buy.'); limSay(''); limGo(false, 'Place limit order'); return; }
+    if (!lim.s || !lim.b) { limNote(''); limSay(''); limGo(false, 'Place limit order'); return; }
     if (!pr) {
       limNote('');
       limSay(NOPOOL + ' — on NEAR one side has to be NEAR.');
@@ -1231,9 +1233,8 @@
     $$('.lxo-tabs button', m).forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-pane') === name); });
     if (name === 'limit') {
       limitUi();
-      // The Limit pane opens on the Swap pane's pair, so it is never empty on arrival.
-      if (!lim.s) lim.s = sw.from ? (heldOf(sw.from) || sw.from) : (heldOf(NEAR) || NEAR);
-      if (!lim.b) lim.b = sw.to || null;
+      // The Limit pane opens EMPTY, as Stellar's does (RAZA 2026-10-29: it opened on the Swap pane's
+      // NEAR / USDC). Nothing is chosen for the trader on an order that rests on the book.
       limitSync();
       limitPool();
       loadAccount().then(function () { return ensureBal(lim.s); }).then(limitSync);
@@ -1304,6 +1305,8 @@
     clearQuote();
     var la = lEl('.lxq-amt'); if (la) la.value = '';
     var lp = lEl('.lxq-price'); if (lp) lp.value = '';
+    // The Limit PAIR is cleared too: unlike the Swap pane, it starts empty every time.
+    if (!lim.busy) { lim.s = null; lim.b = null; lim.pool = undefined; lim.poolFor = ''; }
     limSay(''); limNote('');
     show_('swap');
   }
