@@ -9,7 +9,6 @@
 // Stellar's ledger() read Horizon for a pill it then removed; it is a no-op here.
 (function(){
   if(window.__lxnDashTop)return;window.__lxnDashTop=1;
-  function net(){try{return (localStorage.getItem("lumos.network")||localStorage.getItem("lumos.chain")||"").toLowerCase();}catch(_){return "";}}
   // item 16 -- see the note in the transform. Only touches cards that are on screen right now.
   function lcmShowAbove(){
     try{
@@ -37,7 +36,9 @@
       if((_lcmT+=60)>=1500){ clearInterval(_lcmIv); }
     },60);
   }catch(_){}
-  if(location.pathname.indexOf("/near")!==0&&net()!=="near")return;
+  // No chain gate: this layer ships only in NEAR's build, so the page it runs on IS the NEAR page. The
+  // gate it inherited read lumos.network first, and on the combined site /dashboard is not under /near,
+  // so a legacy "mainnet" or a remembered Stellar connection hid NEAR's price panel (2026-10-28).
   var DAYS={"24H":1,"7D":7,"1M":30,"1Y":365}, tf="24H", cache={}, series=null;
   function j(u){return fetch(u).then(function(r){if(!r.ok)throw new Error(r.status);return r.json();});}
   function money(n){n=+n||0;return "$"+(n<1?n.toFixed(4):n.toFixed(2));}
