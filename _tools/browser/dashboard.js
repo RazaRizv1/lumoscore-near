@@ -69,19 +69,25 @@
     if (val === '—' || val === '…') v.classList.add('lx-pending');
     return p;
   }
-  var ST = { assets: null, pools: null, poolsSplit: '', trades: null, accounts: null, active: null, day: null };
+  var ST = { assets: null, pools: null, poolsSplit: '', trades: null, accounts: null, active: null, day: null, stale: '' };
+  // What the network-wide pills' tooltips add: a figure the edge could not refresh says when it was read,
+  // and a missing one says it could not be read -- neither may pass for an ordinary current number.
+  function netNote(v) {
+    if (v != null && !isFinite(v)) return ' (could not be read just now)';
+    return ST.stale ? ' (as of ' + ST.stale + '; the latest read did not answer)' : '';
+  }
   function paintStats() {
     var row = $('.status-row');
     if (!row) return;
     var net = row.querySelector('.lx-netcard');
     $$('.status-pill', row).forEach(function (p) { if (p !== net && p.parentNode) p.parentNode.removeChild(p); });
-    row.appendChild(pill('Assets', ST.assets == null ? '…' : count(ST.assets), 'Every fungible token on NEAR (NearBlocks)'));
+    row.appendChild(pill('Assets', ST.assets == null ? '…' : count(ST.assets), 'Every fungible token on NEAR (NearBlocks)' + netNote(ST.assets)));
     row.appendChild(pill('Pools', ST.pools == null ? '…' : count(ST.pools), 'Every pool on Rhea Finance, the main NEAR exchange'
-      + (ST.poolsSplit ? ': ' + ST.poolsSplit : '')));
+      + (ST.poolsSplit ? ': ' + ST.poolsSplit : '') + netNote(ST.pools)));
     row.appendChild(pill('Trades', ST.trades == null ? '…' : count(ST.trades), 'Trades in the past 24 hours on the main market of every listed NEAR token'));
     row.appendChild(pill('Accounts', ST.accounts == null ? '…' : compact(ST.accounts),
       (ST.accounts != null && isFinite(ST.accounts) ? count(ST.accounts) + ' — ' : '') + 'every account ever created on NEAR, a running total rather than a daily figure'
-      + (ST.active > 0 ? '. ' + count(ST.active) + ' were active on ' + ST.day + ' (UTC)' : '')));
+      + (ST.active > 0 ? '. ' + count(ST.active) + ' were active on ' + ST.day + ' (UTC)' : '') + netNote(ST.accounts)));
     // The orphaned Stellar sheet holds `.status-row{opacity:0}` until its script raised it; that script is
     // gone, so the row is raised here -- and only once all four figures have answered (or failed to), so
     // the strip appears once, complete, rather than as "…" pills that change one by one. reveal() below is
@@ -105,7 +111,7 @@
     } catch (e) {}
     return j('/lxapi/nearstats').then(function (d) {
       if (!d || !d.ok || !(d.accounts > 0) || !(d.assets > 0) || !(d.pools > 0)) return null;
-      try { localStorage.setItem('lxn.netstats', JSON.stringify({ v: d, t: Date.now() })); } catch (e) {}
+      if (!d.stale) { try { localStorage.setItem('lxn.netstats', JSON.stringify({ v: d, t: Date.now() })); } catch (e) {} }
       return d;
     }).catch(function () { return null; });
   }
@@ -165,6 +171,7 @@
       ST.poolsSplit = v && v.poolsClassic > 0 && v.poolsDcl > 0
         ? count(v.poolsClassic) + ' classic and ' + count(v.poolsDcl) + ' concentrated-liquidity' : '';
       ST.active = v ? v.active : null; ST.day = v ? v.day : null;
+      ST.stale = v && v.stale && v.at ? new Date(v.at).toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : '';
       paintStats();
     });
   }
