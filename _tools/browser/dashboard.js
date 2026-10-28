@@ -6,11 +6,11 @@
 // boxes are lx-dashboxes' `.lx-dbx-v[data-k]` slots, so the inherited stylesheets dress them unchanged.
 // Both Stellar layers are stripped from NEAR pages by _neardash.js; this is what fills their elements.
 //
-// SOURCES, all asked from the browser, none new:
-//   /lxapi/nearmarket   listed tokens (Assets, Markets), 24h trades, main-pair volume and liquidity, NEAR/USD
-//   /lxapi/nearpools    curated Rhea pools: count, liquidity, 24h volume (figures in NEAR, x usd)
-//   NearBlocks /v1/stats  NEAR's running transaction total -- one call, kept 30 minutes in localStorage,
-//                       because the free tier is rate-limited and the wallet's activity shares it
+// SOURCES, all asked from the browser:
+//   /lxapi/nearstats    the strip's NETWORK-WIDE Assets, Pools and Accounts (NearBlocks + Rhea, at the edge)
+//   /lxapi/neartrades   the strip's network-wide Trades (DexScreener over Rhea's most-traded pools)
+//   /lxapi/nearmarket   the Trade box: listed tokens (Markets), main-pair volume and liquidity, NEAR/USD
+//   /lxapi/nearpools    the Pools box: curated Rhea pools, liquidity, 24h volume (figures in NEAR, x usd)
 // WHAT HAS NO NEAR SOURCE says so with the design's em dash: the Cross-chain and Launchpad boxes (no NEAR
 // bridge layer or launchpad in this build yet) and Platform Activity, which shows the design's own "No
 // platform activity yet." row -- LumosCore has no NEAR activity marker to read until NEAR writes exist.
@@ -69,12 +69,13 @@
     if (val === '—' || val === '…') v.classList.add('lx-pending');
     return p;
   }
-  var ST = { assets: null, pools: null, poolsSplit: '', trades: null, accounts: null, active: null, day: null, stale: '' };
+  var ST = { assets: null, pools: null, poolsSplit: '', trades: null, accounts: null, active: null, day: null, stale: '', tradesStale: '' };
   // What the network-wide pills' tooltips add: a figure the edge could not refresh says when it was read,
   // and a missing one says it could not be read -- neither may pass for an ordinary current number.
-  function netNote(v) {
+  function netNote(v, stale) {
     if (v != null && !isFinite(v)) return ' (could not be read just now)';
-    return ST.stale ? ' (as of ' + ST.stale + '; the latest read did not answer)' : '';
+    stale = arguments.length > 1 ? stale : ST.stale;
+    return stale ? ' (as of ' + stale + '; the latest read did not answer)' : '';
   }
   function paintStats() {
     var row = $('.status-row');
@@ -84,7 +85,8 @@
     row.appendChild(pill('Assets', ST.assets == null ? '…' : count(ST.assets), 'Every fungible token on NEAR (NearBlocks)' + netNote(ST.assets)));
     row.appendChild(pill('Pools', ST.pools == null ? '…' : count(ST.pools), 'Every pool on Rhea Finance, the main NEAR exchange'
       + (ST.poolsSplit ? ': ' + ST.poolsSplit : '') + netNote(ST.pools)));
-    row.appendChild(pill('Trades', ST.trades == null ? '…' : count(ST.trades), 'Trades in the past 24 hours on the main market of every listed NEAR token'));
+    row.appendChild(pill('Trades', ST.trades == null ? '…' : count(ST.trades), 'Trades in the past 24 hours on Rhea Finance, the main NEAR exchange, across its most-traded pools'
+      + netNote(ST.trades, ST.tradesStale)));
     row.appendChild(pill('Accounts', ST.accounts == null ? '…' : compact(ST.accounts),
       (ST.accounts != null && isFinite(ST.accounts) ? count(ST.accounts) + ' — ' : '') + 'every account ever created on NEAR, a running total rather than a daily figure'
       + (ST.active > 0 ? '. ' + count(ST.active) + ' were active on ' + ST.day + ' (UTC)' : '') + netNote(ST.accounts)));
@@ -145,14 +147,10 @@
     market().then(function (d) {
       if (!d) {
         ['tvol', 'tliq', 'tmkt'].forEach(function (k) { box(k, '—'); });
-        ST.trades = NaN;
-        paintStats();
         return;
       }
-      var vol = 0, liq = 0, trades = 0;
-      d.rows.forEach(function (r) { vol += +r.v || 0; liq += +r.t || 0; trades += +r.x || 0; });
-      ST.trades = trades;
-      paintStats();
+      var vol = 0, liq = 0;
+      d.rows.forEach(function (r) { vol += +r.v || 0; liq += +r.t || 0; });
       box('tvol', usd(vol * d.usd));
       box('tliq', usd(liq * d.usd));
       box('tmkt', count(d.rows.length));
@@ -166,6 +164,14 @@
     }).catch(function () {
       ['ppool', 'ptvl', 'pvol'].forEach(function (k) { box(k, '—'); });
     });
+    // Trades are network-wide too (RAZA 2026-10-29), from their own Function; not cached in the browser,
+    // since the edge already holds them 10 minutes and the figure rolls.
+    j('/lxapi/neartrades').then(function (d) {
+      if (!d || !d.ok || !(d.trades > 0)) throw new Error('no trades');
+      ST.trades = d.trades;
+      ST.tradesStale = d.stale && d.at ? new Date(d.at).toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : '';
+      paintStats();
+    }).catch(function () { ST.trades = NaN; ST.tradesStale = ''; paintStats(); });
     netStats().then(function (v) {
       ST.assets = v ? v.assets : NaN; ST.accounts = v ? v.accounts : NaN; ST.pools = v ? v.pools : NaN;
       ST.poolsSplit = v && v.poolsClassic > 0 && v.poolsDcl > 0
