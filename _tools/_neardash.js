@@ -67,7 +67,11 @@ const STYLE = '<style id="' + CSS_ID + '">.lx-xlmpanel .lx-xt-head .lx-xt-mark{'
   + '.lxo-retry{margin-top:12px;height:30px;padding:0 15px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text);font:inherit;font-size:12.5px;font-weight:700;cursor:pointer;transition:color .12s ease,border-color .12s ease,background .12s ease}'
   + '.lxo-retry:hover{color:var(--accent,#7c8cff);border-color:var(--accent,#7c8cff);background:rgba(124,140,255,.08)}</' + 'style>';
 
-const STRIP = ['lx-realdata', 'lx-dashtop', 'lx-dashboxes', 'lx-swapcalc', 'lx-qorders', 'lx-feerate'];
+// lx-trending (+ its sheet, removed below: stripById takes scripts only) arrived with Stellar's base on
+// 2026-10-29: Stellar's Trending list, 23 KB, on a dashboard that has no #trendingList and reads Horizon.
+// It never shipped on NEAR and Stellar's own production deploy dropped it too.
+const STRIP = ['lx-realdata', 'lx-dashtop', 'lx-dashboxes', 'lx-swapcalc', 'lx-qorders', 'lx-feerate', 'lx-trending'];
+const STRIP_CSS = ['lx-trending-css'];
 const NEAR_IMG = '<img src="/assets/networks/near.png" style="width:100%;height:100%;object-fit:cover;display:block" alt="">';
 
 // [from, to] exact strings, applied to the dashboard keys (markup and the lx-dashqa router).
@@ -112,6 +116,9 @@ const TEXT = [
   ['if(t.indexOf("custom swap")===0)return null;', 'if(t.indexOf("custom swap")===0)return document.querySelector("#swapModal");'],
   ['if(t.indexOf("custom swap")===0)return "/trade/near";', 'if(t.indexOf("custom swap")===0&&!document.querySelector("#swapModal"))return "/trade/near";'],
   ['if(t==="add liquidity"&&!document.querySelector("#createPoolModal"))return "/pools/stellar";', 'if(t==="add liquidity"&&!document.querySelector("#createPoolModal"))return "/pools/near";'],
+  // lx-dashblogdata's chain token, retargeted exactly as the XRPL fork's _xrplblogs.js does: the blog
+  // card hides posts tagged for ANOTHER chain, and the inherited "stellar" showed Stellar-tagged posts here.
+  ['var LXNET="stellar";', 'var LXNET="near";'],
 ];
 
 function isDashboard(h) { return h.indexOf('id="activityList"') >= 0 && h.indexOf('status-row') >= 0; }
@@ -134,6 +141,14 @@ for (const dev of ['desktop', 'mobile']) {
       h = g.html;
       if (g.removed) { stripped += g.removed; per[sid] = (per[sid] || 0) + g.removed; }
     }
+    for (const cid of STRIP_CSS) {
+      const open = '<style id="' + cid + '">', close = '</' + 'style>';
+      for (let i; (i = h.indexOf(open)) >= 0;) {
+        const j = h.indexOf(close, i);
+        if (j < 0) { console.error('  ' + key + ': ' + cid + ' has no closing tag; aborting'); process.exit(1); }
+        h = h.slice(0, i) + h.slice(j + close.length); stripped++; per[cid] = (per[cid] || 0) + 1;
+      }
+    }
     for (const [from, to] of TEXT) {
       const n = h.split(from).length - 1;
       if (n) { h = h.split(from).join(to); texts += n; }
@@ -154,6 +169,7 @@ for (const dev of ['desktop', 'mobile']) {
       });
     h = h.split('<span class="lbl">Stellar price</span>').join('<span class="lbl">NEAR price</span>');
 
+    if (h.indexOf('id="lx-dashblogdata"') >= 0 && h.indexOf('var LXNET="near";') < 0) { console.error('  ' + key + ': lx-dashblogdata carries no NEAR LXNET — its chain filter changed shape; aborting'); process.exit(1); }
     h = stripById(h, ID).html;
     h = h.replace(new RegExp('<style id="' + CSS_ID + '">[' + B + 's' + B + 'S]*?<' + B + '/style>', 'g'), '');
     if (h.indexOf('</head>') >= 0) h = h.split('</head>').join(STYLE + '</head>');
