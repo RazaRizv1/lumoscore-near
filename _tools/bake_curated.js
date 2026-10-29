@@ -13,9 +13,11 @@ try { j = JSON.parse(fs.readFileSync(SRC, 'utf8')); } catch (e) { console.error(
 const tokens = (j && j.tokens) || [];
 // A token whose own metadata has no usable icon gets one from nearlogos.fallback.json (CoinGecko or
 // DexScreener's image for that token); a logo the token publishes is never replaced.
-const FALLBACK = JSON.parse(fs.readFileSync(path.join(__dirname, 'nearlogos.fallback.json'), 'utf8')).logos || {};
+// A published logo whose url is listed under `dead` (its host is gone) counts as no logo.
+const FB = JSON.parse(fs.readFileSync(path.join(__dirname, 'nearlogos.fallback.json'), 'utf8'));
+const FALLBACK = FB.logos || {}, DEAD = FB.dead || {};
 let filled = 0;
-for (const t of tokens) if (!t.logo && FALLBACK[t.i]) { t.logo = FALLBACK[t.i]; filled++; }
+for (const t of tokens) if ((!t.logo || DEAD[t.logo]) && FALLBACK[t.i]) { t.logo = FALLBACK[t.i]; filled++; }
 // The issuer's website and X profile (_nearlinks.js writes them; absent until it has run once).
 let LINKS = {};
 try { LINKS = JSON.parse(fs.readFileSync(path.join(__dirname, 'nearlinks.generated.json'), 'utf8')).links || {}; } catch (e) {}

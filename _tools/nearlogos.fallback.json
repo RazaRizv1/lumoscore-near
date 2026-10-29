@@ -1,5 +1,5 @@
 {
- "why": "Logos for curated tokens whose own ft_metadata carries no usable icon (none, or over the 24KB inline cap). bake_curated.js fills an EMPTY logo from here and never overrides one the token publishes. Sources: CoinGecko's image for the token's own coin id, else DexScreener's token profile image. RAZA 2026-10-29: Trade page showed QTC as initials. A bridged token takes its SOURCE token's logo only when the bridge itself maps the two: DARK (sol-0xd31e...omdep.near) is DarkSwap 7KEPApdbBMByrmqihz3bht2uMhFQcatjfSFQCKq66kH3 per omni.bridge.near get_token_address.",
+ "why": "Logos for curated tokens whose own ft_metadata carries no usable icon (none, or over the 24KB inline cap). bake_curated.js fills an EMPTY logo from here and never overrides one the token publishes. Sources: CoinGecko's image for the token's own coin id, else DexScreener's token profile image. RAZA 2026-10-29: Trade page showed QTC as initials. A bridged token takes its SOURCE token's logo only when the bridge itself maps the two: DARK (sol-0xd31e...omdep.near) is DarkSwap 7KEPApdbBMByrmqihz3bht2uMhFQcatjfSFQCKq66kH3 per omni.bridge.near get_token_address. A logo the token publishes IS replaced when its url is listed under dead: a link that cannot load is no logo at all.",
  "logos": {
   "qtc.omft.near": "https://coin-images.coingecko.com/coins/images/102171910/small/Token_Icon.png?1791345433",
   "staker1.msig1.trufin.near": "https://coin-images.coingecko.com/coins/images/52958/small/truNEAR-logo.png?1734798536",
@@ -8,6 +8,10 @@
   "22.contract.portalbridge.near": "https://coin-images.coingecko.com/coins/images/4128/small/solana.png",
   "yuvi-6c041e37.qlyphs.near": "https://cdn.dexscreener.com/cms/images/Xi98FAQDhINh7usT?width=128&height=128&quality=90&format=auto",
   "l000000.factory.shardsmarket.near": "https://cdn.dexscreener.com/cms/images/i0PfVlPOnyc-qeAF?width=128&height=128&quality=90&format=auto",
-  "sol-0xd31e793eff8104551603bfac6e1222af303d4c5b.omdep.near": "https://cdn.dexscreener.com/cms/images/uuqslzhMnHe8ByIq?width=128&height=128&quality=90&format=auto"
+  "sol-0xd31e793eff8104551603bfac6e1222af303d4c5b.omdep.near": "https://cdn.dexscreener.com/cms/images/uuqslzhMnHe8ByIq?width=128&height=128&quality=90&format=auto",
+  "kat.token0.near": "https://coin-images.coingecko.com/coins/images/51737/small/nkimage.png?1753240872"
+ },
+ "dead": {
+  "https://image.mitte.gg/token-images/rvGJ6bJue1M1MREfSZgoys": "KAT, 2026-10-29: image.mitte.gg no longer resolves in DNS, so the Trade page drew initials"
  }
 }

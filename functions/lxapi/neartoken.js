@@ -34,7 +34,7 @@ const KEEP = 86400;
 const WNEAR = 'wrap.near';
 const RPC = 'https://free.rpc.fastnear.com';
 const PAIRS = 'https://api.dexscreener.com/token-pairs/v1/near/';
-const VER = 'v2';   // v2: web, x, desc (2026-10-29)
+const VER = 'v3';   // v2: web, x, desc; v3: curated logo first (2026-10-29)
 
 // NEAR account-id rules (nomicon): 2-64 chars, lowercase alphanumerics separated by single - _ or .,
 // no leading/trailing separator. Implicit accounts (64 hex) and eth-implicit (0x + 40 hex) satisfy
@@ -195,7 +195,9 @@ async function build(id, context) {
   const side = p0 ? (String(p0.baseToken.address) === id ? p0.baseToken : p0.quoteToken) : {};
   const symbol = clean(m.symbol || (cur && cur.s) || side.symbol || '', 24);
   const name = clean(m.name || (cur && cur.n) || side.name || '', 80);
-  const logo = safeLogo(m.icon) || safeLogo(cur && cur.logo)
+  // The curated list's logo FIRST: it is the contract's own icon as baked, or a vetted replacement for one
+  // that cannot load (KAT's icon points at a host that no longer exists -- _tools/nearlogos.fallback.json).
+  const logo = safeLogo(cur && cur.logo) || safeLogo(m.icon)
     || safeLogo(p0 && String((p0.baseToken || {}).address) === id && p0.info && p0.info.imageUrl);
   const supply = supplyRaw.ok && decimals != null ? scaled(supplyRaw.v, decimals) : null;
   // The issuer's site and X profile: baked for curated tokens (_tools/_nearlinks.js), else the token's
