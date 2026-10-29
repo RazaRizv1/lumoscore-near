@@ -563,16 +563,22 @@
 
   // 7d / 1m / 3m / 6m from ONE daily series in NEAR terms (a year from CoinGecko, or 200 days of
   // GeckoTerminal day candles), never three calls. A series too short for a window leaves it an em dash.
-  function loadLongPerf(asset) {
+  // Retried like the chart: a refused feed is a busy minute, not a token without a history.
+  function loadLongPerf(asset, attempt) {
     if (!$$('[class*="dxa-perf-cell"]').length) return;   // both layouts — see paintPerf
+    var at = attempt || 0;
     seriesFor('PERF', 'NEAR')
       .then(function (pts) {
         LONG['7d'] = changeOver(pts, 7);
         LONG['1m'] = changeOver(pts, 30);
         LONG['3m'] = changeOver(pts, 90);
         LONG['6m'] = changeOver(pts, 180);
-      }, function () {})
-      .then(function () { PERF.long = 'done'; paintPerf(LASTD); });
+        PERF.long = 'done'; paintPerf(LASTD);
+      }, function (e) {
+        var hopeless = /no wNEAR pool|NEAR in NEAR|no token|short|empty/.test(String((e && e.message) || ''));
+        if (!hopeless && at < CH_RETRY.length - 1) { setTimeout(function () { loadLongPerf(asset, at + 1); }, CH_RETRY[at + 1]); return; }
+        PERF.long = 'done'; paintPerf(LASTD);
+      });
   }
 
   // WHY THE FIGURES ARE MISSING, said once, instead of six dashes and an empty chart.
@@ -1291,8 +1297,9 @@
   // In NEAR, the same pool's DOLLAR candles ride along so the readout's dollar line and volume are each
   // candle's own, not today's NEAR rate applied to last week (which put USDC at $1.027). Matched by candle
   // time; if the dollar call fails the NEAR chart still draws and the readout simply omits the dollar line.
-  function gtSeries(d, R, vs) {
+  function gtSeries(d, R, vs, label) {
     if (vs === 'USD') return gtOne(d, R, 'USD');
+    if (label === 'PERF') return gtOne(d, R, 'NEAR');               // the change cells read closes only
     return Promise.all([gtOne(d, R, 'NEAR'), gtOne(d, R, 'USD').catch(function () { return null; })]).then(function (r) {
       var pts = r[0], usd = r[1];
       if (usd && usd.length) {
@@ -1331,7 +1338,7 @@
     // token charted from CoinGecko -- USDC among them -- had no bars at all, on any range. CoinGecko stays
     // as the fallback when the pool series cannot be had (the chart then draws without bars).
     if (d.cg && gtPool(d)) {
-      var gt = function () { return gtSeries(d, R, vs).then(function (pts) { if (pts.length < 2) throw new Error('short'); return pts; }); };
+      var gt = function () { return gtSeries(d, R, vs, label).then(function (pts) { if (pts.length < 2) throw new Error('short'); return pts; }); };
       // A refused GeckoTerminal call is usually its per-minute allowance: one retry after a pause, before
       // settling for CoinGecko's line, which has no volume bars.
       return gt().catch(function () { return new Promise(function (res) { setTimeout(res, 2500); }).then(gt); })
@@ -1359,10 +1366,10 @@
         // own, larger allowance and real candles, so a refused CoinGecko call falls back to the token's
         // wNEAR pool there rather than leaving the chart empty.
         if (!gtPool(d)) throw e;
-        return gtSeries(d, R, vs).then(function (pts) { if (pts.length < 2) throw new Error('short'); return pts; });
+        return gtSeries(d, R, vs, label).then(function (pts) { if (pts.length < 2) throw new Error('short'); return pts; });
       });
     }
-    return gtSeries(d, R, vs).then(function (pts) { if (pts.length < 2) throw new Error('short'); return pts; });
+    return gtSeries(d, R, vs, label).then(function (pts) { if (pts.length < 2) throw new Error('short'); return pts; });
   }
 
   // 1h, in NEAR terms, from the last hour of the 1D series -- whichever unit is on screen.
@@ -1413,6 +1420,28 @@
     return out;
   }
 
+  // AN EMPTY CHART SAYS WHY (RAZA 2026-10-29, on USDt: "WHy aren't details for this token showing?"). The
+  // price feeds are asked by the visitor's own browser, and both allow only a few calls a minute per
+  // visitor: after a few token pages they refuse, and the chart used to give up after 4.5 seconds and sit
+  // as an empty box. It now keeps trying past the feeds' one-minute window, and says so while it does.
+  var CH_RETRY = [2500, 15000, 30000, 60000];
+  function chartNote(text) {
+    var c = chartSvg();
+    if (!c) return;
+    var n = c.host.querySelector('.lxn-chnote');
+    if (!text) { if (n) n.parentNode.removeChild(n); return; }
+    if (!n) {
+      n = el('div', 'lxn-chnote');
+      n.setAttribute('data-logoed', '1');
+      n.setAttribute('role', 'status');
+      n.style.cssText = 'position:absolute;left:0;right:0;top:42%;text-align:center;z-index:3;pointer-events:none;'
+        + 'font:600 13px/1.5 "Hanken Grotesk",system-ui,sans-serif;color:var(--text-soft,#8a8fa3)';
+      try { if (getComputedStyle(c.host).position === 'static') c.host.style.position = 'relative'; } catch (e) {}
+      c.host.appendChild(n);
+    }
+    if (n.textContent !== text) n.textContent = text;
+  }
+
   function loadChart(asset, label, attempt) {
     var c = chartSvg();
     if (!c) return;
@@ -1424,21 +1453,25 @@
       .then(function (pts) {
         if (gen !== chGen) return;                       // a later range or unit button won
         pts = fitWindow(pts, want);
+        chartNote('');
         drawChart(pts); paintOhlcStrip(pts); paintChartHead(pts); fitChartHeight();
         if (want === '1D') noteHour(pts, vs);
       })
       .catch(function (e) {
         if (gen !== chGen) return;
         var hopeless = /no wNEAR pool|NEAR in NEAR|no token|short|empty/.test(String((e && e.message) || ''));
-        if (hopeless || (attempt || 0) >= 2) {
+        var at = attempt || 0;
+        if (hopeless || at >= CH_RETRY.length) {
           if (want === '1D' && PERF.h1 === 'pending') { PERF.h1 = 'done'; paintPerf(LASTD); }
+          if (!hopeless && !lastRawPts) chartNote('The price feed did not answer. Reload the page to try again.');
           return;
         }
+        if (!lastRawPts && at >= 1) chartNote('The price feed is busy — retrying…');
         setTimeout(function () {
           if (gen !== chGen) return;
           chGen--;                                         // the retry keeps this click's generation
-          loadChart(asset, label, (attempt || 0) + 1);
-        }, 1500 * ((attempt || 0) + 1));
+          loadChart(asset, label, at + 1);
+        }, CH_RETRY[at]);
       });
   }
 
