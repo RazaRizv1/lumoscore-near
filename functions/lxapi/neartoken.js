@@ -34,7 +34,7 @@ const KEEP = 86400;
 const WNEAR = 'wrap.near';
 const RPC = 'https://free.rpc.fastnear.com';
 const PAIRS = 'https://api.dexscreener.com/token-pairs/v1/near/';
-const VER = 'v1';
+const VER = 'v2';   // v2: web, x, desc (2026-10-29)
 
 // NEAR account-id rules (nomicon): 2-64 chars, lowercase alphanumerics separated by single - _ or .,
 // no leading/trailing separator. Implicit accounts (64 hex) and eth-implicit (0x + 40 hex) satisfy
@@ -92,6 +92,26 @@ function safeLogo(u) {
   if (u.length > 200000) return '';
   return /^(data:image\/(png|jpeg|jpg|webp|gif|svg\+xml)[;,]|https:\/\/)/i.test(u) ? u : '';
 }
+
+// A link for an href: https only, no credentials, no quotes or whitespace.
+function safeHref(u) {
+  u = String(u || '').trim();
+  if (!/^https:\/\/[^\s"'<>@]+$/i.test(u) || u.length > 300) return '';
+  try { return new URL(u).protocol === 'https:' ? u : ''; } catch (e) { return ''; }
+}
+function xHref(u) {
+  const m = String(u || '').trim().match(/^https:\/\/(?:www\.)?(?:x|twitter)\.com\/([A-Za-z0-9_]{1,15})\/?$/i);
+  return m ? 'https://x.com/' + m[1] : '';
+}
+
+// ONE ASSET, ONE DESCRIPTION, whichever network it is on (RAZA 2026-10-29: "The Text below the Asset
+// name should be the same if one asset [is] available on multiple networks"). Keyed by the NEAR
+// contract of the issuer's own deployment -- never by symbol, which anyone can copy. The text is the
+// issuer's own, as Stellar's page prints it from the issuer's stellar.toml.
+const DESC = {
+  // Circle's native USDC on NEAR (Stellar: GA5Z...KZVN, desc from circle.com's stellar.toml).
+  '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1': 'USDC is a fully collateralized US Dollar stablecoin.',
+};
 
 // Plain text, bounded: names and symbols are whatever the contract's deployer chose.
 function clean(s, max) {
@@ -178,6 +198,11 @@ async function build(id, context) {
   const logo = safeLogo(m.icon) || safeLogo(cur && cur.logo)
     || safeLogo(p0 && String((p0.baseToken || {}).address) === id && p0.info && p0.info.imageUrl);
   const supply = supplyRaw.ok && decimals != null ? scaled(supplyRaw.v, decimals) : null;
+  // The issuer's site and X profile: baked for curated tokens (_tools/_nearlinks.js), else the token's
+  // DexScreener profile.
+  const prof = (own.find((p) => String((p.baseToken || {}).address) === id && p.info) || {}).info || {};
+  const web = safeHref(cur && cur.w) || safeHref(((prof.websites || [])[0] || {}).url);
+  const x = xHref(cur && cur.x) || xHref(((prof.socials || []).find((q) => q && q.type === 'twitter') || {}).url);
 
   // Pools, largest first. Logos travel once in a map rather than repeated per pool.
   const logos = {};
@@ -209,7 +234,7 @@ async function build(id, context) {
     ok: true, i: id, symbol, name, decimals, logo, supply,
     price, usd, nearUsd, near24, d24, v24, liquidity: liq, trades24: trades,
     pools, poolCount: own.length, logos,
-    curated: !!cur, cg: (cur && cur.cg) || '',
+    curated: !!cur, cg: (cur && cur.cg) || '', web, x, desc: DESC[id] || '',
     lock: { keys, locked: keys == null ? null : (keys > 0 ? false : null) },
     src, at: Date.now(),
   };

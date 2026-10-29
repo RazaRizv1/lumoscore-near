@@ -493,7 +493,7 @@
       detail('rate', paid > 0 ? ('1 ' + f.code + ' ≈ ' + fmtNum(got / paid, (got / paid) < 1 ? 7 : 4) + ' ' + t.code) : '—');
       detail('slip', (q.slipBps / 100) + '%');
       detail('fee', show(q.fee, f.dec, 7) + ' ' + f.code + ' (' + (S().FEE_BPS / 100) + '%)');
-      // NET_FEE_EST is a finished string — '~0.003 NEAR', unit included — and browser/swapmodal.js
+      // NET_FEE_EST is a finished string — '0.003 NEAR', unit included — and browser/swapmodal.js
       // prints it verbatim. Wrapping it read "≈ ~0.003 NEAR NEAR".
       detail('net', S().NET_FEE_EST);
       detail('min', show(q.min, t.dec, 6) + ' ' + t.code);

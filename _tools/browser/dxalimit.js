@@ -58,7 +58,6 @@
     var a = Math.abs(n), dp = d != null ? d : (a >= 1000 ? 2 : a >= 1 ? 4 : 7);
     return Number(n).toLocaleString('en-US', { maximumFractionDigits: dp });
   }
-  function sig(n) { return (n > 0 && isFinite(n)) ? String(+Number(n).toPrecision(6)) : ''; }
   function plainIn(n) { return D().plain(+Number(n).toPrecision(12)) || ''; }
 
   function mark(node, text) {
@@ -124,7 +123,7 @@
     if (pool === undefined && !poolErr) label = 'Checking for a Rhea DCL pool…';
     else if (poolErr) label = 'Could not reach Rhea — reload to try again';
     else if (!pool) label = NOPOOL;
-    else label = side(p) === 'sell' ? 'Place Sell Order' : 'Place Buy Order';
+    else label = 'Place Limit Order';                               // Stellar's wording, either side
     // lx-gate saved the design's label before this ran and restores data-lxorig on connect.
     b.setAttribute('data-lxorig', label);
     b.setAttribute('data-lxdis', on ? '0' : '1');
@@ -158,8 +157,9 @@
     mark(frowMono(f[0]), '');                                     // Stellar parity: no "Market:" label
     var spendF = s === 'sell' ? f[1] : (f[2] || f[1]);
     var otherF = s === 'sell' ? f[2] : f[1];
-    if (otherF && otherF !== spendF) { mark(frowMono(otherF), ''); maxButton(otherF, false); }
-    var pre = phone(p) ? 'Avail: ' : 'Available: ', text = '', canMax = false;
+    if (otherF && otherF !== spendF) { var om = frowMono(otherF); mark(om, ''); if (om) om.removeAttribute('data-lxbal'); maxButton(otherF, false); }
+    // Stellar's "Avail:" on both layouts; data-lxbal is the hook its stylesheet right-aligns the figure by.
+    var pre = 'Avail: ', text = pre + '—', canMax = false;          // signed out: "Avail: —", as Stellar
     if (who && pool) {
       var id = s === 'sell' ? a.id : 'near', raw = acct.bal[id];
       if (raw == null || (s === 'sell' && dec == null)) text = pre + '—';
@@ -171,6 +171,7 @@
       }
     }
     mark(frowMono(spendF), text);
+    if (frowMono(spendF)) frowMono(spendF).setAttribute('data-lxbal', '1');
     maxButton(spendF, canMax);
     var tot = input(f[2]);
     if (tot && !phone(p) && tot.hasAttribute('readonly')) tot.removeAttribute('readonly');
@@ -200,6 +201,86 @@
     var txt = '—';
     if (o) txt = phone(p) ? (op + ' ' + fmt(o.rests, 8) + ' NEAR') : (code() + '/NEAR ' + op + ' ' + fmt(o.rests, 8));
     sumRow(p, 'filled when', txt);
+    totalUsd(p);
+    orderCtx(p);
+  }
+
+  // THE TOTAL IN DOLLARS, at the end of the Total row, as Stellar prints it ("≈ $100.03 USD"). The Total is
+  // always NEAR here, priced at the page's NEAR rate. Empty (and hidden by Stellar's :empty rule) until
+  // there is a total.
+  function totalUsd(p) {
+    var f = fields(p), row = f[2] && $('[class*="dxa-trade-frow"]', f[2]);
+    if (!row || phone(p)) return;
+    var el = $('.lx-ltusd', row);
+    if (!el) { el = document.createElement('span'); el.className = 'lx-ltusd'; el.setAttribute('data-logoed', '1'); row.appendChild(el); }
+    var d = window.__lxnAssetData, tot = num(input(f[2]) && input(f[2]).value);
+    var v = (tot > 0 && d && d.nearUsd > 0) ? tot * d.nearUsd : 0;
+    var t = v > 0 ? ('≈ $' + v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' USD') : '';
+    if (el.textContent !== t) el.textContent = t;
+  }
+
+  // ORDER CONTEXT, Stellar's block above the summary (RAZA 2026-10-29: "I need the order context and all the
+  // stats mentioned below it"): best bid / ask, the spread, where the typed price sits against the side it
+  // would have to cross, and what is ahead of it. Read from the same book the Orderbook tab paints
+  // (window.__lxnBook, Rhea's DCL liquidity, repainted on 'lxn:book'). A DCL book is liquidity at price
+  // POINTS rather than individual orders, so the queue is counted in price levels, not orders.
+  function orderCtx(p) {
+    if (phone(p)) return;
+    var bk = window.__lxnBook;
+    var host = $('.lx-oc', p);
+    if (!bk || !pool || (!(bk.asks || []).length && !(bk.bids || []).length)) { if (host) host.style.display = 'none'; return; }
+    if (!host) {
+      host = document.createElement('div');
+      host.className = 'lx-oc';
+      host.setAttribute('data-logoed', '1');
+      var sum = $('[class*="dxa-trade-summary"]', p);
+      if (sum && sum.parentNode) sum.parentNode.insertBefore(host, sum); else return;
+    }
+    host.style.display = '';
+    var asks = bk.asks || [], bids = bk.bids || [], f = fields(p), s = side(p), c = code();
+    var pr = num(input(f[0]) && input(f[0]).value);
+    var want = num(input(f[1]) && input(f[1]).value);
+    var bb = bids.length ? +bids[0].px : 0, ba = asks.length ? +asks[0].px : 0;
+    var mid = (bb && ba) ? (bb + ba) / 2 : (bb || ba);
+    var spread = (bb && ba && mid) ? ((ba - bb) / mid * 100) : null;
+    var ref = s === 'buy' ? ba : bb;
+    var away = (pr > 0 && ref) ? ((pr - ref) / ref * 100) : null;
+    var awayTxt = away == null ? '—' : (Math.abs(away) < 0.01 ? ('at the ' + (s === 'buy' ? 'ask' : 'bid'))
+      : (Math.abs(away).toFixed(2) + '% ' + (away < 0 ? 'below ' : 'above ') + (s === 'buy' ? 'the ask' : 'the bid')));
+    var fills = !!(pr > 0 && ref) && (s === 'buy' ? pr >= ba : pr <= bb);
+    var six = function (v) { return v ? String(+(+v).toPrecision(6)) : '—'; };
+    var esc = function (t) { return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;'); };
+    var lab, val, cls;
+    if (!(pr > 0)) { lab = 'Ahead of you'; val = '—'; cls = ''; }
+    else if (fills) {
+      // How much of THIS order the book can absorb at or better than the typed price (amounts are in the token).
+      lab = 'Execution';
+      var have = 0, src = s === 'buy' ? asks : bids;
+      for (var k = 0; k < src.length; k++) {
+        var kp = +src[k].px;
+        if (s === 'buy' ? kp > pr : kp < pr) break;
+        have += +src[k].amt || 0;
+      }
+      var pf = want > 0 ? Math.max(0, Math.min(100, have / want * 100)) : 100;
+      if (pf >= 99.5) { val = 'fills now'; cls = 'lx-oc-ok'; }
+      else { val = (pf < 0.5 ? '<1%' : Math.round(pf) + '%') + ' fills now | ' + Math.max(0, 100 - Math.round(pf)) + '% open order'; cls = 'lx-oc-hi'; }
+    } else {
+      // The liquidity already at this price or better on the order's own side of the book.
+      lab = 'Ahead of you';
+      var q0 = 0, nlev = 0, list = s === 'buy' ? bids : asks;
+      for (var i = 0; i < list.length; i++) {
+        var lp = +list[i].px;
+        if (s === 'buy' ? lp < pr : lp > pr) break;
+        q0 += +list[i].amt || 0; nlev++;
+      }
+      cls = nlev ? 'lx-oc-hi' : 'lx-oc-ok';
+      val = nlev ? (fmt(q0, q0 >= 1000 ? 0 : 2) + ' ' + c + ' · ' + nlev + (nlev === 1 ? ' price level' : ' price levels')) : 'nothing — first in line';
+    }
+    host.innerHTML = '<div class="lx-oc-t">Order context</div>'
+      + '<div class="lx-oc-r"><span>Best bid / ask (NEAR)</span><b>' + six(bb) + ' / ' + six(ba) + '</b></div>'
+      + '<div class="lx-oc-r"><span>Spread</span><b>' + (spread == null ? '—' : spread.toFixed(2) + '%') + '</b></div>'
+      + '<div class="lx-oc-r"><span>Your price</span><b class="' + (fills ? 'lx-oc-ok' : '') + '">' + esc(awayTxt) + '</b></div>'
+      + '<div class="lx-oc-r"><span>' + lab + '</span><b class="' + cls + '">' + esc(val) + '</b></div>';
   }
 
   function fromTotal(p) {
@@ -242,14 +323,9 @@
     return p.join('.');
   }
 
-  // Once per side, the page's live price -- the design ships "4.18", another chain's price typed in for you.
-  function prefill(p) {
-    var pin = input(fields(p)[0]);
-    if (!pin) return;
-    var d = window.__lxnAssetData, px = d && Number(d.price), s = side(p);
-    if (p.__lxnPrefilled === s) return;
-    if (px > 0 && isFinite(px)) { pin.value = sig(px); p.__lxnPrefilled = s; }
-  }
+  // NO PREFILL. The limit price used to start at the live price; Stellar's Limit pane starts empty and RAZA
+  // asked for the same (2026-10-29: "Keep the total price & amount & total box blank"). The design's own
+  // "4.18" / "100" are cleared by dexasset.js's paintPanel, which also drops the "0.00" placeholders.
 
   // ---- the connected account ---------------------------------------------------------------------
   function load() {
@@ -336,9 +412,9 @@
       if (t.closest('.lxlim-max')) { e.preventDefault(); e.stopImmediatePropagation(); fillMax(p); return; }
       if (t.closest('[class*="dxa-side-btn"]')) {
         setTimeout(function () {
-          p.__lxnPrefilled = null;
           var ai = input(fields(p)[1]); if (ai) ai.value = '';
-          say(p, ''); prefill(p); paint();
+          var ti = input(fields(p)[2]); if (ti) ti.value = '';
+          say(p, ''); paint();
         }, 30);
         return;
       }
@@ -372,7 +448,6 @@
     var d = window.__lxnAssetData;
     dec = d && d.decimals != null ? +d.decimals : null;
     var decP = dec != null ? Promise.resolve(dec) : SW().tokenInfo(a.id).then(function (m) { dec = m.dec; return dec; });
-    prefill(p);
     paint();
     Promise.all([D().poolFor(a.id), decP]).then(function (r) {
       pool = r[0];
@@ -393,6 +468,7 @@
     try { if (sum) new MutationObserver(function () { feeRow(p); }).observe(sum, { childList: true }); } catch (e) {}
     try { if (window.lxn && window.lxn.onChange) window.lxn.onChange(function () { load(); }); } catch (e) {}
     window.addEventListener('storage', function (e) { if (e && /^lumos\./.test(e.key || '')) load(); });
+    window.addEventListener('lxn:book', function () { orderCtx(p); });
     return true;
   }
 

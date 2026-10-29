@@ -71,6 +71,12 @@ const CSS = [
   '.dxa-pane-limit .lx-feerow .lx-feehint,.mdxa-pane-limit .lx-feerow .lx-feehint{display:none!important}',
   '.dxa-pane-limit .lx-feerow .lxn-limfee,.mdxa-pane-limit .lx-feerow .lxn-limfee{margin-left:auto}',
   '.mdxa-trade-asset.lxmt-chip[data-lxxc]::after{content:attr(data-lxxc)!important}',
+  // THE PROMOTED CARD ENDS AT ITS BUTTON (RAZA 2026-10-29: the chart box and the Promoted box "doesn't align
+  // or match equally"). Stellar's sheet stretches the card to the bottom of the chart column; on Stellar the
+  // trade card is the taller column so the stretch is ~0, but on NEAR the chart column is taller (a two-line
+  // description) and the card grew by ~76px of empty space under "Buy LUMOS". A column flexbox with the foot
+  // pushed down keeps both bottoms aligned and puts the slack between the copy and the button instead.
+  '@media(min-width:900px){.dxa-trade-col .lxad{display:flex;flex-direction:column}.dxa-trade-col .lxad-foot{margin-top:auto}}',
   '.mdxa-trade-asset.lxmt-chip[data-lxxc]::before{background-image:var(--lxx-logo,none)!important}',
 ].join('\n');
 if (CSS.indexOf(B) >= 0) { console.error('  stylesheet carries a backslash — aborting'); process.exit(1); }

@@ -641,9 +641,11 @@
   // change, liquidity or trades cell in this design, so those figures appear where the design does put
   // them -- the change pill and the 24h perf cell, the Pools tab's Combined TVL -- and nowhere new.
   function paintStats(d) {
+    // Stellar's wording and shape (RAZA 2026-10-29): the figure alone, "<CODE> issued" beneath it -- the
+    // token's code is already in that line, so no unit beside the number.
     var supplyCell = function () {
-      setCell('supply', (d && d.supply != null) ? statAmt(d.supply) + ' ' : null, (d && d.symbol) || '',
-        (d && d.symbol) ? (d.symbol + ' total supply') : '');
+      setCell('supply', (d && d.supply != null) ? statAmt(d.supply) : null, '',
+        (d && d.symbol) ? (d.symbol + ' issued') : '');
     };
     if (!d || d.price == null) {
       ['price', '24h volume', 'market cap'].forEach(function (n) { setCell(n, null, '', ''); });
@@ -764,19 +766,40 @@
     return host ? { host: host, svg: host.querySelector('svg') } : null;
   }
 
+  // STELLAR'S CHART, GEOMETRY AND ALL (RAZA 2026-10-29: "The volume bars in the graph & time is not appearing on
+  // Near ... not even appearing when clicking on 1W, 1M or 1Y"). Same 900x380 plot as lumoscore.com's Stellar
+  // page: price on top, a volume band under it (22% of the plot, 12 units of gap), the dates as an HTML row
+  // under the bars, the price axis as HTML in a right gutter sized in PIXELS, and Stellar's gridlines behind
+  // it. Labels are HTML rather than <text> because the svg is preserveAspectRatio="none": glyphs inside it
+  // were squashed by whatever the width/height ratio happened to be. The CSS for all of it (.lxda-cdates,
+  // .lxda-cprices, .lxda-cgrid, .lxda-cunit) is Stellar's, already on this page.
+  //
+  // X is TIME, not the point's index: GeckoTerminal leaves out a candle nobody traded in, and spacing by index
+  // would draw a quiet night as if it were a busy hour.
+  function axisLbl(t, span) {
+    var d = new Date(t), mo = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    if (span <= 172800000) return (d.getHours() < 10 ? '0' : '') + d.getHours() + ':00';
+    if (span <= 10368000000) return mo[d.getMonth()] + ' ' + d.getDate();
+    return mo[d.getMonth()] + " '" + String(d.getFullYear()).slice(2);
+  }
   function drawChart(pts) {
     var c = chartSvg();
     if (!c || !c.svg || !pts || pts.length < 2) return;
     lastRawPts = pts;
+    var pc = c.host;
 
-    // The price band stops above a volume band, as on lumoscore.com (RAZA 2026-09-15: "volume bars missing").
-    var W = 900, H = chartH(c.svg), L = 18, R = 836, T = 16, VB = H - 30, VH = 64, B = VB - VH - 12;
     // MCap is the same series times ISSUED supply — the figure the supply and market-cap boxes use.
     var K = (CH_VIEW.metric === 'mcap' && CH_VIEW.supply > 0) ? CH_VIEW.supply : 1;
-    if (K !== 1) pts = pts.map(function (p) { return [p[0], p[1] * K, p[2] * K, p[3] * K, p[4] * K, p[5], p[6] != null ? p[6] * K : null]; });
-    var axisTxt = function (v) { return (CH_VIEW.vs === 'USD' ? '$' : '') + (K !== 1 ? amount(v) : xrp(v, 5)); };
+    if (K !== 1) pts = pts.map(function (p) { return [p[0], p[1] * K, p[2] * K, p[3] * K, p[4] * K, p[5], p[6] != null ? p[6] * K : null, p[7]]; });
+
+    var W = 900, HT = 380, PADL = 14, PADT = 16, PADB = 28, n = pts.length;
+    var pw = pc.getBoundingClientRect().width || 622, PADR = Math.min(W * 0.25, Math.round(900 * 70 / pw));
+    var iw = W - PADL - PADR, ih = HT - PADT - PADB;
+    var volH = Math.round(ih * 0.22), gap = 12, priceH = ih - volH - gap;
+    var L = PADL, R = PADL + iw, B = PADT + priceH;
+
     var lo = pts[0][1], hi = pts[0][1];
-    for (var i = 1; i < pts.length; i++) {
+    for (var i = 1; i < n; i++) {
       if (pts[i][1] < lo) lo = pts[i][1];
       if (pts[i][1] > hi) hi = pts[i][1];
     }
@@ -787,84 +810,42 @@
       });
     }
     var span = hi - lo;
-    var t0 = pts[0][0], t1 = pts[pts.length - 1][0], tspan = (t1 - t0) || 1;
-    var y = function (v) { return span > 0 ? B - ((v - lo) / span) * (B - T) : (T + B) / 2; };
+    var t0 = pts[0][0], t1 = pts[n - 1][0], tspan = (t1 - t0) || 1;
+    var y = function (v) { return span > 0 ? B - ((v - lo) / span) * priceH : PADT + priceH / 2; };
+    var xAt = function (t) { return L + ((t - t0) / tspan) * iw; };
 
-    // GREEN OR RED BY DIRECTION — and this line used to say the opposite, which is worth keeping
-    // rather than deleting, because the history is the argument.
-    //
-    // It read: "THE BRAND ACCENT, NOT GREEN-OR-RED. This line was coloured by direction ... and
-    // lumoscore.com never does that: its chart is always var(--accent,#ea6a2c) ... RAZA 2026-09-15:
-    // 'WTF does the chart have red line. We dont have that on Stellar.'"
-    //
-    // That was correct when it was written, and the reason it gave was PARITY, not a dislike of
-    // coloured lines. On 2026-10-16 RAZA asked for direction colouring on the Stellar Trade-Asset
-    // chart, and then for it here. Stellar now does do that, so the same rule that removed this
-    // colouring is the rule that brings it back. Anyone reading only the old note would "fix" this
-    // straight back to accent and be wrong.
-    // REVERSED ON 2026-10-16, AND THE NOTE ABOVE IS WHY IT IS NOT A CONTRADICTION. The red line was
-    // removed from this chart on 2026-09-15 for one stated reason — lumoscore.com did not have it —
-    // and that reason has now gone: RAZA asked for exactly this on the STELLAR Trade-Asset chart
-    // first ("If the chart is UP in the last 24 hours, then it will be green. If down ... red. Same
-    // logic applies on 1W, 1M, 1Y"), then for it here. The rule that governed both decisions is the
-    // same one: this chart matches Stellar's. Only the answer moved.
-    //
-    // FIRST CLOSE VERSUS LAST, over the points actually drawn, so the colour always describes the
-    // span on screen and every timeframe is served by one rule. pts[i][1] is the close — the same
-    // value the line itself is plotted from, so the colour can never disagree with the shape.
-    //
-    // BOTH AN ATTRIBUTE AND A style, which is this file's existing pattern and not belt-and-braces
-    // for its own sake: see the note at the top of chart.js about var() in SVG presentation
-    // attributes. Measured in Chrome today, var() DOES resolve there — but the literal costs
-    // nothing and keeps the line coloured anywhere it does not.
-    var xUp  = (pts.length > 1) ? (+pts[pts.length - 1][1] >= +pts[0][1]) : true;
+    // GREEN OR RED BY DIRECTION, first close against last over the span on screen — Stellar's rule since
+    // 2026-10-16 (the history of this line, removed and brought back, is in the XRPL fork's dexasset.js).
+    var xUp = +pts[n - 1][1] >= +pts[0][1];
     var xHex = xUp ? '#35c07f' : '#ff5b5b';
     var xVar = xUp ? 'var(--green,#35c07f)' : 'var(--red,#ff5b5b)';
     var s = '<defs><linearGradient id="dxaAreaGrad" x1="0" x2="0" y1="0" y2="1">'
       + '<stop offset="0%" stop-color="' + xHex + '" style="stop-color:' + xVar + '" stop-opacity="0.20"></stop>'
       + '<stop offset="100%" stop-color="' + xHex + '" style="stop-color:' + xVar + '" stop-opacity="0"></stop></linearGradient></defs>';
 
-    // Five gridlines, labelled with REAL prices off this series rather than the design's constants.
-    for (var g = 0; g < 5; g++) {
-      var gv = hi - (span * g / 4), gy = y(gv);
-      s += '<line x1="' + L + '" y1="' + gy.toFixed(1) + '" x2="' + R + '" y2="' + gy.toFixed(1)
-        + '" stroke="var(--border)" stroke-width="1" stroke-dasharray="3,5" class="lxda-candle"></line>'
-        + '<text x="842" y="' + (gy + 3).toFixed(1) + '" font-size="10" fill="var(--text-soft)"'
-        + ' font-family="JetBrains Mono, monospace">' + axisTxt(gv) + '</text>';
-    }
-
-    // Volume, square-root scaled like Stellar's band so an ordinary session still shows beside the outlier,
-    // green when that close is at or above the one before it. xrplohlc's volume is in TOKEN units whatever
-    // the price unit (measured: identical sums for vs=XRP and vs=USD), so only its shape is drawn here.
+    // Volume, square-root scaled as Stellar's (DEX volume is long-tailed: linear, most bars round to nothing),
+    // green when that close is at or above the one before it. Only GeckoTerminal candles carry a volume.
     var vmax = 0;
-    for (var vi = 0; vi < pts.length; vi++) { var vv0 = +pts[vi][5] || 0; if (vv0 > vmax) vmax = vv0; }
+    for (var vi = 0; vi < n; vi++) { var vv0 = +pts[vi][5] || 0; if (vv0 > vmax) vmax = vv0; }
     if (vmax > 0) {
-      var bw = Math.max(1, Math.min(14, (R - L) / pts.length * 0.62)), vroot = Math.sqrt(vmax);
-      for (var bi = 0; bi < pts.length; bi++) {
+      var bw = Math.max(1, Math.min(14, iw / n * 0.62)), vroot = Math.sqrt(vmax), vtop = B + gap;
+      for (var bi = 0; bi < n; bi++) {
         var bv = +pts[bi][5] || 0;
         if (!(bv > 0)) continue;
-        var bx = L + ((pts[bi][0] - t0) / tspan) * (R - L);
-        var bh = Math.max(3, (Math.sqrt(bv) / vroot) * VH);
-        var upv = bi === 0 || pts[bi][1] >= pts[bi - 1][1];
-        s += '<rect class="lxda-vol" x="' + (bx - bw / 2).toFixed(1) + '" y="' + (VB - bh).toFixed(1)
+        var bh = Math.max(3, (Math.sqrt(bv) / vroot) * volH);
+        var upv = CH_VIEW.type === 'candle' ? (pts[bi][1] >= (isFinite(pts[bi][4]) && pts[bi][4] > 0 ? pts[bi][4] : pts[bi][1]))
+          : (bi === 0 || pts[bi][1] >= pts[bi - 1][1]);
+        s += '<rect class="lxda-vol" x="' + (xAt(pts[bi][0]) - bw / 2).toFixed(1) + '" y="' + (vtop + volH - bh).toFixed(1)
           + '" width="' + bw.toFixed(1) + '" height="' + bh.toFixed(1) + '" fill="' + (upv ? '#22c55e' : '#ff5b5b')
           + '" fill-opacity="0.5"></rect>';
       }
     }
 
-    var line = '';
-    for (var j = 0; j < pts.length; j++) {
-      var px = L + ((pts[j][0] - t0) / tspan) * (R - L);
-      line += (j ? ' L' : 'M') + px.toFixed(1) + ' ' + y(pts[j][1]).toFixed(1);
-    }
-    // The accent goes in a style declaration as well as the attribute: chart.js records that a var()
-    // inside an SVG presentation attribute can leave a path uncoloured, so the attribute carries the
-    // literal fallback and the style carries the theme token.
     if (CH_VIEW.type === 'candle') {
-      // xrplohlc candles are [t, close, high, low, open, volume]; a candle missing its open opens at the close before it.
-      var cdw = Math.max(1.5, Math.min(12, (R - L) / pts.length * 0.62));
-      for (var cdi = 0; cdi < pts.length; cdi++) {
-        var cdp = pts[cdi], cdx = L + ((cdp[0] - t0) / tspan) * (R - L);
+      // Candles are [t, close, high, low, open, volume]; a candle missing its open opens at the close before it.
+      var cdw = Math.max(1.4, Math.min(12, iw / n * 0.6));
+      for (var cdi = 0; cdi < n; cdi++) {
+        var cdp = pts[cdi], cdx = xAt(cdp[0]);
         var cdc = cdp[1];
         var cdo = (isFinite(cdp[4]) && cdp[4] > 0) ? cdp[4] : (cdi ? pts[cdi - 1][1] : cdc);
         var cdh = (isFinite(cdp[2]) && cdp[2] > 0) ? cdp[2] : Math.max(cdo, cdc);
@@ -877,31 +858,79 @@
           + '" height="' + Math.max(1, cdyb - cdyt).toFixed(1) + '" fill="' + cdcol + '"></rect>';
       }
     } else {
-      s += '<path d="' + line + ' L' + R + ' ' + B + ' L' + L + ' ' + B + ' Z" fill="url(#dxaAreaGrad)" class="lxda-area"></path>'
-        + '<path d="' + line + '" fill="none" stroke="' + xHex + '" style="stroke:' + xVar + '" stroke-width="2"'
+      var line = '';
+      for (var j = 0; j < n; j++) line += (j ? ' L' : 'M') + xAt(pts[j][0]).toFixed(1) + ' ' + y(pts[j][1]).toFixed(1);
+      // The area closes on the bottom of the PRICE band, so the fill does not pour down through the bars.
+      s += '<path d="' + line + ' L' + R.toFixed(1) + ' ' + B.toFixed(1) + ' L' + L + ' ' + B.toFixed(1) + ' Z" fill="url(#dxaAreaGrad)" class="lxda-area"></path>'
+        + '<path d="' + line + '" fill="none" stroke="' + xHex + '" style="stroke:' + xVar + '" stroke-width="2.5"'
         + ' stroke-linecap="round" stroke-linejoin="round" class="lxda-line"></path>';
     }
 
-    c.svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+    c.svg.setAttribute('viewBox', '0 0 ' + W + ' ' + HT);
+    c.svg.setAttribute('preserveAspectRatio', 'none');
     c.svg.innerHTML = s;
+
+    // The date row: five labels evenly over the span, the last one "Now", as on Stellar.
+    var dr = pc.querySelector('.lxda-cdates');
+    if (!dr) { dr = el('div', 'lxda-cdates'); dr.setAttribute('data-logoed', '1'); pc.appendChild(dr); }
+    var dh = '';
+    for (var qi = 0; qi < 5; qi++) dh += '<span>' + (qi === 4 ? 'Now' : axisLbl(t0 + tspan * qi / 4, tspan)) + '</span>';
+    dr.innerHTML = dh;
+
+    // The price axis and its gridlines share one band, the PRICE band, so neither can label the bars.
+    var topPct = (PADT / HT * 100).toFixed(3) + '%', botPct = ((HT - B) / HT * 100).toFixed(3) + '%';
+    var gr = pc.querySelector('.lxda-cgrid');
+    if (!gr) { gr = el('div', 'lxda-cgrid'); pc.insertBefore(gr, pc.firstChild); }
+    gr.style.top = topPct; gr.style.bottom = botPct;
+    gr.style.display = span > 0 ? '' : 'none';
+    var pr = pc.querySelector('.lxda-cprices');
+    if (!pr) { pr = el('div', 'lxda-cprices'); pr.setAttribute('data-logoed', '1'); pc.appendChild(pr); }
+    pr.style.top = topPct; pr.style.bottom = botPct;
+    var ax = function (v) { return (CH_VIEW.vs === 'USD' ? '$' : '') + (K !== 1 ? amount(v) : xrp(v, 5)); };
+    var ph = '';
+    if (span > 0) for (var g = 0; g < 5; g++) ph += '<span style="top:' + (g * 25) + '%">' + ax(hi - span * g / 4) + '</span>';
+    pr.innerHTML = ph;
+    var un = pc.querySelector('.lxda-cunit');
+    if (!un) { un = el('div', 'lxda-cunit'); un.setAttribute('data-logoed', '1'); pc.appendChild(un); }
+    var uw = (CH_VIEW.vs === 'USD' ? 'USD' : 'NEAR');
+    if (K !== 1) uw = 'MCAP · ' + uw;
+    if (un.textContent !== uw) un.textContent = uw;
+
     // Only now is the gate lifted: the box stays hidden while it holds the design's Aptos prices,
     // and opens the moment it holds this token's own.
-    c.host.classList.add('lxda');
-    wireChartHover(c.host, { pts: pts, L: L, R: R, t0: t0, tspan: tspan, y: y, K: K });
-
-    // (The XRPL build feeds Stellar's snapshot camera from here; that layer is not on the NEAR page.)
+    pc.classList.add('lxda');
+    wireChartHover(pc, { pts: pts, L: L, R: R, t0: t0, tspan: tspan, y: y, K: K });
+    watchChartWidth();
+  }
+  // The right gutter is sized in pixels, so a new width redraws rather than stretches.
+  var cwSeen = 0, cwTimer = null;
+  function watchChartWidth() {
+    if (window.__lxnChartW) return;
+    window.__lxnChartW = 1;
+    window.addEventListener('resize', function () {
+      clearTimeout(cwTimer);
+      cwTimer = setTimeout(function () {
+        var c = chartSvg(); if (!c || !lastRawPts) return;
+        var w = Math.round(c.host.getBoundingClientRect().width || 0);
+        if (!w || w === cwSeen) return;
+        cwSeen = w;
+        drawChart(lastRawPts);
+      }, 180);
+    }, { passive: true });
   }
 
   // THE HOVER READOUT (RAZA 2026-09-15: "where's the chart hover that we also have on Stellar"). Stellar's own
   // elements — .lxda-chtip / .lxda-chdot / .lxda-chvl, styled by the inherited sheet — with the date, the
   // price in the chart's unit and dollars beneath it, and that bucket's volume in dollars.
+  // Stellar's readout date, in 24-hour time (RAZA 2026-10-29: "the time format above the price should be of
+  // 24hr format instead of AM-PM"): "Oct 28, 16:45" on 1D and 1W, where an hour means something, and
+  // "Oct 28" on the longer ranges.
   function tipDate(ms) {
-    try {
-      var o = (CH_VIEW.label === '1D' || CH_VIEW.label === '1W')
-        ? { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }
-        : { year: 'numeric', month: 'short', day: 'numeric' };
-      return new Date(ms).toLocaleString('en-US', o);
-    } catch (e) { return ''; }
+    var d = new Date(ms), mo = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    if (!isFinite(d.getTime())) return '';
+    var two = function (v) { return (v < 10 ? '0' : '') + v; };
+    var hm = (CH_VIEW.label === '1D' || CH_VIEW.label === '1W') ? (', ' + two(d.getHours()) + ':' + two(d.getMinutes())) : '';
+    return mo[d.getMonth()] + ' ' + d.getDate() + hm;
   }
   function usdCompact(v) {
     if (!(v > 0)) return '$0';
@@ -952,13 +981,14 @@
       var d = window.__lxnAssetData, usdPerXrp = (d && d.nearUsd > 0) ? +d.nearUsd : 0;
       var inUsd = CH_VIEW.vs === 'USD', mcap = S.K !== 1;
       var head = inUsd ? ('$' + (mcap ? amount(p[1]) : xrp(p[1], 6))) : ((mcap ? amount(p[1]) : xrp(p[1], 6)) + ' NEAR');
-      // The dollar line is the point's OWN dollar price when the series carries it (CoinGecko does),
-      // and today's NEAR rate otherwise.
-      var pu = (p[6] != null && isFinite(p[6])) ? p[6] : (usdPerXrp > 0 ? p[1] * usdPerXrp : null);
+      // The dollar line is the point's OWN dollar price (CoinGecko's, or the pool's dollar candle), and is
+      // left out when the point has none -- never today's NEAR rate applied to a past price.
+      var pu = (p[6] != null && isFinite(p[6])) ? p[6] : null;
       var sub = (!inUsd && pu != null) ? (mcap ? usdCompact(pu) : ('$' + xrp(pu, 6))) : '';
       // Per-candle volume exists only on GeckoTerminal candles (in the chart's unit). CoinGecko's
       // volume is a rolling 24h total, not a candle's, so its points carry none and no row is shown.
-      var volUsd = (isFinite(p[5]) && p[5] > 0) ? (inUsd ? +p[5] : +p[5] * usdPerXrp) : 0;
+      var volUsd = inUsd ? ((isFinite(p[5]) && p[5] > 0) ? +p[5] : 0)
+        : ((p[7] != null && isFinite(p[7]) && p[7] > 0) ? +p[7] : ((isFinite(p[5]) && p[5] > 0) ? +p[5] * usdPerXrp : 0));
       tip.textContent = '';
       tip.appendChild(tipEl('d', tipDate(p[0])));
       tip.appendChild(tipEl('l', mcap ? 'Market cap' : 'Price'));
@@ -1138,14 +1168,14 @@
 
   // ---- where the series comes from ----------------------------------------------------------------
   //
-  // CURATED WITH A COINGECKO ID: market_chart (USD), re-priced in NEAR by dividing by NEAR's own series
-  // at the nearest timestamp -- the same method the Trade table's 7D column uses (browser/trade.js).
-  // CoinGecko gives prices, not candles, so each range is bucketed into ~120 candles from the points
-  // that fall inside each bucket. It carries no per-candle volume, so none is drawn.
+  // A TOKEN WITH A DEEP wNEAR POOL (since 2026-10-29, every one): GeckoTerminal OHLCV on its busiest deep
+  // pool against wNEAR (gtPool), asked for in the quote token (currency=token), which IS NEAR -- real
+  // candles with real per-candle volume, in NEAR. The dollar view asks the same pool in USD.
   //
-  // ANY OTHER TOKEN: GeckoTerminal OHLCV on the token's largest pool against wNEAR, asked for in the
-  // quote token (currency=token), which IS NEAR -- real candles with real volume. The dollar view asks
-  // the same pool in USD.
+  // FALLBACK, a curated token with a CoinGecko id: market_chart (USD), re-priced in NEAR by dividing by
+  // NEAR's own series at the nearest timestamp -- the same method the Trade table's 7D column uses
+  // (browser/trade.js). CoinGecko gives prices, not candles, so each range is bucketed into ~120 candles
+  // from the points that fall inside each bucket. It carries no per-candle volume, so no bars are drawn.
   //
   // Neither: no series. The chart stays the design's empty box and the price-change cells em-dash.
   //
@@ -1236,17 +1266,38 @@
     return out;
   }
 
-  // The token's largest pool against wNEAR, from the pools the token payload already carries.
+  // THE TOKEN'S BUSIEST DEEP POOL AGAINST wNEAR, from the pools the token payload already carries. Busiest,
+  // because the volume bars are that pool's trading: USDC's deepest wNEAR pool (refv1-4512, $2.2M) trades
+  // $0.2M a day while the concentrated-liquidity one beside it trades $2.9M. DEEP first, because Rhea lets
+  // anyone open a duplicate pool at any fee, and a 7-cent pool can print any price it likes -- only pools
+  // with the curation floor of $25K liquidity may be picked, and the deepest is the fallback.
   function gtPool(d) {
-    var ps = (d && d.pools) || [];
+    var ps = (d && d.pools) || [], best = null, first = null;
     for (var i = 0; i < ps.length; i++) {
       var p = ps[i];
-      if (p && p.id && ((p.base && p.base.i === WNEAR) || (p.quote && p.quote.i === WNEAR))) return p;
+      if (!p || !p.id || !((p.base && p.base.i === WNEAR) || (p.quote && p.quote.i === WNEAR))) continue;
+      if (!first) first = p;                                     // the list is liquidity-ranked
+      if ((+p.liqUsd || 0) >= 25000 && (!best || (+p.volUsd || 0) > (+best.volUsd || 0))) best = p;
     }
-    return null;
+    return best || first;
   }
 
+  // In NEAR, the same pool's DOLLAR candles ride along so the readout's dollar line and volume are each
+  // candle's own, not today's NEAR rate applied to last week (which put USDC at $1.027). Matched by candle
+  // time; if the dollar call fails the NEAR chart still draws and the readout simply omits the dollar line.
   function gtSeries(d, R, vs) {
+    if (vs === 'USD') return gtOne(d, R, 'USD');
+    return Promise.all([gtOne(d, R, 'NEAR'), gtOne(d, R, 'USD').catch(function () { return null; })]).then(function (r) {
+      var pts = r[0], usd = r[1];
+      if (usd && usd.length) {
+        var by = {};
+        usd.forEach(function (u) { by[u[0]] = u; });
+        pts = pts.map(function (p) { var u = by[p[0]]; return u ? [p[0], p[1], p[2], p[3], p[4], p[5], u[1], u[5]] : p; });
+      }
+      return pts;
+    });
+  }
+  function gtOne(d, R, vs) {
     var pool = gtPool(d);
     if (!pool) return Promise.reject(new Error('no wNEAR pool'));
     var cur = vs === 'USD' ? 'usd' : 'token';
@@ -1267,6 +1318,22 @@
     var d = window.__lxnAssetData, R = CH_SRC[label] || CH_SRC['1D'];
     if (!d) return Promise.reject(new Error('no token'));
     if (d.i === WNEAR && vs !== 'USD') return Promise.reject(new Error('NEAR in NEAR'));
+    // REAL CANDLES FIRST, now that the chart draws Stellar's volume band (RAZA 2026-10-29). GeckoTerminal's
+    // candles carry each bucket's volume; CoinGecko's points carry only a rolling 24h total, so a curated
+    // token charted from CoinGecko -- USDC among them -- had no bars at all, on any range. CoinGecko stays
+    // as the fallback when the pool series cannot be had (the chart then draws without bars).
+    if (d.cg && gtPool(d)) {
+      return gtSeries(d, R, vs).then(function (pts) { if (pts.length < 2) throw new Error('short'); return pts; })
+        .catch(function () {
+          var jobs = [cgSeries(d.cg, R.days, R.ttl)];
+          if (vs !== 'USD') jobs.push(cgSeries('near', R.days, R.ttl));
+          return Promise.all(jobs).then(function (r) {
+            var pts = bucketise(r[0], vs === 'USD' ? null : r[1], R.days);
+            if (pts.length < 2) throw new Error('short');
+            return pts;
+          });
+        });
+    }
     if (d.cg) {
       var jobs = [cgSeries(d.cg, R.days, R.ttl)];
       if (vs !== 'USD') jobs.push(cgSeries('near', R.days, R.ttl));
@@ -1768,15 +1835,16 @@
       document.title = asset.code + ' price, pools and holders on NEAR | LumosCore';
     } catch (e) {}
 
-    // THE CONTRACT CHIP, where the XRPL page shows the issuer. The label says Contract, the text is the
-    // contract id (shortened when it is a 64-hex implicit account), and data-copy holds the whole id.
+    // THE ISSUER CHIP. The text is the token's contract id (shortened when it is a 64-hex implicit
+    // account) and data-copy holds the whole id. The label reads Issuer, as on Stellar (RAZA 2026-10-29:
+    // "Update the text Contract to Issuer") -- on NEAR the contract IS what issues the token.
     var addrEl = $('.item .addr') || $('.asset-meta .addr') || $('.asset-id .addr');
     if (addrEl) {
       addrEl.setAttribute('data-copy', asset.id);
       addrEl.setAttribute('data-copy-label', asset.code + ' contract');
       addrEl.setAttribute('title', asset.id);
       var tag = addrEl.parentNode && addrEl.parentNode.querySelector('.label-tag');
-      if (tag) plain(tag, 'Contract');
+      if (tag) plain(tag, 'Issuer');
       var addrTxt = ' ' + shortId(asset.id) + ' ';
       var wrote = false;
       [].forEach.call(addrEl.childNodes, function (n) {
@@ -1809,14 +1877,54 @@
       wireIssuerCopy();
     }
 
-    // No home-domain source on NEAR: the design's "circle.com" pill is hidden rather than guessed.
-    var web = $('.website');
-    if (web) {
-      web.style.display = 'none';
-      if (web.tagName === 'A') web.setAttribute('href', '#');
-    }
+    paintLinks(d);
 
     paintLogo(asset, d);
+  }
+
+  // THE ISSUER'S SITE AND X ACCOUNT beside the address, as Stellar shows them (RAZA 2026-10-29). Stellar
+  // reads them from the issuer's stellar.toml; NEAR has no such record, so /lxapi/neartoken carries them
+  // from the token's CoinGecko entry (curated tokens, baked by _tools/_nearlinks.js) or its DexScreener
+  // profile. The same two elements Stellar uses (.website pill, a.lx-soc), so its stylesheet -- already on
+  // this page -- styles them, including hiding the X mark on a phone. No link known: the pill stays hidden
+  // rather than showing the design's "circle.com" on someone else's token.
+  var X_SVG = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M18.9 2H22l-7.1 8.1L23.2 22h-6.5l-5.1-6.7L5.8 22H2.7l7.6-8.7L1.2 2h6.7l4.6 6.1L18.9 2Zm-1.1 18h1.7L7.4 3.8H5.6L17.8 20Z"></path></svg>';
+  function paintLinks(d) {
+    var site = (d && /^https:\/\//i.test(d.web || '')) ? d.web : '';
+    var xu = (d && /^https:\/\/x\.com\/[A-Za-z0-9_]{1,15}$/.test(d.x || '')) ? d.x : '';
+    $$('.website').forEach(function (web) {
+      if (!site) {
+        web.style.display = 'none';
+        if (web.tagName === 'A') web.setAttribute('href', '#');
+        return;
+      }
+      var host = site.replace(/^https:\/\//i, '').replace(/^www\./i, '').split(/[\/?#]/)[0];
+      if (web.tagName === 'A') {
+        web.setAttribute('href', site);
+        web.setAttribute('target', '_blank');
+        web.setAttribute('rel', 'noopener nofollow');
+      }
+      web.setAttribute('data-lxfixed', '1');
+      web.setAttribute('data-lx-noswap', '');
+      web.setAttribute('data-tooltip', 'Visit website');
+      var done = false;
+      [].forEach.call(web.childNodes, function (n) {
+        if (n.nodeType === 3 && n.nodeValue.trim()) { if (!done) { n.nodeValue = ' ' + host + ' '; done = true; } else n.nodeValue = ''; }
+      });
+      if (!done) web.appendChild(document.createTextNode(' ' + host + ' '));
+      web.style.display = '';
+    });
+    var row = $('.asset-meta-row') || $('.asset-meta');
+    if (!row) return;
+    $$('.lx-soc', row).forEach(function (n) { if (n.parentNode) n.parentNode.removeChild(n); });
+    if (!xu) return;
+    var a = document.createElement('a');
+    a.className = 'lx-soc';
+    a.href = xu; a.target = '_blank'; a.rel = 'noopener nofollow';
+    a.title = 'X'; a.setAttribute('aria-label', 'X');
+    a.setAttribute('data-lxc', ''); a.setAttribute('data-lx-noswap', '');
+    a.innerHTML = X_SVG;
+    row.appendChild(a);
   }
 
   // THE TOKEN'S LOGO WAS A BLANK GREY SQUARE ON EVERY PAGE.
@@ -1878,7 +1986,10 @@
   function paintLabels(asset) {
     var code = asset.code;
     var d = window.__lxnAssetData;
-    var tokLogo = (d && /^(data:image\/|https:\/\/)/i.test(d.logo || '')) ? d.logo.replace(/"/g, '%22') : '';
+    // Spaces encoded too: an inline SVG logo carries them ("<?xml version=..."), and the review popup
+    // (lx-feemodal) strips every space out of the url it copies -- which turned USDC's mark into a broken
+    // image there (RAZA 2026-10-29: "The logo for the asset I receive is not appearing").
+    var tokLogo = (d && /^(data:image\/|https:\/\/)/i.test(d.logo || '')) ? d.logo.replace(/"/g, '%22').replace(/\s/g, '%20') : '';
 
     $$('[class*="dxa-side-btn"]').forEach(function (b) {
       var sell = b.classList.contains('sell');
@@ -1928,15 +2039,26 @@
     }
     var inSwap = !!(c.closest && c.closest('.dxa-pane-swap'));
     if (!inSwap) {
-      // The desktop limit chips are bare text in the design. An empty data-logo child is the logo
-      // engine's own escape, so a four-letter "NEAR" is not taken for a ticker slot.
-      if ((c.__lxnUnit || '') === unit) return;
-      c.__lxnUnit = unit;
+      // THE DESKTOP LIMIT CHIPS ARE LOGOS, as on Stellar (RAZA 2026-10-29: "The logo isn't appearing besides
+      // the limit price & amount"). Stellar's own hooks: data-lxic names the unit and --lxtic carries the
+      // mark, which its stylesheet paints through ::before over a transparent label. The unit stays in the
+      // element as text (invisible) and in the title, so it is still read out and still on hover. A token with
+      // no logo keeps the text label rather than an empty circle.
+      if ((c.__lxnUnit || '') === unit + '|' + (logo ? 1 : 0)) return;
+      c.__lxnUnit = unit + '|' + (logo ? 1 : 0);
       c.textContent = unit;
+      c.title = unit;
       var esc = document.createElement('span');
-      esc.setAttribute('data-logo', '');
+      esc.setAttribute('data-logo', '');                          // the logo engine's escape: not a ticker slot
       esc.style.display = 'none';
       c.appendChild(esc);
+      if (logo) {
+        c.setAttribute('data-lxic', unit);
+        c.style.setProperty('--lxtic', 'url("' + logo + '")');
+      } else {
+        c.removeAttribute('data-lxic');
+        c.style.removeProperty('--lxtic');
+      }
       return;
     }
     c.__lxnChip = { code: unit, logo: logo || '' };
@@ -2216,13 +2338,15 @@
       plain(v, txt);
       v.classList.add('lxp');
     });
+    // Empty, with no "0.00" placeholder either, and no rate until an amount is typed: Stellar's swap and
+    // limit panes start blank (RAZA 2026-10-29: "Keep the rate hidden and 0.00 shouldn't be appearing").
     $$('[class*="dxa-trade-ir"] input').forEach(function (inp) {
       if (inp.__lxnCleared) return;
       inp.__lxnCleared = 1;
       inp.value = '';
-      if (!inp.placeholder) inp.placeholder = '0.00';
+      if (inp.placeholder === '0.00') inp.placeholder = '';
     });
-    setSumRow('rate', p != null ? ('1 ' + asset.code + ' = ' + xrp(p) + ' NEAR') : '—');
+    setSumRow('rate', '—');
     ['price impact', 'min received', 'network fee', 'filled when'].forEach(function (k) { setSumRow(k, '—'); });
     $$('.dxa-tsum-row .mono, .mdxa-tsum .mono').forEach(function (v) { v.classList.add('lxp'); });
     $$('.dxa-trade-cta, .mdxa-trade-cta').forEach(function (b) {
@@ -2297,8 +2421,9 @@
   //
   // The text is ATTACKER-CONTROLLED — anyone can issue a token and publish metadata for it — so it
   // goes in through plain(), which is textContent, never innerHTML. The edge caps and normalises it.
-  // No description source on NEAR yet (token metadata carries none), so every token gets Stellar's
-  // generic line in NEAR words rather than the design's 251 characters about Circle.
+  // NEAR token metadata carries no description, so a token gets Stellar's generic line in NEAR words --
+  // unless it is an asset LumosCore also lists on another network, which keeps that network's text
+  // (/lxapi/neartoken `desc`; RAZA 2026-10-29: USDC reads the same on NEAR as on Stellar).
   function paintDescription() {
     var desc = $('.asset-description');
     if (!desc) return;
@@ -2306,8 +2431,12 @@
     if (!a) { if (desc.parentNode) desc.parentNode.removeChild(desc); return; }
     var d = window.__lxnAssetData;
     var nm = d && d.name && d.name.toLowerCase() !== String(a.code).toLowerCase() ? (' (' + d.name + ')') : '';
-    plain(desc, a.code + nm + ' is a token on NEAR Protocol. Its price, 24h volume and pools come from '
-      + 'Rhea Finance and DexScreener, and its supply is read from the token contract itself.');
+    plain(desc, (d && d.desc) ? d.desc : (a.code + nm + ' is a token on NEAR Protocol. Its price, 24h volume and pools come from '
+      + 'Rhea Finance and DexScreener, and its supply is read from the token contract itself.'));
+    // Stellar's settled state: two lines at most, and no 24px held under it for a "Show more" control.
+    // Without these the pre-script rule kept that space reserved for good, so NEAR's header stood 22px
+    // taller than Stellar's for the same one-line USDC text.
+    desc.classList.add('lx-clamp', 'lx-descready');
     desc.style.display = '';
   }
 

@@ -164,10 +164,8 @@
     var f = fields(p), recv = input(f[1]), s = sides(p), d = window.__lxnAssetData;
     if (recv && document.activeElement !== recv) recv.value = '';
     mark(frowMono(f[1]), usdTxt(p, 0));
-    if (d && d.price > 0) {
-      var r = s.pay === 'near' ? 1 / d.price : d.price;
-      sumRow(p, 'rate', '1 ' + meta(s.pay).code + ' = ' + fmt(r, 6) + ' ' + meta(s.get).code);
-    } else sumRow(p, 'rate', '—');
+    // No rate until there is an amount to quote, as on Stellar (RAZA 2026-10-29).
+    sumRow(p, 'rate', '—');
     sumRow(p, 'price impact', '—', '');
     sumRow(p, 'min received', '—');
     payUsd(p, 0);
@@ -203,9 +201,7 @@
     q = null;
     setCta(p);
     var have = bal.raw[s.pay];
-    if (me() && have != null && S().big(raw) > S().big(have)) {
-      say(p, 'You only have ' + fmt(S().toNum(have, meta(s.pay).dec), 6) + ' ' + meta(s.pay).code + '.');
-    } else say(p, '');
+    say(p, me() && have != null ? short(p, raw, have) : '');
     S().quote(s.pay, s.get, raw).then(function (qq) {
       if (my !== seq) return;
       applyQuote(p, qq);
@@ -227,6 +223,28 @@
     }, function () {});
   }
 
+  // THE SHORTFALL, IN STELLAR'S WORDS (RAZA 2026-10-29: "it should say Insufficient XXX balance — you have
+  // XXX like it does on Stellar"). Two cases on NEAR: more than the balance itself, and -- paying NEAR only
+  // -- within the balance but into the 0.05 NEAR kept for gas, which Stellar's reserve never needs to say.
+  // The figures are FLOORED from the raw units (never rounded up), so "you have" is never more than is held.
+  function floorTxt(raw, dec) {
+    var t = String(S().fromUnits(raw, dec)), i = t.indexOf('.');
+    if (i >= 0) t = t.slice(0, i + 7).replace(/\.?0+$/, '');
+    var parts = t.split('.');
+    parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    return parts.join('.');
+  }
+  function short(p, raw, have) {
+    var s = sides(p), m = meta(s.pay);
+    if (m.dec == null || have == null) return '';
+    if (S().big(raw) > S().big(have)) return 'Insufficient ' + m.code + ' balance — you have ' + floorTxt(have, m.dec);
+    var room = S().maxSpend(s.pay, have);
+    if (S().big(raw) > S().big(room)) {
+      return 'Insufficient ' + m.code + ' balance — keep 0.05 NEAR for gas; up to ' + floorTxt(room, m.dec) + ' can be swapped';
+    }
+    return '';
+  }
+
   // ---- signing ------------------------------------------------------------------------------------
   function validate(p) {
     if (!asset()) return 'This page has no token.';
@@ -238,13 +256,7 @@
     if (!me()) return 'Connect a NEAR wallet first.';
     var have = bal.raw[s.pay];
     if (have == null) return 'Reading your balance — try again in a moment.';
-    var room = S().maxSpend(s.pay, have);
-    if (S().big(raw) > S().big(room)) {
-      return s.pay === 'near'
-        ? ('Not enough NEAR — keep 0.05 NEAR for gas. Up to ' + fmt(S().toNum(room, 24), 6) + ' NEAR can be swapped.')
-        : ('You only have ' + fmt(S().toNum(have, meta(s.pay).dec), 6) + ' ' + meta(s.pay).code + '.');
-    }
-    return '';
+    return short(p, raw, have);
   }
 
   function doSwap(p) {
@@ -288,6 +300,7 @@
         : ('Sold ' + fmt(S().toNum(x.q.amount, pm.dec), 6) + ' ' + pm.code));
       var i = input(fields(p)[0]);
       if (i) i.value = '';
+      quick(p, null);
       clearQuote(p);
       loadBal(p);
     }).catch(function (e) {
@@ -295,6 +308,12 @@
       stop(/reject|denied|cancel|closed/i.test(m) ? 'The swap was not approved, so nothing was swapped.' : (m || 'The swap could not be completed.'));
       if (e && e.requote) setTimeout(requote, 50);
     });
+  }
+
+  // THE SELECTED %/MAX STAYS ORANGE, as on Stellar (RAZA 2026-10-29), until an amount is typed, the side
+  // flips or the swap completes. The rule (.lxq-active) is Stellar's, already in this page's stylesheet.
+  function quick(p, on) {
+    $$('.dxa-trade-quick button, .mdxa-trade-quick button', p).forEach(function (b) { b.classList.toggle('lxq-active', b === on); });
   }
 
   // ---- wiring -------------------------------------------------------------------------------------
@@ -331,6 +350,7 @@
         var raw = (room * BigInt(pct) / BigInt(100)).toString();
         var i = input(fields(p)[0]);
         if (i) i.value = S().fromUnits(raw, m.dec);
+        quick(p, qb);
         requote();
         return;
       }
@@ -343,6 +363,7 @@
       }
       if (t.closest('[class*="dxa-side-btn"]')) {
         setTimeout(function () {
+          quick(p, null);
           var i2 = input(fields(p)[0]); if (i2) i2.value = '';
           say(p, ''); clearQuote(p); paintStatic(p); checkFee(p);
         }, 30);
@@ -359,6 +380,7 @@
       if (dot >= 0) v = v.slice(0, dot + 1) + v.slice(dot + 1).replace(/\./g, '');
       if (v !== t.value) t.value = v;
       var ff = fields(p), payI = input(ff[0]), recvI = input(ff[1]);
+      quick(p, null);                                  // a typed amount is no longer "25%"
       // Typing in "You receive" fills "You pay" at the current rate; the real quote then runs on that.
       if (t === recvI && payI) {
         var want = Number(v), s = sides(p), d = window.__lxnAssetData, rt = 0;

@@ -68,8 +68,10 @@
   var MAX_TX_GAS = 300;                               // TGas per transaction
   var NEAR_KEEP = '50000000000000000000000';          // 0.05 NEAR left behind by MAX, for gas and storage
   // Mainnet swaps through Rhea burn ~18-28 TGas end to end (measured on four real txs 2026-10-21:
-  // 0.0016-0.0026 NEAR). Shown as an approximation, labelled so.
-  var NET_FEE_EST = '~0.003 NEAR';
+  // 0.0016-0.0026 NEAR). Shown as the figure alone, as Stellar prints its network fee -- RAZA 2026-10-29
+  // asked for the "~" to go, on the swap pane and the review popup alike. 0.003 is the ceiling of what was
+  // measured, so the figure never understates the cost.
+  var NET_FEE_EST = '0.003 NEAR';
 
   // A capture test may point the fee at a registered account. Honoured on a local host only, so a
   // production page can never be steered by it.

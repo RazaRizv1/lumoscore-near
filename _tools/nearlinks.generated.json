@@ -1,0 +1,219 @@
+{
+ "generated": "2026-10-29T00:02:51.644Z",
+ "links": {
+  "wrap.near": {
+   "w": "https://near.org/",
+   "x": "https://x.com/nearprotocol"
+  },
+  "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1": {
+   "w": "https://circle.com",
+   "x": "https://x.com/circle"
+  },
+  "usdt.tether-token.near": {
+   "w": "https://tether.to/",
+   "x": "https://x.com/tether"
+  },
+  "qtc.omft.near": {
+   "w": "https://www.quantus.com/",
+   "x": "https://x.com/QuantusNetwork"
+  },
+  "zec.omft.near": {
+   "w": "https://explorer.near-intents.org/"
+  },
+  "token.rhealab.near": {
+   "w": "https://rhea.finance/",
+   "x": "https://x.com/rhea_finance"
+  },
+  "batman-4.nearlytrade.near": {
+   "w": "https://nearbatman.com/",
+   "x": "https://x.com/BatmanDogNear"
+  },
+  "dac17f958d2ee523a2206206994597c13d831ec7.factory.bridge.near": {
+   "w": "https://rainbowbridge.app/",
+   "x": "https://x.com/auroraisnear"
+  },
+  "ikp.v2-launchpad.justhoot.near": {
+   "x": "https://x.com/INDERNEDKEPUTER"
+  },
+  "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.factory.bridge.near": {
+   "w": "https://rainbowbridge.app/",
+   "x": "https://x.com/auroraisnear"
+  },
+  "nearly-993927.nearlytrade.near": {
+   "w": "https://nearly.trade/",
+   "x": "https://x.com/nearlytrade"
+  },
+  "6b175474e89094c44da98b954eedeac495271d0f.factory.bridge.near": {
+   "w": "https://rainbowbridge.app/transfer"
+  },
+  "hoot-8ecf65.launchpad.justhoot.near": {
+   "w": "https://justhoot.fun/",
+   "x": "https://x.com/justhootfun"
+  },
+  "aaaaaa20d9e0e2461697782ef11675f668207961.factory.bridge.near": {
+   "w": "https://aurora.dev/",
+   "x": "https://x.com/auroraisnear"
+  },
+  "wth-0b2227.launchpad.justhoot.near": {
+   "w": "https://www.whatthehoot.lol/",
+   "x": "https://x.com/what_the_hoot"
+  },
+  "three-de86d6.launchpad.justhoot.near": {
+   "x": "https://x.com/ThreeisNEAR"
+  },
+  "token.sweat": {
+   "w": "https://swe.at/",
+   "x": "https://x.com/SweatEconomy"
+  },
+  "token.publicailab.near": {
+   "w": "https://publicai.io/",
+   "x": "https://x.com/PublicAI_"
+  },
+  "dragon-3.nearlytrade.near": {
+   "w": "https://nearly.trade/dragon-3.nearlytrade.near",
+   "x": "https://x.com/BlackDragoNear"
+  },
+  "nomo.nearlytrade.near": {
+   "w": "https://nomo.trading/",
+   "x": "https://x.com/nomotrading"
+  },
+  "token.0xshitzu.near": {
+   "w": "https://shitzuapes.xyz/",
+   "x": "https://x.com/shitzuonnear"
+  },
+  "qcat-3.nearlytrade.near": {
+   "w": "https://quantuscat.xyz/",
+   "x": "https://x.com/qcat_quantus"
+  },
+  "diarhea.nearlytrade.near": {
+   "w": "https://nearly.trade/diarhea.nearlytrade.near"
+  },
+  "blackdragon.tkn.near": {
+   "w": "https://blackdragon.meme/",
+   "x": "https://x.com/dragonisnear"
+  },
+  "linear-protocol.near": {
+   "w": "https://linearprotocol.org/",
+   "x": "https://x.com/LinearProtocol"
+  },
+  "hoodl-95275b.launchpad.justhoot.near": {
+   "w": "https://justhoodl.fun/",
+   "x": "https://x.com/HoodlCTO"
+  },
+  "shore-4lzt.launch.shoremarkets.near": {
+   "w": "https://shore.markets/",
+   "x": "https://x.com/shoremarkets"
+  },
+  "kat.token0.near": {
+   "w": "https://nearkat.com/",
+   "x": "https://x.com/nearkattoken"
+  },
+  "meta-pool.near": {
+   "w": "https://metapool.app/dapp/mainnet/meta/",
+   "x": "https://x.com/meta_pool"
+  },
+  "ninu-4.nearlytrade.near": {
+   "w": "https://ninu.meme/",
+   "x": "https://x.com/NEAR_INU"
+  },
+  "ai-8.nearlytrade.near": {
+   "w": "https://autonomousinu.trade/",
+   "x": "https://x.com/autonomousinunr"
+  },
+  "npro.nearmobile.near": {
+   "w": "https://nearmobile.app/",
+   "x": "https://x.com/NEARMobile_app"
+  },
+  "2260fac5e5542a773aa44fbcfedf7c193bc2c599.factory.bridge.near": {
+   "w": "https://rainbowbridge.app/"
+  },
+  "gear.enleap.near": {
+   "w": "https://tinkerunion.com/",
+   "x": "https://x.com/NearTinkerUnion"
+  },
+  "yuvi-6c041e37.qlyphs.near": {
+   "w": "https://yuvi.wtf/",
+   "x": "https://x.com/yuvi_wtf"
+  },
+  "singularty.nearlytrade.near": {
+   "w": "https://singularityisnear.fun/",
+   "x": "https://x.com/SingulartyNEAR"
+  },
+  "ftv2.nekotoken.near": {
+   "w": "https://nekoonnear.com/",
+   "x": "https://x.com/nekotoken_xyz"
+  },
+  "staker1.msig1.trufin.near": {
+   "w": "https://www.trufin.io/",
+   "x": "https://x.com/TruFinProtocol"
+  },
+  "spud-3.nearlytrade.near": {
+   "x": "https://x.com/smashed_spud"
+  },
+  "trade-2.nearlytrade.near": {
+   "w": "https://neartrade.lol/",
+   "x": "https://x.com/tryneartrade"
+  },
+  "52a047ee205701895ee06a375492490ec9c597ce.factory.bridge.near": {
+   "w": "https://www.pulsemarkets.org/",
+   "x": "https://x.com/pulsemarkets"
+  },
+  "cfi.consumer-fi.near": {
+   "w": "https://consumerfi.ai/",
+   "x": "https://x.com/consumerfi"
+  },
+  "jambo-1679.meme-cooking.near": {
+   "w": "https://jambo.meme.cooking/",
+   "x": "https://x.com/jambo_cs"
+  },
+  "ribbit-426.meme-cooking.near": {
+   "w": "https://meme.cooking/meme/426"
+  },
+  "token.v2.ref-finance.near": {
+   "w": "https://ref.finance/",
+   "x": "https://x.com/finance_ref"
+  },
+  "usmeme.tg": {
+   "w": "https://usmeme.io/",
+   "x": "https://x.com/USM_eme"
+  },
+  "438e48ed4ce6beecf503d43b9dbd3c30d516e7fd.factory.bridge.near": {
+   "w": "https://www.uwon.lol/",
+   "x": "https://x.com/uwon_near"
+  },
+  "nearai.aidols.near": {
+   "w": "https://aidols.bot/agents/nearai.aidols.near",
+   "x": "https://x.com/near_ai"
+  },
+  "mpdao-token.near": {
+   "w": "https://metapool.app/",
+   "x": "https://x.com/meta_pool"
+  },
+  "d9c2d319cd7e6177336b0a9c93c21cb48d84fb54.factory.bridge.near": {
+   "w": "https://www.hapi.one/",
+   "x": "https://x.com/i_am_hapi_one"
+  },
+  "zolanear-1726.meme-cooking.near": {
+   "w": "https://zolanear.xyz/",
+   "x": "https://x.com/Zolanear_"
+  },
+  "c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2.factory.bridge.near": {
+   "w": "https://rainbowbridge.app/transfer"
+  },
+  "vote-1737.meme-cooking.near": {
+   "x": "https://x.com/ConclaveVote"
+  },
+  "l000000.factory.shardsmarket.near": {
+   "w": "https://shards.market/",
+   "x": "https://x.com/shardsmarket"
+  },
+  "itlx.intellex_xyz.near": {
+   "w": "https://www.intellex.xyz/",
+   "x": "https://x.com/intellex_xyz"
+  },
+  "claw-2.nearlytrade.near": {
+   "w": "https://ironclawtoken.xyz/",
+   "x": "https://x.com/ironclawtoken"
+  }
+ }
+}
