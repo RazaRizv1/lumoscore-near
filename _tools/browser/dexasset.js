@@ -810,7 +810,11 @@
       });
     }
     var span = hi - lo;
-    var t0 = pts[0][0], t1 = pts[n - 1][0], tspan = (t1 - t0) || 1;
+    var t0 = pts[0][0], t1 = pts[n - 1][0];
+    if (FIT.t1 && FIT.t0 <= t0 && FIT.t1 >= t1) { t0 = FIT.t0; t1 = FIT.t1; }  // the range's own window
+    var tspan = (t1 - t0) || 1;
+    // One candle's width of the window, so bars never overlap however the trades cluster.
+    var slot = FIT.bucket > 0 ? iw * FIT.bucket / tspan : iw / n;
     var y = function (v) { return span > 0 ? B - ((v - lo) / span) * priceH : PADT + priceH / 2; };
     var xAt = function (t) { return L + ((t - t0) / tspan) * iw; };
 
@@ -828,7 +832,7 @@
     var vmax = 0;
     for (var vi = 0; vi < n; vi++) { var vv0 = +pts[vi][5] || 0; if (vv0 > vmax) vmax = vv0; }
     if (vmax > 0) {
-      var bw = Math.max(1, Math.min(14, iw / n * 0.62)), vroot = Math.sqrt(vmax), vtop = B + gap;
+      var bw = Math.max(1, Math.min(14, slot * 0.62)), vroot = Math.sqrt(vmax), vtop = B + gap;
       for (var bi = 0; bi < n; bi++) {
         var bv = +pts[bi][5] || 0;
         if (!(bv > 0)) continue;
@@ -843,7 +847,7 @@
 
     if (CH_VIEW.type === 'candle') {
       // Candles are [t, close, high, low, open, volume]; a candle missing its open opens at the close before it.
-      var cdw = Math.max(1.4, Math.min(12, iw / n * 0.6));
+      var cdw = Math.max(1.4, Math.min(12, slot * 0.6));
       for (var cdi = 0; cdi < n; cdi++) {
         var cdp = pts[cdi], cdx = xAt(cdp[0]);
         var cdc = cdp[1];
@@ -1187,7 +1191,9 @@
     '1W':   { days: 7,   ttl: 900000,  tf: 'hour',   agg: 1,  limit: 168 },
     '1M':   { days: 30,  ttl: 1800000, tf: 'hour',   agg: 4,  limit: 180 },
     '1Y':   { days: 365, ttl: 3600000, tf: 'day',    agg: 1,  limit: 365 },
-    'PERF': { days: 365, ttl: 3600000, tf: 'day',    agg: 1,  limit: 200 },
+    // The same request as 1Y on purpose: one call (and one cache entry) serves the chart's year and the
+    // 7d/1m/3m/6m cells, which keeps a page inside GeckoTerminal's per-visitor allowance.
+    'PERF': { days: 365, ttl: 3600000, tf: 'day',    agg: 1,  limit: 365 },
   };
   var SERIES_INFLIGHT = {};
 
@@ -1308,7 +1314,9 @@
     return getJsonOnce(key, url, R.ttl, function (j) {
       var list = (j && j.data && j.data.attributes && j.data.attributes.ohlcv_list) || [];
       // GeckoTerminal: [seconds, open, high, low, close, volume], newest first.
-      return list.filter(function (c) { return c && c[4] > 0; })
+      // GeckoTerminal can list the same candle twice (seen on UWON's hourly series); one per time.
+      var seen = {};
+      return list.filter(function (c) { if (!c || !(c[4] > 0) || seen[c[0]]) return false; seen[c[0]] = 1; return true; })
         .map(function (c) { return [c[0] * 1000, +c[4], +c[2], +c[3], +c[1], +c[5], null]; })
         .sort(function (a, b) { return a[0] - b[0]; });
     });
@@ -1323,7 +1331,10 @@
     // token charted from CoinGecko -- USDC among them -- had no bars at all, on any range. CoinGecko stays
     // as the fallback when the pool series cannot be had (the chart then draws without bars).
     if (d.cg && gtPool(d)) {
-      return gtSeries(d, R, vs).then(function (pts) { if (pts.length < 2) throw new Error('short'); return pts; })
+      var gt = function () { return gtSeries(d, R, vs).then(function (pts) { if (pts.length < 2) throw new Error('short'); return pts; }); };
+      // A refused GeckoTerminal call is usually its per-minute allowance: one retry after a pause, before
+      // settling for CoinGecko's line, which has no volume bars.
+      return gt().catch(function () { return new Promise(function (res) { setTimeout(res, 2500); }).then(gt); })
         .catch(function () {
           var jobs = [cgSeries(d.cg, R.days, R.ttl)];
           if (vs !== 'USD') jobs.push(cgSeries('near', R.days, R.ttl));
@@ -1368,6 +1379,40 @@
     else seriesFor('1D', 'NEAR').then(take, function () { PERF.h1 = 'done'; paintPerf(LASTD); });
   }
 
+  // EACH RANGE SHOWS ITS OWN WINDOW (RAZA 2026-10-29: "why are the volume bars merging into each other").
+  // GeckoTerminal returns the last N candles that HAD a trade, not the last N periods: for a quiet token
+  // the "1D" request (96 x 15 min) reached back to Oct 26, and the bars, sized as if 96 candles shared the
+  // width evenly, piled into each other wherever the trades clustered. So the series is cut to the range
+  // (the last 24h for 1D), opened at the price carried in from before it, a quiet stretch is drawn flat
+  // (no trade, no move) rather than as a diagonal, and the line runs on to now. The candle length is kept
+  // on FIT so drawChart can size a bar to one candle of the window.
+  var FIT = { t0: 0, t1: 0, bucket: 0 };
+  function fitWindow(pts, label) {
+    var R = CH_SRC[label] || CH_SRC['1D'];
+    if (!pts || pts.length < 2) return pts;
+    var diffs = [];
+    for (var i = 1; i < pts.length; i++) { var df = pts[i][0] - pts[i - 1][0]; if (df > 0) diffs.push(df); }
+    diffs.sort(function (a, b) { return a - b; });
+    var win = R.days * 86400000;
+    var bucket = Math.max(60000, Math.min(win / 20, diffs[0] || 60000));
+    var end = Math.max(Date.now(), pts[pts.length - 1][0]), start = end - win;
+    var prev = null, inside = [];
+    for (var k = 0; k < pts.length; k++) { if (pts[k][0] < start) prev = pts[k]; else inside.push(pts[k]); }
+    var flat = function (t, p) { return [t, p[1], p[1], p[1], p[1], 0, p[6], 0]; };
+    var seq = prev ? [flat(start, prev)].concat(inside) : inside;
+    if (seq.length < 2) { FIT = { t0: pts[0][0], t1: pts[pts.length - 1][0], bucket: bucket }; return pts; }
+    var out = [seq[0]];
+    for (var j = 1; j < seq.length; j++) {
+      var a = out[out.length - 1], b = seq[j];
+      if (b[0] - a[0] > 1.5 * bucket) out.push(flat(b[0] - bucket, a));
+      out.push(b);
+    }
+    var last = out[out.length - 1];
+    if (end - last[0] > 1.5 * bucket) out.push(flat(end, last));
+    FIT = { t0: prev ? start : out[0][0], t1: end, bucket: bucket };
+    return out;
+  }
+
   function loadChart(asset, label, attempt) {
     var c = chartSvg();
     if (!c) return;
@@ -1378,6 +1423,7 @@
     seriesFor(want, vs)
       .then(function (pts) {
         if (gen !== chGen) return;                       // a later range or unit button won
+        pts = fitWindow(pts, want);
         drawChart(pts); paintOhlcStrip(pts); paintChartHead(pts); fitChartHeight();
         if (want === '1D') noteHour(pts, vs);
       })
