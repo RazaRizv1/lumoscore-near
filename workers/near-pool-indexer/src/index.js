@@ -55,7 +55,7 @@ async function rpc(method, params, k) {
   if (j.error) {
     const name = (j.error.cause && j.error.cause.name) || j.error.name || '';
     // A height with no block (skipped) or no chunk for the shard is an answer, not a fault.
-    if (/UNKNOWN_BLOCK|UNKNOWN_CHUNK|NOT_SYNCED_YET/.test(name) && (method === 'chunk' || method === 'EXPERIMENTAL_changes')) return null;
+    if (/UNKNOWN_BLOCK|UNKNOWN_CHUNK|NOT_SYNCED_YET/.test(name) && (method === 'chunk' || method === 'EXPERIMENTAL_changes' || method === 'block')) return null;
     if (k < 2) { await pause(300); return rpc(method, params, k + 1); }
     throw new Error(method + ': ' + name);
   }
@@ -171,6 +171,16 @@ async function blockAt(h) {
   try { const b = await rpc('block', { block_id: h }); return b && b.header ? { h: b.header.height, ts: Math.floor(Number(b.header.timestamp_nanosec || b.header.timestamp) / 1e6) } : null; }
   catch (e) { return null; }
 }
+// NEAR skips heights, and a skipped height has no block to time it by. The backfill's window edge landed on one
+// (222146653) and blockAt returned null every run, so the backfill retried the same window forever and stalled
+// at 31 of 72 hours (2026-10-31). Only the edge's TIME is needed, so the nearest real block on either side will do.
+async function blockNear(h) {
+  for (let d = 0; d <= 6; d++) {
+    const b = (await blockAt(h + d)) || (d ? await blockAt(h - d) : null);
+    if (b) return b;
+  }
+  return null;
+}
 async function findShard(h) {
   for (let k = 0; k < 10; k++) {
     const b = await nd('/block/' + (h - k)).catch(() => null);
@@ -265,10 +275,11 @@ async function run(env) {
   if (m.backDone !== '1' && head - fwd < 30 && Date.now() < deadline - 8000) {
     const hi = back - 1, lo = Math.max(0, back - BACK);
     const hs = []; for (let h = hi; h >= lo; h--) hs.push(h);
-    const t1 = await blockAt(hi), t0 = await blockAt(lo);
+    const t1 = await blockNear(hi), t0 = await blockNear(lo);
     if (t0 && t1) {
       const r = await scan(hs, shard, t0, t1, deadline);
       await save(db, r.rows);
+      if (+m.backMiss) stmts.push(setMeta(db, 'backMiss', 0));
       if (r.done) {
         back = hi - r.done + 1;
         const bt = Math.round(t0.ts + (t1.ts - t0.ts) * (back - t0.h) / Math.max(1, t1.h - t0.h));
@@ -276,8 +287,16 @@ async function run(env) {
         if (bt <= floorTs) stmts.push(setMeta(db, 'backDone', '1'));
       }
       report.back = r.done; report.rows += r.rows.length; report.hits += r.hits; report.failed += r.failed; report.bwhy = r.why;
+    } else {
+      // The free RPCs keep only ~32 hours of blocks (dRPC answers UNKNOWN_BLOCK for every height past that, measured
+      // 2026-10-31), so a 3-day backfill cannot finish here. Ten runs in a row with the newer edge readable and the
+      // older one not is that limit, not a blip: stop there. History then grows forward, kept KEEP_DAYS.
+      const miss = (+m.backMiss || 0) + 1;
+      stmts.push(setMeta(db, 'backMiss', t1 && !t0 ? miss : 0));
+      if (t1 && !t0 && miss >= 10) stmts.push(setMeta(db, 'backDone', '1'));
+      report.bwhy = { edge: (t1 ? '' : 'hi ' + hi + ' ') + (t0 ? '' : 'lo ' + lo), miss };
     }
-  }
+  } else if (m.backDone !== '1') report.bwhy = { skipped: head - fwd >= 30 ? 'lag ' + (head - fwd) : 'out of time' };
   if (fwd % 3000 < FWD) stmts.push(db.prepare('DELETE FROM txs WHERE ts < ?1').bind(Date.now() - KEEP_DAYS * 86400000));
   await db.batch(stmts);
   return report;
