@@ -2230,8 +2230,13 @@
   // read "NEAR" beside Aptos's own logo, and every APT figure an Aptos transfer would show. lx-mc skips
   // anything inside [data-lx-noswap], so the bridge's own areas carry it. Set before the destinations are
   // appended: the renamer's observer sees each new option as it lands.
+  //
+  // THE WHOLE CARD, NOT A LIST OF ITS PARTS (RAZA 2026-10-30: "it keeps freezing"). Picking Aptos made
+  // lx-brstep2 write "Make sure the address is on Aptos" into step 2 -- outside the parts listed here -- the
+  // renamer made it "on NEAR", lx-brstep2's own observer wrote "Aptos" back, and the two traded the node in
+  // an endless microtask loop: the tab froze. Every .br-step and the card around them are ours.
   function noSwap() {
-    $$('.br-steps, .br-netbox, .lx-brroute, .br-table, .lx-brmhost, .lx-br-amenu').forEach(function (el) {
+    $$('.br-card, .br-step, .br-steps, .br-netbox, .lx-brroute, .br-table, .lx-brmhost, .lx-br-amenu').forEach(function (el) {
       if (!el.hasAttribute('data-lx-noswap')) el.setAttribute('data-lx-noswap', '');
     });
   }
