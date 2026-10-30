@@ -225,7 +225,7 @@
 
   // THE SHORTFALL, IN STELLAR'S WORDS (RAZA 2026-10-29: "it should say Insufficient XXX balance — you have
   // XXX like it does on Stellar"). Two cases on NEAR: more than the balance itself, and -- paying NEAR only
-  // -- within the balance but into the 0.05 NEAR kept for gas, which Stellar's reserve never needs to say.
+  // -- within the balance but into the 0.2 NEAR a swap keeps for gas, which Stellar's reserve never needs to say.
   // The figures are FLOORED from the raw units (never rounded up), so "you have" is never more than is held.
   function floorTxt(raw, dec) {
     var t = String(S().fromUnits(raw, dec)), i = t.indexOf('.');
@@ -238,9 +238,9 @@
     var s = sides(p), m = meta(s.pay);
     if (m.dec == null || have == null) return '';
     if (S().big(raw) > S().big(have)) return 'Insufficient ' + m.code + ' balance — you have ' + floorTxt(have, m.dec);
-    var room = S().maxSpend(s.pay, have);
+    var room = S().swapRoom(s.pay, have);
     if (S().big(raw) > S().big(room)) {
-      return 'Insufficient ' + m.code + ' balance — keep 0.05 NEAR for gas; up to ' + floorTxt(room, m.dec) + ' can be swapped';
+      return 'Insufficient ' + m.code + ' balance — keep 0.2 NEAR for gas; up to ' + floorTxt(room, m.dec) + ' can be swapped';
     }
     return '';
   }
@@ -348,7 +348,7 @@
         e.stopImmediatePropagation();
         var s = sides(p), have = bal.raw[s.pay], m = meta(s.pay);
         if (have == null || m.dec == null) return;
-        var room = S().big(S().maxSpend(s.pay, have));
+        var room = S().big(S().swapRoom(s.pay, have));
         var pct = /max/i.test(qb.textContent) ? 100 : parseInt(qb.textContent, 10);
         if (!(pct > 0)) return;
         var raw = (room * BigInt(pct) / BigInt(100)).toString();

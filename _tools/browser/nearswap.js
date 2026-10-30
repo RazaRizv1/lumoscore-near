@@ -74,6 +74,12 @@
   // use); real swaps here burned 18-28 TGas end to end. Unused gas is refunded either way.
   var SWAP_GAS = 180;
   var NEAR_KEEP = '50000000000000000000000';          // 0.05 NEAR left behind by MAX, for gas and storage
+  // A SWAP KEEPS 0.2 NEAR, NOT 0.05 (RAZA 2026-10-30: HOT refused three swaps of 0.005 NEAR from a 0.147 NEAR
+  // balance with "User rejected the request"; Rhea's own app, same wallet, refuses the same swap with "Must have
+  // 0.2N or more left in wallet for gas fee"). NEAR sets aside a transaction's whole prepaid gas up front, at a
+  // pessimistic price, and refunds what goes unused -- a 200+ TGas swap needs far more on hand than the few
+  // thousandths it finally costs. 0.2 is Rhea's figure; the 0.05 above stays for cheap calls (send, bridge).
+  var SWAP_KEEP = '200000000000000000000000';
   // Mainnet swaps through Rhea burn ~18-28 TGas end to end (measured on four real txs 2026-10-21:
   // 0.0016-0.0026 NEAR). Shown as the figure alone, as Stellar prints its network fee -- RAZA 2026-10-29
   // asked for the "~" to go, on the swap pane and the review popup alike. 0.003 is the ceiling of what was
@@ -335,16 +341,24 @@
   // Everything the chain can tell us before the user signs: output registration, wrap.near registration
   // for a NEAR input, the fee account's registration. Resolves { txs, steps, deposits } or rejects with a
   // sentence for the user.
+  // What a swap may spend of a balance: NEAR keeps SWAP_KEEP back for the gas (see above), tokens all of it.
+  function swapRoom(id, rawBal) {
+    if (id !== 'near') return String(rawBal);
+    var v = big(rawBal) - big(SWAP_KEEP);
+    return (v > BigInt(0) ? v : BigInt(0)).toString();
+  }
   function build(me, q) {
     var acct = feeAccount();
     var inC = contractOf(q.from), outC = contractOf(q.to);
     var outNative = q.to === 'near';
     return Promise.all([
+      balance(me, 'near'),
       feeReady(q.from),
       outNative ? Promise.resolve(true) : storageOf(outC, me),
       q.from === 'near' ? storageOf(WNEAR, me) : Promise.resolve(true),
       q.from === 'near' ? balance(me, WNEAR).catch(function () { return null; }) : Promise.resolve(null)
-    ]).then(function (r) {
+    ]).then(function (r0) {
+      var nearHave = r0[0], r = r0.slice(1);
       var wnearBefore = r[3];
       if (r[0] !== true) throw new Error(r[0] === false ? 'Swaps from this token are not enabled yet.' : 'Could not check the fee setup — try again.');
       var needOut = !r[1], needWrap = !r[2];
@@ -397,6 +411,12 @@
         var dep = BigInt(0);
         if (needOut) dep += big(m[0]);
         if (needWrap) dep += big(m[1]);
+        // The gas reserve, checked here so every swap screen gets the same answer before anything is signed.
+        var needNear = dep + (q.from === 'near' ? big(q.amount) : BigInt(0)) + big(SWAP_KEEP);
+        if (big(nearHave) < needNear) {
+          throw new Error('Keep at least 0.2 NEAR in your wallet for gas: NEAR sets the gas aside before a swap runs and refunds what is not used (Rhea asks the same). '
+            + 'You have ' + fromUnits(nearHave, 24).replace(/(\.\d{4})\d+$/, '$1') + ' NEAR.');
+        }
         return { txs: txs, steps: txs.length, needOut: needOut, needWrap: needWrap, storage: dep.toString(),
           wrapped: q.from === 'near', wnearBefore: wnearBefore, me: me };
       });
@@ -488,7 +508,7 @@
 
   window.lxnSwap = {
     get FEE_BPS() { return feeBps(); }, get ROUTED() { return !!router(); }, SLIP_BPS: SLIP_BPS, REF: REF, WNEAR: WNEAR, USDC: USDC, NET_FEE_EST: NET_FEE_EST,
-    feeAccount: feeAccount, feeReady: feeReady, feeOf: feeOf, minOut: minOut,
+    feeAccount: feeAccount, feeReady: feeReady, feeOf: feeOf, minOut: minOut, swapRoom: swapRoom, SWAP_KEEP: SWAP_KEEP,
     toUnits: toUnits, fromUnits: fromUnits, toNum: toNum, big: big,
     tokenInfo: tokenInfo, remember: remember, meta: function (id) { return META[id] || null; },
     pools: pools, quote: quote, along: along, balance: balance, maxSpend: maxSpend,

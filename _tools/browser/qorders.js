@@ -186,7 +186,7 @@
   function roomRaw(a) {
     var r = rawBal(a);
     if (r == null) return r;                     // undefined or null, passed through as-is
-    try { return S().maxSpend(a.id, r); } catch (e) { return null; }
+    try { return S().swapRoom(a.id, r); } catch (e) { return null; }   // swaps and orders keep 0.2 NEAR for gas
   }
   // Why the pay side cannot be spent from yet, or '' when it can.
   function balWhy(a) {

@@ -165,7 +165,7 @@
       if (raw == null || (s === 'sell' && dec == null)) text = pre + '—';
       else {
         // Floored from the raw units, like MAX: a rounded figure here would name, as available, more than is held.
-        var have = s === 'sell' ? fmtDown(raw, dec) : fmtDown(SW() ? SW().maxSpend('near', raw) : raw, 24);
+        var have = s === 'sell' ? fmtDown(raw, dec) : fmtDown(SW() ? SW().swapRoom('near', raw) : raw, 24);
         text = pre + have + ' ' + (s === 'sell' ? code() : 'NEAR');
         canMax = have !== '0';
       }
@@ -303,7 +303,7 @@
     if (side(p) === 'sell') { if (acct.bal[a.id] != null && dec != null) out = trunc6(D().fromUnits(acct.bal[a.id], dec)); }
     else if (price > 0 && acct.bal.near != null && SW()) {
       // Leave room for the DCL storage a first order adds.
-      var room = D().big(SW().maxSpend('near', acct.bal.near));
+      var room = D().big(SW().swapRoom('near', acct.bal.near));
       if (acct.reg === false) room -= D().big('500000000000000000000000');
       var amt = room > BigInt(0) ? D().toNum(room.toString(), 24) / price : 0;
       if (amt > 0) out = trunc6((Math.floor(amt * 1e6) / 1e6).toFixed(6));
@@ -366,14 +366,14 @@
     function stop(text) { busy = false; if (b) b.textContent = label; setCta(p); if (text) say(p, text); }
     Promise.all([D().prereqs(who, o), SW().balance(who, 'near'), o.sell === D().WNEAR ? null : SW().balance(who, o.sell)]).then(function (r) {
       var pre = r[0], nearBal = D().big(r[1]);
-      var keep = D().big('50000000000000000000000');               // 0.05 NEAR for gas, as the swap keeps
+      var keep = D().big(SW().SWAP_KEEP);                            // 0.2 NEAR for gas, as a swap keeps
       var needNear = D().big(pre.storage) + (o.sell === D().WNEAR ? D().big(o.sellRaw) : BigInt(0));
       if (o.sell !== D().WNEAR && D().big(o.sellRaw) > D().big(r[2])) {
         throw new Error('You only have ' + fmtDown(r[2], dec) + ' ' + code() + '.');
       }
       if (needNear + keep > nearBal) {
         throw new Error(o.sell === D().WNEAR
-          ? 'Not enough NEAR for this order' + (D().big(pre.storage) > BigInt(0) ? ' and the storage it needs' : '') + ' — keep 0.05 NEAR for gas.'
+          ? 'Not enough NEAR for this order' + (D().big(pre.storage) > BigInt(0) ? ' and the storage it needs' : '') + ' — keep 0.2 NEAR for gas.'
           : 'Not enough NEAR for the storage this order needs.');
       }
       var txs = D().buildPlace(who, o, pre);

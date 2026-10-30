@@ -146,7 +146,7 @@
       if (nd.nodeType === 3 && nd.nodeValue.trim()) { if (!done) { nd.nodeValue = ' ' + a.code + ' '; done = true; } else nd.nodeValue = ' '; }
     });
   }
-  function room(id) { return bal[id] == null ? null : S().maxSpend(id, bal[id]); }
+  function room(id) { return bal[id] == null ? null : S().swapRoom(id, bal[id]); }   // 0.2 NEAR kept for a swap's gas
   function paintBalance(P) {
     if (!P.fromMeta || !from) return;
     var r = room(from.id);
