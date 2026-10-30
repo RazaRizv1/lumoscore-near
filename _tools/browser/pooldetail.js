@@ -798,6 +798,7 @@
       if (share > 0 && USD && window.__lxnPoolRow && window.__lxnPoolRow.liq != null) value = window.__lxnPoolRow.liq * USD * share;
       bothPos('amount').forEach(function (amt) { amt.textContent = share > 0 ? (value != null ? usdShort(value) : num(scaled(mine, 24), 4) + ' LP') : 'No position'; });
       $$('#dwWithdraw .balance').forEach(function (b) { b.textContent = 'Your LP: ' + (share > 0 ? num(scaled(mine, 24), 6) : '0'); });
+      holdDw();
     }, function () {});
     // Balances: the wNEAR side shows NEAR, which a deposit wraps.
     p.tokens.slice(0, 2).forEach(function (t, k) {
@@ -821,6 +822,7 @@
     renderTx();
     loadTx();
     loadMine();
+    findSweep();                                   // tokens left on Rhea by an earlier deposit or withdrawal
   }
 
   function paint(id, row) {
@@ -1086,60 +1088,354 @@
     };
   }
 
-  // ---- Deposit / Withdraw: the design's disabled state ------------------------------------------------
-  // Balances are not read and nothing can be signed yet, so: the baked "Balance: 25,420.18" / "Your LP:
-  // 1,240.55" become em dashes (and the design's lx-dwready gate is lifted on them), the inputs, MAX and
-  // percentage buttons are inert, and the CTA takes the design's own .lx-dwoff state with a label saying
-  // why. The Deposit/Withdraw tabs still switch, as the design's card does, so both halves can be seen.
-  var DW_LABEL = { deposit: 'Adding liquidity on NEAR is coming soon', withdraw: 'Removing liquidity on NEAR is coming soon' };
+  // ---- Deposit / Withdraw ---------------------------------------------------------------------------------
+  // RAZA 2026-10-30: "Yes, build Deposit and Withdraw for NEAR pools next." CLASSIC (SIMPLE_POOL) Rhea pools,
+  // which is what this page lists; a stable / rated pool says why it cannot take a deposit here.
+  //
+  // DEPOSIT, the transactions the launchpad already signs on mainnet (browser/nearmint.js, pool 8978):
+  //   Rhea      [storage_deposit for the shortfall], register_tokens(the pool's tokens not yet in the account)
+  //   wrap.near [storage_deposit if unregistered], near_deposit(NEAR side), ft_transfer_call(Rhea, msg "")
+  //   token     ft_transfer_call(Rhea, msg "")
+  //   Rhea      add_liquidity({pool_id, amounts, min_amounts: 99.5%}) 0.01 NEAR, ~0.009 refunded
+  // Anything already sitting in the account on Rhea is used before more is sent. The second amount follows the
+  // pool's reserve ratio exactly, in raw units.
+  //
+  // WITHDRAW, two presses on purpose. remove_liquidity({pool_id, shares, min_amounts: 99.5%}) puts the tokens in
+  // the account ON RHEA; the exact amounts are known only after it runs. The button then reads "Withdraw to
+  // wallet", which reads get_deposits and sends every pool token home (registering the account on a token
+  // first if needed) and unwraps wNEAR to NEAR -- so nothing is left behind on Rhea, and the same button appears
+  // whenever a deposit's leftovers or an interrupted withdrawal are found there.
+  //
+  // Every flow keeps 0.2 NEAR for gas (see browser/nearswap.js, SWAP_KEEP), and a wallet error is reported in
+  // the wallet's own words after reading what reached the chain.
+  var REF = 'v2.ref-finance.near', WNEAR = 'wrap.near';
+  var BYTE = BigInt('10000000000000000000'), REF_NEW = BigInt('10000000000000000000000'), REF_TOKEN_BYTES = 148;
+  var LIQ_DEPOSIT = '10000000000000000000000', GAS_KEEP = BigInt('200000000000000000000000'), FT_REG = '1250000000000000000000';
+  var DW = { busy: false, sweep: null };
+  function bigI(v) { try { return BigInt(String(v || '0')); } catch (e) { return BigInt(0); } }
+  function toRaw(v, dec) {
+    var s = String(v == null ? '' : v).replace(/,/g, '').trim();
+    if (!/^\d*\.?\d*$/.test(s) || s === '' || s === '.') return null;
+    var p = s.split('.'), frac = (p[1] || '').slice(0, dec);
+    while (frac.length < dec) frac += '0';
+    var r = ((p[0] || '0') + frac).replace(/^0+(?=\d)/, '');
+    return r;
+  }
+  function fromRaw(raw, dec, dp) {
+    var s = String(raw || '0');
+    while (s.length <= dec) s = '0' + s;
+    var whole = s.slice(0, s.length - dec), frac = s.slice(s.length - dec).slice(0, dp == null ? 6 : dp).replace(/0+$/, '');
+    return whole + (frac ? '.' + frac : '');
+  }
+  function fcall(m, args, tgas, dep) { return { type: 'FunctionCall', params: { methodName: m, args: args, gas: String(tgas) + '000000000000', deposit: String(dep) } }; }
+  function less(raw, bps) { return (bigI(raw) * BigInt(10000 - bps) / BigInt(10000)).toString(); }
+  function canDw() { var p = window.__lxnPool; return !!(p && p.kind === 'SIMPLE_POOL' && p.tokens && p.tokens.length === 2); }
+  // The pool as Rhea holds it, in raw units and in its own token order.
+  function poolRaw() {
+    var p = window.__lxnPool;
+    if (!p) return Promise.reject(new Error('no pool'));
+    if (p.rawP) return p.rawP;
+    p.rawP = Promise.all([nview(REF, 'get_pool', { pool_id: +p.id }), Promise.all(p.tokens.map(function (t) { return decOf(t.i); }))])
+      .then(function (r) {
+        var pool = r[0] || {}, ids = pool.token_account_ids || [], decs = {};
+        p.tokens.forEach(function (t, k) { decs[t.i] = r[1][k]; });
+        return { ids: ids, amounts: (pool.amounts || []).map(String), supply: String(pool.shares_total_supply || '0'), decs: decs };
+      });
+    p.rawP.catch(function () { p.rawP = null; });
+    return p.rawP;
+  }
+  function dwSay(text, tone) {
+    var card = $('.dw-card');
+    if (!card) return;
+    var box = card.querySelector('.lxx-dwsay');
+    if (!box) {
+      box = el('div', 'lxx-dwsay');
+      box.setAttribute('data-logoed', '1');
+      box.style.cssText = 'margin-top:10px;font-size:13px;font-weight:600;line-height:1.5';
+      card.appendChild(box);
+    }
+    box.textContent = text || '';
+    box.style.color = tone === 'bad' ? '#e5484d' : (tone === 'good' ? 'var(--green,#22c55e)' : 'var(--text-muted,#9aa)');
+    box.style.display = text ? '' : 'none';
+  }
+  function dwToast(msg) {
+    if (typeof window.lxToast === 'function') { try { window.lxToast(msg); return; } catch (e) {} }
+    dwSay(msg, 'good');
+  }
+
+  var DW_OFF = { deposit: 'Adding liquidity to this pool type is not supported here', withdraw: 'Removing liquidity from this pool type is not supported here' };
   function dwMode() {
     var t = $('.dw-tabs button.active');
     return (t && t.getAttribute('data-dw')) === 'withdraw' ? 'withdraw' : 'deposit';
+  }
+  function ctaLabel() {
+    if (!window.__lxnPool) return dwMode() === 'withdraw' ? 'Remove Liquidity' : 'Add Liquidity';   // still reading
+    if (!canDw()) return DW_OFF[dwMode()];
+    if (DW.sweep && DW.sweep.length) return 'Withdraw to wallet';
+    return dwMode() === 'withdraw' ? 'Remove Liquidity' : 'Add Liquidity';
+  }
+  function setCta(label, on) {
+    $$('.dw-cta').forEach(function (b) {
+      // lx-gate swaps this button to "Connect wallet" while no wallet is connected and restores data-lxorig /
+      // data-lxdis on connect, so both always carry the state this layer wants.
+      b.setAttribute('data-lxorig', label);
+      b.setAttribute('data-lxdis', on ? '0' : '1');
+      if ((b.textContent || '').trim() === 'Connect wallet') { b.classList.remove('lx-dwoff'); return; }
+      if (DW.busy) return;
+      b.classList.toggle('lx-dwoff', !on);
+      b.disabled = !on;
+      if (on) b.removeAttribute('aria-disabled'); else b.setAttribute('aria-disabled', 'true');
+      b.title = on ? '' : label;
+      var wrote = false;
+      [].forEach.call(b.childNodes, function (nd) {
+        if (nd.nodeType === 3 && nd.nodeValue.trim()) { nd.nodeValue = ' ' + label + ' '; wrote = true; }
+      });
+      if (!wrote) b.appendChild(document.createTextNode(' ' + label + ' '));
+    });
   }
   function holdDw() {
     // Balances already read stay on screen when the tabs switch (loadMine fills them).
     var P = window.__lxnPool || {};
     $$('#dwDeposit .balance').forEach(function (b, k) {
       var v = P['bal' + k], t = P.tokens && P.tokens[k];
-      b.textContent = 'Balance: ' + (v != null ? num(v, 6) + (t && t.i === 'wrap.near' ? ' NEAR' : '') : '—');
+      b.textContent = 'Balance: ' + (v != null ? num(v, 6) + (t && t.i === WNEAR ? ' NEAR' : '') : '—');
     });
     $$('#dwWithdraw .balance').forEach(function (b) {
-      b.textContent = 'Your LP: ' + (P.myShares != null ? (P.myShares !== '0' ? num(Number(P.myShares) / 1e24, 6) : '0') : '—');
+      b.textContent = 'Your LP: ' + (P.myShares != null ? (P.myShares !== '0' ? fromRaw(P.myShares, 24, 6) : '0') : '—');
     });
     try { document.documentElement.classList.add('lx-dwready'); } catch (e) {}
+    var on = canDw();
     $$('#dwDeposit input, #dwWithdraw input').forEach(function (i) {
-      i.value = '';
-      i.disabled = true;
-      i.setAttribute('aria-disabled', 'true');
+      if (!on) i.value = '';
+      i.disabled = !on;
+      if (on) i.removeAttribute('aria-disabled'); else i.setAttribute('aria-disabled', 'true');
     });
     $$('#dwDeposit .max-btn, #dwWithdraw .dw-pct-b').forEach(function (b) {
-      b.style.pointerEvents = 'none';
-      b.style.opacity = '.45';
-      b.setAttribute('aria-disabled', 'true');
-      if (b.tagName === 'BUTTON') b.disabled = true;
+      b.style.pointerEvents = on ? '' : 'none';
+      b.style.opacity = on ? '' : '.45';
+      if (on) b.removeAttribute('aria-disabled'); else b.setAttribute('aria-disabled', 'true');
+      if (b.tagName === 'BUTTON') b.disabled = !on;
     });
-    $$('.dw-cta').forEach(function (b) {
-      var t = DW_LABEL[dwMode()];
-      // lx-gate swaps this button to "Connect wallet" while no wallet is connected and, on connect,
-      // RESTORES what it saved in data-lxorig / data-lxdis. Writing both means the restore lands on this
-      // disabled label rather than the design's enabled "Add Liquidity".
-      b.setAttribute('data-lxorig', t);
-      b.setAttribute('data-lxdis', '1');
-      // While lx-gate shows "Connect wallet" the button is the gate's and must stay pressable: .lx-dwoff
-      // is pointer-events:none, which made it a dead control on the first check (2026-10-21). Connecting
-      // reloads the page, and this runs again with the wallet present.
-      if ((b.textContent || '').trim() === 'Connect wallet') { b.classList.remove('lx-dwoff'); return; }
-      b.classList.add('lx-dwoff');
-      b.setAttribute('aria-disabled', 'true');
-      b.disabled = true;
-      b.title = t;
-      var wrote = false;
-      [].forEach.call(b.childNodes, function (nd) {
-        if (nd.nodeType === 3 && nd.nodeValue.trim()) { nd.nodeValue = ' ' + t + ' '; wrote = true; }
+    setCta(ctaLabel(), on);
+    if (on) setSummary('network fee', '0.003 NEAR');
+  }
+
+  // ---- the form: amounts, ratio, previews ----
+  function inVal(i) { return i ? String(i.value || '').replace(/,/g, '') : ''; }
+  function syncRatio(from) {
+    var p = window.__lxnPool, i = dwInputs();
+    if (!p || !i.a || !i.b) return;
+    poolRaw().then(function (R) {
+      var ka = R.ids.indexOf(p.a.i), kb = R.ids.indexOf(p.b.i);
+      var ra = bigI(R.amounts[ka]), rb = bigI(R.amounts[kb]), da = R.decs[p.a.i], db = R.decs[p.b.i];
+      if (!(ra > BigInt(0)) || !(rb > BigInt(0))) return;
+      if (from === 'a') {
+        var xa = toRaw(inVal(i.a), da);
+        i.b.value = xa && xa !== '0' ? fromRaw((bigI(xa) * rb / ra).toString(), db, 6) : '';
+      } else {
+        var xb = toRaw(inVal(i.b), db);
+        i.a.value = xb && xb !== '0' ? fromRaw((bigI(xb) * ra / rb).toString(), da, 6) : '';
+      }
+      previewDeposit(R);
+    }, function () {});
+  }
+  function previewDeposit(R) {
+    var p = window.__lxnPool, i = dwInputs();
+    if (!p || !R) return;
+    var ka = R.ids.indexOf(p.a.i), xa = toRaw(inVal(i.a), R.decs[p.a.i]);
+    var ra = bigI(R.amounts[ka]), sup = bigI(R.supply), mine = bigI(p.myShares || '0');
+    if (!xa || xa === '0' || !(ra > BigInt(0)) || !(sup > BigInt(0))) { setSummary('pool share', '—'); return; }
+    var minted = sup * bigI(xa) / ra;
+    var after = Number((mine + minted) * BigInt(1000000) / (sup + minted)) / 1e4;
+    setSummary('pool share', (after < 0.0001 ? '<0.0001' : after.toFixed(4)) + '%');
+  }
+  function previewWithdraw() {
+    var p = window.__lxnPool, i = dwInputs();
+    if (!p || !i.lp) return;
+    poolRaw().then(function (R) {
+      var sh = toRaw(inVal(i.lp), 24), sup = bigI(R.supply);
+      var recv = $$('#dwWithdraw .dw-field')[1], rows = recv ? recv.querySelectorAll('.row') : [];
+      [p.a, p.b].forEach(function (t, k) {
+        var out = rows[k] && recvOut(rows[k]);
+        if (!out) return;
+        var amt = (sh && sup > BigInt(0)) ? (bigI(R.amounts[R.ids.indexOf(t.i)]) * bigI(sh) / sup).toString() : '0';
+        out.textContent = fromRaw(amt, R.decs[t.i], 6);
       });
-      if (!wrote) b.appendChild(document.createTextNode(' ' + t + ' '));
+      var mine = bigI(p.myShares || '0'), s = bigI(sh || '0');
+      var after = (sup - s) > BigInt(0) ? Number((mine > s ? mine - s : BigInt(0)) * BigInt(1000000) / (sup - s)) / 1e4 : 0;
+      setSummary('pool share', sh ? ((after < 0.0001 && after > 0 ? '<0.0001' : after.toFixed(4)) + '%') : '—');
+    }, function () {});
+  }
+
+  // ---- signing ----
+  function signTxs(me, txs) {
+    if (!window.lxn || typeof window.lxn.wallet !== 'function') return Promise.reject(new Error('Connect a NEAR wallet first.'));
+    return window.lxn.wallet().then(function (w) {
+      if (!w) throw new Error('No NEAR wallet is connected.');
+      if (txs.length === 1) return w.signAndSendTransaction({ signerId: me, receiverId: txs[0].receiverId, actions: txs[0].actions }).then(function (r) { return [r]; });
+      return w.signAndSendTransactions({ signerId: me, transactions: txs });
     });
   }
+  function failed(res) {
+    return (res || []).some(function (r) { return r && r.status && typeof r.status === 'object' && r.status.Failure; });
+  }
+  function errText(e, what) {
+    var m = String((e && e.message) || e || '').replace(/\s+/g, ' ').slice(0, 180);
+    try { console.warn('[LumosCore pool] wallet error:', e); } catch (x) {}
+    return 'Nothing more was ' + what + '. The wallet said: "' + (m || 'no reason given') + '". Check your wallet activity before trying again.';
+  }
+  function storageOf(c, me) { return nview(c, 'storage_balance_of', { account_id: me }); }
+  function refState(me, ids) {
+    return storageOf(REF, me).then(function (sb) {
+      if (!sb) return { need: REF_NEW.toString(), deps: {}, fresh: ids.slice() };
+      return Promise.all([nview(REF, 'get_user_storage_state', { account_id: me }), nview(REF, 'get_deposits', { account_id: me })]).then(function (r) {
+        var st = r[0] || {}, deps = r[1] || {};
+        var fresh = ids.filter(function (t) { return !(t in deps); });
+        var need = bigI(st.usage) + BigInt(fresh.length * REF_TOKEN_BYTES) * BYTE, have = bigI(st.deposit || sb.total);
+        return { need: need > have ? (need - have).toString() : '0', deps: deps, fresh: fresh };
+      });
+    });
+  }
+
+  function doDeposit() {
+    var p = window.__lxnPool, me = addr(), i = dwInputs();
+    return Promise.all([poolRaw(), nativeBal(me)]).then(function (r0) {
+      var R = r0[0], nearHave = bigI(r0[1]);
+      var ka = R.ids.indexOf(p.a.i), kb = R.ids.indexOf(p.b.i);
+      if (ka < 0 || kb < 0) throw new Error('This pool’s tokens could not be matched.');
+      var amt = {};
+      amt[p.a.i] = toRaw(inVal(i.a), R.decs[p.a.i]);
+      amt[p.b.i] = toRaw(inVal(i.b), R.decs[p.b.i]);
+      if (!amt[p.a.i] || amt[p.a.i] === '0' || !amt[p.b.i] || amt[p.b.i] === '0') throw new Error('Enter an amount to deposit.');
+      return Promise.all([refState(me, R.ids), Promise.all(R.ids.map(function (t) {
+        return t === WNEAR ? Promise.resolve(null) : nview(t, 'ft_balance_of', { account_id: me });
+      })), storageOf(WNEAR, me)]).then(function (r) {
+        var st = r[0], bals = r[1], wrapReg = !!r[2];
+        var txs = [], needNear = BigInt(0), refActs = [];
+        if (bigI(st.need) > BigInt(0)) { refActs.push(fcall('storage_deposit', { account_id: me, registration_only: false }, 30, st.need)); needNear += bigI(st.need); }
+        if (st.fresh.length) refActs.push(fcall('register_tokens', { token_ids: st.fresh }, 30, '1'));
+        if (refActs.length) txs.push({ receiverId: REF, actions: refActs });
+        R.ids.forEach(function (t, k) {
+          var want = bigI(amt[t]), already = bigI(st.deps[t] || '0'), send = want > already ? want - already : BigInt(0);
+          if (!(send > BigInt(0))) return;
+          if (t === WNEAR) {
+            var w = [];
+            if (!wrapReg) { w.push(fcall('storage_deposit', { account_id: me, registration_only: true }, 10, FT_REG)); needNear += bigI(FT_REG); }
+            w.push(fcall('near_deposit', {}, 10, send.toString()));
+            w.push(fcall('ft_transfer_call', { receiver_id: REF, amount: send.toString(), msg: '' }, 100, '1'));
+            needNear += send;
+            txs.push({ receiverId: WNEAR, actions: w });
+          } else {
+            if (bigI(bals[k]) < send) {
+              var tk = t === p.a.i ? p.a : p.b;
+              throw new Error('Insufficient ' + tk.name + ' balance — you have ' + fromRaw(bals[k], R.decs[t], 6));
+            }
+            txs.push({ receiverId: t, actions: [fcall('ft_transfer_call', { receiver_id: REF, amount: send.toString(), msg: '' }, 100, '1')] });
+          }
+        });
+        var amounts = R.ids.map(function (t) { return amt[t]; });
+        txs.push({ receiverId: REF, actions: [fcall('add_liquidity', { pool_id: +p.id, amounts: amounts, min_amounts: amounts.map(function (a) { return less(a, 50); }) }, 60, LIQ_DEPOSIT)] });
+        needNear += bigI(LIQ_DEPOSIT);
+        if (nearHave < needNear + GAS_KEEP) {
+          throw new Error('Not enough NEAR: this deposit needs ' + fromRaw(needNear.toString(), 24, 4) + ' NEAR plus 0.2 NEAR kept for gas. You have ' + fromRaw(nearHave.toString(), 24, 4) + ' NEAR.');
+        }
+        return txs;
+      });
+    }).then(function (txs) {
+      dwSay(txs.length > 1 ? 'Approve ' + txs.length + ' transactions in your wallet…' : 'Confirm in your wallet…');
+      return signTxs(me, txs).then(function (res) {
+        if (failed(res)) throw new Error('A transaction failed on chain. Check your wallet activity; anything sent to Rhea can be withdrawn with “Withdraw to wallet”.');
+        return res;
+      });
+    });
+  }
+
+  function doRemove() {
+    var p = window.__lxnPool, me = addr(), i = dwInputs();
+    return poolRaw().then(function (R) {
+      var mine = bigI(p.myShares || '0');
+      var sh = i.lp && i.lp.__lxnAll ? mine.toString() : toRaw(inVal(i.lp), 24);
+      if (!sh || sh === '0') throw new Error('Enter how many LP shares to remove.');
+      if (bigI(sh) > mine) throw new Error('You only have ' + fromRaw(mine.toString(), 24, 6) + ' LP shares in this pool.');
+      var sup = bigI(R.supply);
+      var mins = R.ids.map(function (t, k) { return less((bigI(R.amounts[k]) * bigI(sh) / sup).toString(), 50); });
+      return nativeBal(me).then(function (nb) {
+        if (bigI(nb) < GAS_KEEP) throw new Error('Keep at least 0.2 NEAR in your wallet for gas. You have ' + fromRaw(nb, 24, 4) + ' NEAR.');
+        dwSay('Confirm in your wallet…');
+        return signTxs(me, [{ receiverId: REF, actions: [fcall('remove_liquidity', { pool_id: +p.id, shares: sh, min_amounts: mins }, 60, '1')] }]);
+      });
+    }).then(function (res) {
+      if (failed(res)) throw new Error('Rhea did not remove the liquidity (the price may have moved past 0.5%). Nothing was removed.');
+      return res;
+    });
+  }
+
+  // What this account holds ON RHEA in this pool's tokens -- the second withdraw step, and leftovers.
+  function findSweep() {
+    var p = window.__lxnPool, me = addr();
+    if (!p || !me || !canDw()) return Promise.resolve(null);
+    return nview(REF, 'get_deposits', { account_id: me }).then(function (deps) {
+      DW.sweep = p.tokens.filter(function (t) { return bigI((deps || {})[t.i]) > BigInt(0); })
+        .map(function (t) { return { i: t.i, name: t.name, raw: String(deps[t.i]) }; });
+      if (DW.sweep.length) {
+        Promise.all(DW.sweep.map(function (s) { return decOf(s.i); })).then(function (ds) {
+          dwSay('On Rhea, in your account: ' + DW.sweep.map(function (s, k) { return fromRaw(s.raw, ds[k], 6) + ' ' + (s.i === WNEAR ? 'NEAR' : s.name); }).join(' and ')
+            + '. Press “Withdraw to wallet” to bring it home.');
+        });
+      }
+      holdDw();
+      return DW.sweep;
+    }, function () { return null; });
+  }
+  function doSweep() {
+    var me = addr(), list = DW.sweep || [];
+    if (!list.length) return Promise.resolve();
+    return Promise.all(list.map(function (s) { return storageOf(s.i, me); })).then(function (regs) {
+      var txs = [], refActs = [], wnear = null;
+      list.forEach(function (s, k) {
+        if (!regs[k]) txs.push({ receiverId: s.i, actions: [fcall('storage_deposit', { account_id: me, registration_only: true }, 10, FT_REG)] });
+        refActs.push(fcall('withdraw', { token_id: s.i, amount: s.raw, unregister: false }, 100, '1'));
+        if (s.i === WNEAR) wnear = s.raw;
+      });
+      txs.push({ receiverId: REF, actions: refActs });
+      if (wnear) txs.push({ receiverId: WNEAR, actions: [fcall('near_withdraw', { amount: wnear }, 10, '1')] });
+      dwSay(txs.length > 1 ? 'Approve ' + txs.length + ' transactions in your wallet…' : 'Confirm in your wallet…');
+      return signTxs(me, txs);
+    }).then(function (res) {
+      if (failed(res)) throw new Error('Part of the withdrawal failed on chain. Check your wallet activity; what is still on Rhea can be withdrawn again.');
+      return res;
+    });
+  }
+
+  function submitDw() {
+    if (DW.busy || !canDw()) return;
+    var me = addr();
+    if (!me) { dwSay('Connect a NEAR wallet first.', 'bad'); return; }
+    var sweeping = DW.sweep && DW.sweep.length, mode = dwMode();
+    var job = sweeping ? doSweep() : (mode === 'withdraw' ? doRemove() : doDeposit());
+    DW.busy = true;
+    $$('.dw-cta').forEach(function (b) { b.disabled = true; });
+    var what = sweeping ? 'withdrawn' : (mode === 'withdraw' ? 'removed' : 'deposited');
+    job.then(function () {
+      DW.busy = false;
+      var i = dwInputs();
+      [i.a, i.b, i.lp].forEach(function (x) { if (x) { x.value = ''; x.__lxnAll = false; } });
+      var p = window.__lxnPool;
+      if (p) p.rawP = null;
+      if (sweeping) { DW.sweep = null; dwSay(''); dwToast('Tokens withdrawn to your wallet'); }
+      else if (mode === 'withdraw') dwToast('Liquidity removed');
+      else { dwSay(''); dwToast('Liquidity added'); }
+      setTimeout(function () { loadMine(); findSweep(); }, 1500);
+    }, function (e) {
+      DW.busy = false;
+      var m = String((e && e.message) || e || '');
+      // Our own checks (before signing) are exact; a wallet's error gets its own words and a look at the chain.
+      var ours = /^(Enter |Insufficient |Not enough NEAR|Keep at least|You only have|This pool|Rhea did not|A transaction failed|Part of the withdrawal)/.test(m);
+      dwSay(ours ? m : errText(e, what), 'bad');
+      setTimeout(function () { loadMine(); findSweep(); }, 1500);
+    }).then(holdDw, holdDw);
+  }
+
   function wireDwTabs() {
     if (window.__lxnDwTabs) return;
     window.__lxnDwTabs = 1;
@@ -1150,8 +1446,47 @@
         var d = $('#dwDeposit'), wd = $('#dwWithdraw');
         if (d) d.style.display = w ? 'none' : '';
         if (wd) wd.style.display = w ? '' : 'none';
+        if (!DW.sweep || !DW.sweep.length) dwSay('');
         holdDw();
       });
+    });
+    var i = dwInputs();
+    if (i.a) i.a.addEventListener('input', function () { syncRatio('a'); });
+    if (i.b) i.b.addEventListener('input', function () { syncRatio('b'); });
+    if (i.lp) i.lp.addEventListener('input', function () { i.lp.__lxnAll = false; previewWithdraw(); });
+    $$('#dwDeposit .max-btn').forEach(function (btn, k) {
+      btn.addEventListener('click', function (e) {
+        e.preventDefault();
+        var p = window.__lxnPool, ii = dwInputs();
+        if (!p || !canDw()) return;
+        var t = k === 0 ? p.a : p.b, v = p['bal' + k];
+        if (v == null) return;
+        // The NEAR side keeps 0.25 back: 0.2 for gas and room for the deposit's own storage.
+        if (t.i === WNEAR) v = Math.max(0, v - 0.25);
+        (k === 0 ? ii.a : ii.b).value = String(Math.floor(v * 1e6) / 1e6);
+        syncRatio(k === 0 ? 'a' : 'b');
+      }, true);
+    });
+    $$('#dwWithdraw .dw-pct-b').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.preventDefault();
+        var p = window.__lxnPool, ii = dwInputs();
+        if (!p || !ii.lp || !canDw()) return;
+        var mine = bigI(p.myShares || '0');
+        var tx = (btn.textContent || '').trim().toLowerCase(), f = tx === 'max' ? 100 : parseInt(tx, 10);
+        if (!(f > 0)) f = 100;
+        ii.lp.value = fromRaw((mine * BigInt(f) / BigInt(100)).toString(), 24, 6);
+        ii.lp.__lxnAll = f === 100;                    // MAX removes every share, not the rounded figure
+        previewWithdraw();
+      }, true);
+    });
+    $$('.dw-cta').forEach(function (b) {
+      b.addEventListener('click', function (e) {
+        if (b.getAttribute('data-lxgate') === '1' || (b.textContent || '').trim() === 'Connect wallet') return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        submitDw();
+      }, true);
     });
   }
 
