@@ -1677,7 +1677,7 @@
       }).catch(function (err) {
         fresh.disabled = false;
         var msg = (err && err.message) || '';
-        flbl.textContent = /reject|denied|cancel|closed/i.test(msg) ? 'Not approved — nothing was cancelled' : (msg || 'Could not cancel');
+        flbl.textContent = err && err.lxnWallet && window.lxnDcl.walletErr ? window.lxnDcl.walletErr(err, 'cancelled') : (msg || 'Could not cancel');
       });
     });
     m.classList.add('open');

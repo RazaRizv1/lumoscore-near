@@ -329,7 +329,24 @@
       return w.signAndSendTransactions({ signerId: txs[0].signerId, transactions: txs.map(function (t) {
         return { receiverId: t.receiverId, actions: t.actions };
       }) });
+    }).catch(function (e) {
+      // Tagged, so every order screen can tell the WALLET's answer from its own pre-signing checks.
+      var err = (e instanceof Error) ? e : new Error(String((e && e.message) || e || ''));
+      err.lxnWallet = true;
+      err.lxnMulti = txs.length > 1;
+      throw err;
     });
+  }
+
+  // WHAT A WALLET ERROR MEANT, SAID IN ITS OWN WORDS (2026-10-30). Every order screen read "not approved" into
+  // any error containing "cancel" or "closed" -- the same guess that told RAZA a swap he had approved was not
+  // (HOT's "User rejected the request" was its own refusal: too little NEAR kept for gas). A single transaction
+  // the wallet refused sent nothing; a batch may have sent its setup steps first, so it says to check.
+  function walletErr(e, verb) {
+    var m = String((e && e.message) || e || '').replace(/\s+/g, ' ').slice(0, 180);
+    try { console.warn('[LumosCore order] wallet error:', e); } catch (x) {}
+    if (e && e.lxnMulti) return 'The wallet stopped: "' + (m || 'no reason given') + '". A setup step may already have gone through — check your wallet activity before trying again.';
+    return 'Nothing was ' + verb + '. The wallet said: "' + (m || 'no reason given') + '".';
   }
   // The order transaction's outcome (the last one): ft_transfer_call returns what DCL USED.
   function verdict(results) {
@@ -453,7 +470,7 @@
     poolIdFor: poolIdFor, splitPool: splitPool, poolFor: poolFor, tokenPriceAt: tokenPriceAt,
     plan: plan, msgFor: msgFor, prereqs: prereqs, registered: registered, buildPlace: buildPlace,
     activeOrders: activeOrders, getOrder: getOrder, buildCancel: buildCancel,
-    sign: sign, verdict: verdict, book: book, bookFrom: bookFrom,
+    sign: sign, walletErr: walletErr, verdict: verdict, book: book, bookFrom: bookFrom,
     callView: callView, viewAccount: viewAccount, storageOf: storageOf, storageMin: storageMin,
     toUnits: toUnits, fromUnits: fromUnits, toNum: toNum, big: big, plain: plain
   };

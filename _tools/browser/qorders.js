@@ -1008,7 +1008,7 @@
       loadAccount(true).then(function () { limitSync(); });
     }).catch(function (e) {
       var msg = (e && e.message) || '';
-      stop(/reject|denied|cancel|closed/i.test(msg) ? 'The order was not approved, so nothing was placed.' : (msg || 'The order could not be placed.'));
+      stop(e && e.lxnWallet ? D().walletErr(e, 'placed') : (msg || 'The order could not be placed.'));
     });
   }
 
@@ -1221,8 +1221,7 @@
     }).catch(function (e) {
       btn.__busy = 0; btn.disabled = false; btn.textContent = label;
       var msg = (e && e.message) || '';
-      toast(/reject|denied|cancel|closed/i.test(msg)
-        ? ('Not approved — nothing was ' + (collect ? 'collected' : 'cancelled') + '.')
+      toast(e && e.lxnWallet ? D().walletErr(e, collect ? 'collected' : 'cancelled')
         : (msg || 'Could not ' + (collect ? 'collect' : 'cancel') + ' the order.'), true);
     });
   }

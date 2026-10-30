@@ -395,7 +395,7 @@
       try { if (window.__lxnBookReload) window.__lxnBookReload(); } catch (e) {}
     }).catch(function (e) {
       var m = (e && e.message) || '';
-      stop(/reject|denied|cancel|closed/i.test(m) ? 'The order was not approved, so nothing was placed.' : (m || 'The order could not be placed.'));
+      stop(e && e.lxnWallet ? D().walletErr(e, 'placed') : (m || 'The order could not be placed.'));
     });
   }
 
