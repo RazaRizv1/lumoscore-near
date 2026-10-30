@@ -342,8 +342,10 @@
     return Promise.all([
       feeReady(q.from),
       outNative ? Promise.resolve(true) : storageOf(outC, me),
-      q.from === 'near' ? storageOf(WNEAR, me) : Promise.resolve(true)
+      q.from === 'near' ? storageOf(WNEAR, me) : Promise.resolve(true),
+      q.from === 'near' ? balance(me, WNEAR).catch(function () { return null; }) : Promise.resolve(null)
     ]).then(function (r) {
+      var wnearBefore = r[3];
       if (r[0] !== true) throw new Error(r[0] === false ? 'Swaps from this token are not enabled yet.' : 'Could not check the fee setup — try again.');
       var needOut = !r[1], needWrap = !r[2];
       return Promise.all([needOut ? storageMin(outC) : null, needWrap ? storageMin(WNEAR) : null]).then(function (m) {
@@ -352,16 +354,22 @@
           txs.push({ signerId: me, receiverId: outC, actions: [{ type: 'FunctionCall', params: {
             methodName: 'storage_deposit', args: { account_id: me, registration_only: true }, gas: '30' + TGAS, deposit: m[0] } }] });
         }
-        var actions = [], used = 0;
+        // WRAPPING IS ITS OWN TRANSACTION, as Rhea's own app does it (RAZA 2026-10-30: HOT refused the swap three
+        // times with "User rejected the request" after he approved; nothing reached the chain). Every step of the
+        // single transaction was valid on chain -- checked one by one -- but the fee and the swap spend wNEAR that
+        // the wrap step only creates a moment earlier, and HOT pre-checks a transaction against the balances as
+        // they stand before it. HOT sends a batch one transaction after the other, so by the time it checks the
+        // swap, the wrap has landed and the wNEAR is there.
         if (q.from === 'near') {
+          var wrap = [];
           if (needWrap) {
-            actions.push({ type: 'FunctionCall', params: { methodName: 'storage_deposit',
+            wrap.push({ type: 'FunctionCall', params: { methodName: 'storage_deposit',
               args: { account_id: me, registration_only: true }, gas: '10' + TGAS, deposit: m[1] } });
-            used += 10;
           }
-          actions.push({ type: 'FunctionCall', params: { methodName: 'near_deposit', args: {}, gas: '10' + TGAS, deposit: q.amount } });
-          used += 10;
+          wrap.push({ type: 'FunctionCall', params: { methodName: 'near_deposit', args: {}, gas: '10' + TGAS, deposit: q.amount } });
+          txs.push({ signerId: me, receiverId: WNEAR, actions: wrap });
         }
+        var actions = [], used = 0;
         var rt = router();
         var acts = q.hops.map(function (h, i) {
           var a = { pool_id: +h.pool.id, token_in: h.tin, token_out: h.tout };
@@ -389,7 +397,8 @@
         var dep = BigInt(0);
         if (needOut) dep += big(m[0]);
         if (needWrap) dep += big(m[1]);
-        return { txs: txs, steps: txs.length, needOut: needOut, needWrap: needWrap, storage: dep.toString() };
+        return { txs: txs, steps: txs.length, needOut: needOut, needWrap: needWrap, storage: dep.toString(),
+          wrapped: q.from === 'near', wnearBefore: wnearBefore, me: me };
       });
     });
   }
@@ -430,11 +439,21 @@
     var reg1 = !!(L && L.b && L.b.needOut && L.b.txs && L.b.txs.length > 1);
     var outC = reg1 ? L.b.txs[0].receiverId : '';
     var check = reg1 ? storageOf(outC, L.me).then(function (s) { return !!s; }, function () { return null; }) : Promise.resolve(null);
-    return check.then(function (registered) {
+    // Did the wrap land without the swap? Then the person's NEAR is now wNEAR, and they must be told so.
+    var wrapCheck = (L && L.b && L.b.wrapped && L.b.wnearBefore != null)
+      ? balance(L.me, WNEAR).then(function (now) { return big(now) > big(L.b.wnearBefore) ? (big(now) - big(L.b.wnearBefore)).toString() : null; }, function () { return null; })
+      : Promise.resolve(null);
+    return Promise.all([check, wrapCheck]).then(function (rr) {
+      var registered = rr[0], wrappedRaw = rr[1];
+      if (wrappedRaw) {
+        return 'Your ' + fromUnits(wrappedRaw, 24).replace(/(\.\d{6})\d+$/, '$1') + ' NEAR was wrapped into wNEAR (it shows in your wallet as wNEAR), '
+          + 'but the swap itself did not go through. Nothing is lost: wNEAR is NEAR one-to-one. The wallet said: "'
+          + String(m || 'no reason given').replace(/\s+/g, ' ').slice(0, 140) + '".';
+      }
       if (registered === true) {
         var code = (META[outC] && META[outC].code) || 'the token you are buying';
         return 'Only the first step went through: your account is now registered for ' + code + ' (a one-time deposit). '
-          + 'The swap itself did not go through — check your wallet activity, then press Swap again: it is one transaction now.';
+          + 'The swap itself did not go through — check your wallet activity, then press Swap again to finish it.';
       }
       // THE WALLET'S OWN WORDS, ALWAYS (RAZA's second HOT attempt, 2026-10-30: approved, nothing reached the
       // chain, and the page said "not approved" -- HOT's error carried one of those words for a refusal of its

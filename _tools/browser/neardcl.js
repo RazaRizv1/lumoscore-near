@@ -271,13 +271,16 @@
     if (pre.needBuyReg) txs.push({ signerId: me, receiverId: o.buy, actions: [fc('storage_deposit', { account_id: me, registration_only: true }, GAS_REG, pre.buyRegDeposit)] });
     if (pre.dcl === 'register') txs.push({ signerId: me, receiverId: DCL, actions: [fc('storage_deposit', { account_id: me, registration_only: true }, GAS_REG, pre.dclDeposit)] });
     else if (pre.dcl === 'topup') txs.push({ signerId: me, receiverId: DCL, actions: [fc('storage_deposit', { account_id: me }, GAS_REG, pre.dclDeposit)] });
-    var acts = [];
+    // Wrapping NEAR is its own transaction, before the order -- the same change as the swap (browser/nearswap.js):
+    // HOT pre-checks each transaction against balances as they stand before it, and refused a single
+    // transaction that wrapped and then spent the wNEAR it had just made.
     if (o.sell === WNEAR) {
-      if (pre.needWrapReg) acts.push(fc('storage_deposit', { account_id: me, registration_only: true }, 10, pre.wrapRegDeposit));
-      acts.push(fc('near_deposit', {}, 10, o.sellRaw));
+      var wrap = [];
+      if (pre.needWrapReg) wrap.push(fc('storage_deposit', { account_id: me, registration_only: true }, 10, pre.wrapRegDeposit));
+      wrap.push(fc('near_deposit', {}, 10, o.sellRaw));
+      txs.push({ signerId: me, receiverId: WNEAR, actions: wrap });
     }
-    acts.push(fc('ft_transfer_call', { receiver_id: DCL, amount: o.sellRaw, msg: msgFor(o) }, GAS_ORDER, '1'));
-    txs.push({ signerId: me, receiverId: o.sell, actions: acts });
+    txs.push({ signerId: me, receiverId: o.sell, actions: [fc('ft_transfer_call', { receiver_id: DCL, amount: o.sellRaw, msg: msgFor(o) }, GAS_ORDER, '1')] });
     return txs;
   }
 
