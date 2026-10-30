@@ -249,6 +249,93 @@
     }
   }
 
+  // ---- Participants -------------------------------------------------------------------------------------
+  // THE LARGEST PROVIDERS, EVERY SHARE READ FROM THE CHAIN (RAZA 2026-10-30: "why arent liq pool participants
+  // shown", then "Verify on-chain"). /lxapi/nearlps takes Rhea's LP and farm-staker lists as CANDIDATES only --
+  // Rhea's per-pool list stopped updating on 2026-02-02 -- and reads each account's shares (held + staked in
+  // Rhea's farm) against the pool's current total. Someone who joined since February and never staked cannot
+  // be seen, so the panel says "largest known", not "all". Drawn in the design's .part-row shape (XRPL's port).
+  var PART = { rows: [], page: 1, per: 17, at: 0 };
+  if (!window.__lxnPoolAcctNav) {
+    window.__lxnPoolAcctNav = 1;
+    window.addEventListener('click', function (e) {
+      var n = e.target && e.target.closest && e.target.closest('[data-lxacct]');
+      if (!n || (e.target.closest && e.target.closest('a[href]'))) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      window.location.href = '/account/near/' + encodeURIComponent(n.getAttribute('data-lxacct'));
+    }, true);
+  }
+  function loadParticipants(id) {
+    PART = { rows: [], page: 1, per: 17, at: 0 };
+    participants('Reading the liquidity providers…');
+    fetch('/lxapi/nearlps?pool=' + encodeURIComponent(id)).then(function (r) { return r.json(); }).then(function (d) {
+      if (!d || !d.ok) { emptyParticipants('Could not read the liquidity providers — try again shortly.'); return; }
+      PART.rows = d.providers || [];
+      PART.at = d.at || 0;
+      if (!PART.rows.length) { emptyParticipants('No liquidity providers found.'); return; }
+      renderParticipants();
+    }).catch(function () { emptyParticipants('Could not read the liquidity providers — try again shortly.'); });
+  }
+  function renderParticipants() {
+    ['#partList', '#participantsList'].forEach(function (sel) {
+      var host = $(sel);
+      if (!host) return;
+      var from = (PART.page - 1) * PART.per, slice = PART.rows.slice(from, from + PART.per);
+      host.innerHTML = '';
+      slice.forEach(function (h) {
+        var row = el('div', 'part-row lx-partrow');
+        var av = el('div', 'part-avatar');
+        if (window.lxIdent) { try { av.innerHTML = window.lxIdent(h.a, 26); } catch (e) {} }
+        row.appendChild(av);
+        row.appendChild(el('div', 'wallet', short(h.a)));
+        var share = +h.pct || 0;
+        row.appendChild(el('div', 'share', (share > 0 && share < 0.01 ? '<0.01' : share.toFixed(2)) + '%'));
+        var bar = el('div', 'share-bar'), fill = el('div', 'fill');
+        fill.style.width = Math.max(2, Math.min(100, share)) + '%';
+        bar.appendChild(fill);
+        row.appendChild(bar);
+        row.title = h.a + (h.staked && h.staked !== '0' ? ' (includes shares staked in Rhea farms)' : '');
+        row.setAttribute('data-lxacct', h.a);
+        row.style.cursor = 'pointer';
+        host.appendChild(row);
+      });
+      // Said once, under the last page: what the list is and when the chain was read.
+      if (PART.page * PART.per >= PART.rows.length) {
+        var when = PART.at ? new Date(PART.at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) : '';
+        var note = el('div', 'acc-empty lx-partrow', 'Largest known providers — shares read from the chain' + (when ? ' at ' + when : '') + '.');
+        note.style.cssText = 'padding:12px 8px 6px;text-align:center;opacity:.6;font-size:12px';
+        host.appendChild(note);
+      }
+      var card = host.closest('.side-card, .card');
+      if (!card) return;
+      var pill = card.querySelector('.count-pill');
+      if (pill) pill.textContent = PART.rows.length.toLocaleString('en-US');
+      var foot = card.querySelector('.part-foot');
+      if (!foot) return;
+      foot.classList.add('lx-partfoot');
+      var info = foot.firstElementChild;
+      if (info) info.textContent = 'Viewing ' + (from + 1) + ' – ' + (from + slice.length) + ' of ' + PART.rows.length + ' largest';
+      var nb = foot.querySelectorAll('.nav button');
+      if (nb[0] && !nb[0].__lxn) {
+        nb[0].__lxn = 1;
+        nb[0].addEventListener('click', function (e) {
+          e.preventDefault(); e.stopImmediatePropagation();
+          if (PART.page > 1) { PART.page--; renderParticipants(); }
+        }, true);
+      }
+      if (nb[1] && !nb[1].__lxn) {
+        nb[1].__lxn = 1;
+        nb[1].addEventListener('click', function (e) {
+          e.preventDefault(); e.stopImmediatePropagation();
+          if (PART.page * PART.per < PART.rows.length) { PART.page++; renderParticipants(); }
+        }, true);
+      }
+      if (nb[0]) nb[0].disabled = PART.page <= 1;
+      if (nb[1]) nb[1].disabled = PART.page * PART.per >= PART.rows.length;
+    });
+  }
+
   var KIND = { SIMPLE_POOL: 'Classic pool', STABLE_SWAP: 'Stable pool', RATED_SWAP: 'Rated stable pool', DEGEN_SWAP: 'Degen pool' };
   function pct(v) {
     if (v == null || !isFinite(v)) return '—';
@@ -959,7 +1046,7 @@
     paintPositionIdentity();
     holdDw();
     live(id, row);
-    emptyParticipants('Liquidity providers are not listed on NEAR yet.');
+    loadParticipants(id);
     liftPage();
   }
 

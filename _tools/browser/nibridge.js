@@ -834,6 +834,7 @@
     var m = document.createElement('div');
     m.id = 'lx-br-amenu';
     m.className = 'lx-br-amenu';
+    m.setAttribute('data-lx-noswap', '');       // before it is appended: see noSwap()
     m.style.cssText = 'position:absolute;z-index:99999;min-width:236px;display:block';
     var listHost = document.createElement('div');
     listHost.className = 'lx-amlist';
@@ -890,6 +891,7 @@
     var m = document.createElement('div');
     m.id = 'lx-br-amenu';
     m.className = 'lx-br-amenu';
+    m.setAttribute('data-lx-noswap', '');       // before it is appended: see noSwap()
     m.style.cssText = 'position:absolute;z-index:99999;min-width:236px;display:block';
     var sw = document.createElement('div');
     sw.className = 'lx-amsearch';
@@ -1700,6 +1702,7 @@
     paintReview(QUOTE);
     paintRoutePanel();
     setCta();
+    noSwap();
   }
 
   function gateReview() {
@@ -2221,8 +2224,21 @@
     }).then(function () { recoverFromChain.busyFor = ''; });
   }
 
+  // THE CHAIN RENAMER MUST NOT TOUCH WHAT THIS FILE WRITES (RAZA 2026-10-30: "why is near itself in the
+  // destination dropdown list"). The design was drawn for Aptos, and lx-mc walks every text node renaming
+  // "Aptos" to the chain in use and the ticker "APT" to NEAR -- including the real Aptos destination, which
+  // read "NEAR" beside Aptos's own logo, and every APT figure an Aptos transfer would show. lx-mc skips
+  // anything inside [data-lx-noswap], so the bridge's own areas carry it. Set before the destinations are
+  // appended: the renamer's observer sees each new option as it lands.
+  function noSwap() {
+    $$('.br-steps, .br-netbox, .lx-brroute, .br-table, .lx-brmhost, .lx-br-amenu').forEach(function (el) {
+      if (!el.hasAttribute('data-lx-noswap')) el.setAttribute('data-lx-noswap', '');
+    });
+  }
+
   function load() {
     if (!$('.br-netbox') && !$('.br-steps')) return;
+    noSwap();
     paintSource();
     try { document.documentElement.classList.add('lx-chainready'); } catch (e) {}
     paintOptionCss();

@@ -58,7 +58,19 @@ async function ethCall(c, data) {
 }
 const hex32 = (n) => n.toString(16).padStart(64, '0');
 // A token too small to matter is kept; a data: logo is kept only when small, the rest fall back to letters.
-const logoOf = (t) => (t.logo && (/^https:/.test(t.logo) || t.logo.length < 6000)) ? t.logo : '';
+// A TOKEN'S LOGO, in the order the rest of the NEAR build uses (RAZA 2026-10-30: "in source assets dropdown,
+// some assets dont have their logos" -- NINU, DARK, XRHEA): the curated logo, then the fallback list the Trade
+// pages already use (nearlogos.fallback.json: DARK, QTC, WETH...), then the token's own on-chain ft_metadata
+// icon. Only an https url or a data:image up to 12 KB (NINU's and xRHEA's are ~7 KB, which the old 6 KB cap
+// dropped); _nearintents.js then drops any that ships as /assets/tokens/ni art, so the page carries each once.
+const FALLBACK = (() => { try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'nearlogos.fallback.json'), 'utf8')).logos || {}; } catch (e) { return {}; } })();
+const okLogo = (l) => !!l && (/^https:\/\//.test(l) || (/^data:image\/(png|jpeg|jpg|gif|webp|svg\+xml)[;,]/i.test(l) && l.length <= 12000));
+async function logoOf(t) {
+  if (okLogo(t.logo)) return t.logo;
+  if (okLogo(FALLBACK[t.i])) return FALLBACK[t.i];
+  try { const m = await view(t.i, 'ft_metadata', {}); if (m.v && okLogo(m.v.icon)) return m.v.icon; } catch (e) {}
+  return '';
+}
 
 (async () => {
   for (const [n, c] of Object.entries(WH)) {
@@ -90,7 +102,7 @@ const logoOf = (t) => (t.logo && (/^https:/.test(t.logo) || t.logo.length < 6000
         (wh[t.i] = wh[t.i] || {})[label] = { to: '0x' + res.slice(-40) };
       } catch (e) { errors++; console.warn('  wormhole ' + t.s + ' ' + label + ': ' + e.message); }
     }
-    if (om[t.i] || wh[t.i]) meta[t.i] = t.native ? { s: 'NEAR', n: 'NEAR', d: 24, native: 1 } : { s: t.s, n: t.n || t.s, d: t.d, logo: logoOf(t) };
+    if (om[t.i] || wh[t.i]) meta[t.i] = t.native ? { s: 'NEAR', n: 'NEAR', d: 24, native: 1 } : { s: t.s, n: t.n || t.s, d: t.d, logo: await logoOf(t) };
   }
   if (errors) { console.error('  ' + errors + ' lookup(s) failed — not writing a partial table'); process.exit(1); }
   const out = { generated: new Date().toISOString(), wh_chain: Object.fromEntries(Object.entries(WH).map(([n, c]) => [n, { id: c.id, tb: c.tb }])), meta, om, wh };
