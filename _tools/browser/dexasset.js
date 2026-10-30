@@ -1816,7 +1816,8 @@
         HL.list = j.holders || [];
         HL.count = j.count != null ? Number(j.count) : null;
         HL.countAt = j.countAt || null;                   // set when the figure is the build's, not live
-        setTabCount(/holders/i, HL.count != null ? HL.count.toLocaleString('en-US') : '—');
+        HL.countMin = j.countMin > 0 ? Number(j.countMin) : null;   // "at least": the list is full, no total known
+        setTabCount(/holders/i, HL.count != null ? HL.count.toLocaleString('en-US') : HL.countMin ? (HL.countMin + '+') : '—');
         HL.err = false;
         syncPanel();
         // The edge could not reach NearBlocks for the count (it allows a few calls a minute per address, and
@@ -1876,7 +1877,7 @@
     var count = HL.count != null ? Number(HL.count) : null;
     var more = base + 50 < all.length;
     var stat = function (lbl, val) { return '<div class="' + pre + '-hl-stat"><span class="lbl">' + lbl + '</span><span class="val mono lxp">' + val + '</span></div>'; };
-    var h = '<div class="' + pre + '-hl-head">' + stat('Holders', count != null ? count.toLocaleString('en-US') : '—')
+    var h = '<div class="' + pre + '-hl-head">' + stat('Holders', count != null ? count.toLocaleString('en-US') : HL.countMin ? (HL.countMin + '+') : '—')
       + stat(phone ? 'Top 10' : 'Top 10 hold', top(t10)) + stat(phone ? 'Top 50' : 'Top 50 hold', top(t50)) + '</div>';
     if (phone) {
       h += '<div class="mdxa-hl-list" data-lxbuilt="p' + HL.page + '">' + rows.map(function (r, i) {

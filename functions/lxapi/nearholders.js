@@ -22,7 +22,7 @@
 // Last of all, the count baked into the build from a paced run (_tools/_nearholdercounts.js), so a curated
 // token is never "—" just because NearBlocks was busy -- with its date, as countAt.
 import { CURATED } from './_nearcurated.js';
-const TTL = 1800, KEEP = 604800, VER = 'v4';
+const TTL = 1800, KEEP = 604800, VER = 'v5';
 const COUNT_TTL = 21600, COUNT_KEEP = 2592000;
 const TOP = 'https://api.fastnear.com/v1/ft/';
 const COUNT = 'https://api.nearblocks.io/v1/fts/';
@@ -65,8 +65,11 @@ export async function build(id, get, count, countAt) {
   // A LIST SHORTER THAN FastNEAR's 100 IS EVERY ACCOUNT -- so its holders are the count, exact and live, for
   // the small tokens NearBlocks has never indexed (DARK: 25). Preferred over any other figure.
   if (top.accounts.length < 100) { count = holders.length; countAt = null; }
+  // With no count anywhere, a FULL list still proves a floor: at least this many hold it. The page shows
+  // "100+" -- true -- rather than "—" (14 curated tokens NearBlocks has never indexed, 2026-10-30).
+  const countMin = count == null && top.accounts.length >= 100 ? holders.length : null;
   return { ok: true, src: 'FastNEAR (list), NearBlocks (count)', at: Date.now(), i: id,
-    count: count == null ? null : count, countUnread: count === undefined, countAt: countAt || null, holders };
+    count: count == null ? null : count, countUnread: count === undefined, countAt: countAt || null, countMin, holders };
 }
 
 // The count through its own cache: fresh, else asked, else the kept figure, else undefined.

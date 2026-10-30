@@ -1,0 +1,297 @@
+{
+ "generated": "2026-10-30T09:06:34.823Z",
+ "counts": {
+  "wrap.near": {
+   "n": 1469339,
+   "at": "2026-10-30"
+  },
+  "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1": {
+   "n": 614584,
+   "at": "2026-10-30"
+  },
+  "usdt.tether-token.near": {
+   "n": 2495713,
+   "at": "2026-10-30"
+  },
+  "qtc.omft.near": {
+   "n": null,
+   "at": "2026-10-30"
+  },
+  "zec.omft.near": {
+   "n": 9790,
+   "at": "2026-10-30"
+  },
+  "token.rhealab.near": {
+   "n": 16285,
+   "at": "2026-10-30"
+  },
+  "batman-4.nearlytrade.near": {
+   "n": 79,
+   "at": "2026-10-30"
+  },
+  "dac17f958d2ee523a2206206994597c13d831ec7.factory.bridge.near": {
+   "n": 31413,
+   "at": "2026-10-30"
+  },
+  "ikp.v2-launchpad.justhoot.near": {
+   "n": null,
+   "at": "2026-10-30"
+  },
+  "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.factory.bridge.near": {
+   "n": 50304,
+   "at": "2026-10-30"
+  },
+  "nearly-993927.nearlytrade.near": {
+   "n": 2680,
+   "at": "2026-10-30"
+  },
+  "6b175474e89094c44da98b954eedeac495271d0f.factory.bridge.near": {
+   "n": 16085,
+   "at": "2026-10-30"
+  },
+  "853d955acef822db058eb8505911ed77f175b99e.factory.bridge.near": {
+   "n": 4992,
+   "at": "2026-10-30"
+  },
+  "hoot-8ecf65.launchpad.justhoot.near": {
+   "n": null,
+   "at": "2026-10-30"
+  },
+  "aaaaaa20d9e0e2461697782ef11675f668207961.factory.bridge.near": {
+   "n": 29682,
+   "at": "2026-10-30"
+  },
+  "wth-0b2227.launchpad.justhoot.near": {
+   "n": null,
+   "at": "2026-10-30"
+  },
+  "three-de86d6.launchpad.justhoot.near": {
+   "n": null,
+   "at": "2026-10-30"
+  },
+  "token.sweat": {
+   "n": 23234579,
+   "at": "2026-10-30"
+  },
+  "token.publicailab.near": {
+   "n": 50621,
+   "at": "2026-10-30"
+  },
+  "dragon-3.nearlytrade.near": {
+   "n": 97,
+   "at": "2026-10-30"
+  },
+  "nomo.nearlytrade.near": {
+   "n": 103,
+   "at": "2026-10-30"
+  },
+  "lst.rhealab.near": {
+   "n": 15180,
+   "at": "2026-10-30"
+  },
+  "token.0xshitzu.near": {
+   "n": 11924,
+   "at": "2026-10-30"
+  },
+  "qcat-3.nearlytrade.near": {
+   "n": null,
+   "at": "2026-10-30"
+  },
+  "diarhea.nearlytrade.near": {
+   "n": 770,
+   "at": "2026-10-30"
+  },
+  "blackdragon.tkn.near": {
+   "n": 286268,
+   "at": "2026-10-30"
+  },
+  "linear-protocol.near": {
+   "n": 14254,
+   "at": "2026-10-30"
+  },
+  "hoodl-95275b.launchpad.justhoot.near": {
+   "n": null,
+   "at": "2026-10-30"
+  },
+  "shore-4lzt.launch.shoremarkets.near": {
+   "n": 361,
+   "at": "2026-10-30"
+  },
+  "kat.token0.near": {
+   "n": 6377,
+   "at": "2026-10-30"
+  },
+  "meta-pool.near": {
+   "n": 7010,
+   "at": "2026-10-30"
+  },
+  "ninu-4.nearlytrade.near": {
+   "n": 963,
+   "at": "2026-10-30"
+  },
+  "ai-8.nearlytrade.near": {
+   "n": null,
+   "at": "2026-10-30"
+  },
+  "v2-nearx.stader-labs.near": {
+   "n": null,
+   "at": "2026-10-30"
+  },
+  "nearagents.nearlytrade.near": {
+   "n": null,
+   "at": "2026-10-30"
+  },
+  "npro.nearmobile.near": {
+   "n": 13297,
+   "at": "2026-10-30"
+  },
+  "2260fac5e5542a773aa44fbcfedf7c193bc2c599.factory.bridge.near": {
+   "n": 7760,
+   "at": "2026-10-30"
+  },
+  "gear.enleap.near": {
+   "n": 14814,
+   "at": "2026-10-30"
+  },
+  "yuvi-6c041e37.qlyphs.near": {
+   "n": null,
+   "at": "2026-10-30"
+  },
+  "singularty.nearlytrade.near": {
+   "n": 474,
+   "at": "2026-10-30"
+  },
+  "ftv2.nekotoken.near": {
+   "n": 152980,
+   "at": "2026-10-30"
+  },
+  "staker1.msig1.trufin.near": {
+   "n": 51,
+   "at": "2026-10-30"
+  },
+  "spud-3.nearlytrade.near": {
+   "n": null,
+   "at": "2026-10-30"
+  },
+  "trade-2.nearlytrade.near": {
+   "n": 132,
+   "at": "2026-10-30"
+  },
+  "22.contract.portalbridge.near": {
+   "n": 20442,
+   "at": "2026-10-30"
+  },
+  "sol-0xd31e793eff8104551603bfac6e1222af303d4c5b.omdep.near": {
+   "n": null,
+   "at": "2026-10-30"
+  },
+  "52a047ee205701895ee06a375492490ec9c597ce.factory.bridge.near": {
+   "n": 1775,
+   "at": "2026-10-30"
+  },
+  "cfi.consumer-fi.near": {
+   "n": 325,
+   "at": "2026-10-30"
+  },
+  "eth.bridge.near": {
+   "n": 14171,
+   "at": "2026-10-30"
+  },
+  "nbtc.bridge.near": {
+   "n": 3319,
+   "at": "2026-10-30"
+  },
+  "jambo-1679.meme-cooking.near": {
+   "n": 17380,
+   "at": "2026-10-30"
+  },
+  "apys.token.a11bd.near": {
+   "n": 189,
+   "at": "2026-10-30"
+  },
+  "ribbit-426.meme-cooking.near": {
+   "n": 308,
+   "at": "2026-10-30"
+  },
+  "xtoken.rhealab.near": {
+   "n": 1065,
+   "at": "2026-10-30"
+  },
+  "token.v2.ref-finance.near": {
+   "n": 124627,
+   "at": "2026-10-30"
+  },
+  "mpoo.nearlytrade.near": {
+   "n": null,
+   "at": "2026-10-30"
+  },
+  "usmeme.tg": {
+   "n": 301376,
+   "at": "2026-10-30"
+  },
+  "438e48ed4ce6beecf503d43b9dbd3c30d516e7fd.factory.bridge.near": {
+   "n": 1242210,
+   "at": "2026-10-30"
+  },
+  "nearai.aidols.near": {
+   "n": 533,
+   "at": "2026-10-30"
+  },
+  "nearsight.v2-launchpad.justhoot.near": {
+   "n": null,
+   "at": "2026-10-30"
+  },
+  "mpdao-token.near": {
+   "n": 83228,
+   "at": "2026-10-30"
+  },
+  "gnear-229.meme-cooking.near": {
+   "n": 624,
+   "at": "2026-10-30"
+  },
+  "d9c2d319cd7e6177336b0a9c93c21cb48d84fb54.factory.bridge.near": {
+   "n": 33268,
+   "at": "2026-10-30"
+  },
+  "zolanear-1726.meme-cooking.near": {
+   "n": 1167,
+   "at": "2026-10-30"
+  },
+  "xtoken.ref-finance.near": {
+   "n": 1738,
+   "at": "2026-10-30"
+  },
+  "c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2.factory.bridge.near": {
+   "n": 4440,
+   "at": "2026-10-30"
+  },
+  "vote-1737.meme-cooking.near": {
+   "n": 162,
+   "at": "2026-10-30"
+  },
+  "poppy-0.meme-cooking-test.near": {
+   "n": 335,
+   "at": "2026-10-30"
+  },
+  "509a38b7a1cc0dcd83aa9d06214663d9ec7c7f4a.factory.bridge.near": {
+   "n": 36,
+   "at": "2026-10-30"
+  },
+  "meta-token.near": {
+   "n": 6140,
+   "at": "2026-10-30"
+  },
+  "l000000.factory.shardsmarket.near": {
+   "n": 107,
+   "at": "2026-10-30"
+  },
+  "itlx.intellex_xyz.near": {
+   "n": 505,
+   "at": "2026-10-30"
+  },
+  "claw-2.nearlytrade.near": {
+   "n": 319,
+   "at": "2026-10-30"
+  }
+ }
+}
