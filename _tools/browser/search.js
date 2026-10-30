@@ -38,6 +38,13 @@
   }
 
   function short(a) { return C.short(a); }
+  // 129.2K, as Stellar's and XRPL's rows print a holder count.
+  function compact(n) {
+    n = +n || 0;
+    if (n >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+    if (n >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'K';
+    return String(Math.round(n));
+  }
   function money(v) {
     v = +v;
     if (!isFinite(v) || v <= 0) return '';
@@ -82,7 +89,13 @@
       + '.sp-row.sp-row--asset{color:inherit;text-decoration:none}'
       // The price / 24h cells are the design's own (.sp-right .sp-price / .sp-change), as its sample rows use them.
       + '.lx-searow .sp-price{font-family:\'JetBrains Mono\',monospace;font-weight:700;font-size:13px}'
-      + '.lx-searow .sp-change{font-size:12px;font-weight:700}';
+      + '.lx-searow .sp-change{font-size:12px;font-weight:700}'
+      // A long pair (SHITZU / BLACKDRAGON) pushed the "Rhea pool" tag onto a line of its own: the pair gives way
+      // with an ellipsis and the tag stays beside it.
+      + '.lx-searow .sp-name-row:has(.lx-pool-pair){display:flex;align-items:center;gap:6px;min-width:0;flex-wrap:nowrap}'
+      + '.lx-searow .lx-pool-pair{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
+      + '.lx-searow .sp-name-row:has(.lx-pool-pair) .sp-domain{flex:none;white-space:nowrap}'
+      + '.lx-searow .sp-info{min-width:0}';
     document.head.appendChild(st);
   })();
 
@@ -138,7 +151,7 @@
   function rowFor(t) {
     var a = document.createElement('a');
     a.className = 'sp-row sp-row--asset lx-searow';
-    a.__lxnT = { k: 't', i: t.i, n: t.n, nm: t.nm };          // what a recent-search entry stores
+    a.__lxnT = { k: 't', i: t.i, n: t.n, nm: t.nm, h: t.h };  // what a recent-search entry stores
     a.setAttribute('data-chain', 'near');
     a.href = '/trade/near/' + encodeURIComponent(t.i);
     a.appendChild(icoImg(t.i === C.WNEAR ? C.NEAR_LOGO : t.logo, t.n));
@@ -147,18 +160,17 @@
     var nameRow = el('div', 'sp-name-row', t.n || short(t.i));
     if (t.cur) nameRow.appendChild(vBadge());
     info.appendChild(nameRow);
-    // A token IS its contract on NEAR; the name is the second line, the contract the right-hand chip.
-    var nm = String(t.nm || '').trim();
-    info.appendChild(el('div', 'sp-sub', nm && nm.toLowerCase() !== String(t.n || '').toLowerCase() ? nm : 'NEAR token'));
+    // STELLAR'S AND XRPL'S ROW (RAZA 2026-10-30, "fix the search like Stellar and XRPL"; read off lumoscore.com):
+    // the second line is "CODE · Name · N holders" and the right side is the address chip alone. This row also
+    // carried a price and a 24h change in the same right-hand cell, which ran into the chip as one string
+    // ("$0.00165-2.45%token…near"). A token IS its contract on NEAR, so the contract is the chip.
+    var nm = String(t.nm || '').trim(), sub = [t.n || short(t.i)];
+    if (nm && nm.toLowerCase() !== String(t.n || '').toLowerCase()) sub.push(nm);
+    if (t.h > 0) sub.push(compact(t.h) + ' holder' + (+t.h === 1 ? '' : 's'));
+    info.appendChild(el('div', 'sp-sub', sub.join(' · ')));
     a.appendChild(info);
 
     var right = el('div', 'sp-right');
-    var usd = (t.p != null && isFinite(t.p) && USD > 0) ? money(t.p * USD) : '';
-    if (usd) right.appendChild(tag('sp-price', usd));
-    if (usd && t.d != null && isFinite(t.d)) {
-      var up = +t.d >= 0;
-      right.appendChild(tag('sp-change ' + (up ? 'up' : 'down'), (up ? '+' : '') + (+t.d).toFixed(2) + '%'));
-    }
     var mini = el('div', 'sp-addr-mini', short(t.i));
     mini.setAttribute('data-copy', t.i);
     mini.setAttribute('data-copy-label', (t.n || 'Token') + ' contract');
@@ -215,7 +227,7 @@
       (d.rows || []).forEach(function (r) {
         if (!r || !r.i || !C.isAccountId(r.i)) return;
         out.push({ i: r.i, n: C.cleanSym(r.n) || short(r.i), nm: C.cleanSym(r.nm), logo: r.logo || '',
-          p: r.p, d: r.d, t: +r.t || 0, cur: true });
+          p: r.p, d: r.d, t: +r.t || 0, h: +r.hc || 0, cur: true });
       });
       TOKS = out;
       return out;
