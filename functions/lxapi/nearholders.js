@@ -13,7 +13,14 @@
 // beside a non-empty list is an unindexed token, returned as null rather than printed as zero holders.
 //
 // Cached at the edge 30 minutes, the last good answer kept a week, a failure NEVER cached.
-const TTL = 1800, KEEP = 604800, VER = 'v2';
+//
+// THE COUNT IS CACHED ON ITS OWN, and a refused count is not "no count" (RAZA 2026-10-30: "Why isnt the holder
+// count shown on any asset?"). NearBlocks allows a few calls a minute from Cloudflare's address too, so after
+// two tokens it refused -- and the first version turned that refusal into count:null and cached the whole answer
+// for half an hour. Now: a count is kept 6 hours (fresh) and 30 days (fallback); a refused call serves the kept
+// figure; with none, the answer says countUnread and is kept only a minute, and the page asks NearBlocks itself.
+const TTL = 1800, KEEP = 604800, VER = 'v3';
+const COUNT_TTL = 21600, COUNT_KEEP = 2592000;
 const TOP = 'https://api.fastnear.com/v1/ft/';
 const COUNT = 'https://api.nearblocks.io/v1/fts/';
 
@@ -36,19 +43,40 @@ async function getJson(u) {
 // A NEAR account id: 2-64 chars of lowercase letters, digits, - _ . (implicit accounts are 64 hex).
 export function validId(id) { return /^[a-z0-9._-]{2,64}$/.test(id) && !/\.\.|^\.|\.$/.test(id); }
 
-export async function build(id, get) {
+// The count: a number, null when NearBlocks answered but has no figure (an unindexed token says "0"), and
+// undefined when it could not be asked -- three different answers, kept apart.
+export async function readCount(id, get) {
+  let c;
+  try { c = await (get || getJson)(COUNT + encodeURIComponent(id) + '/holders/count'); } catch (e) { return undefined; }
+  const n = Number((((c && c.holders) || [])[0] || {}).count);
+  return isFinite(n) && n > 0 ? n : null;
+}
+
+export async function build(id, get, count) {
   get = get || getJson;
-  const [top, c] = await Promise.all([
-    get(TOP + encodeURIComponent(id) + '/top'),
-    get(COUNT + encodeURIComponent(id) + '/holders/count').catch(() => null),
-  ]);
+  const top = await get(TOP + encodeURIComponent(id) + '/top');
   if (!top || !Array.isArray(top.accounts)) throw new Error('fastnear: no list');
   const holders = top.accounts
     .filter((x) => x && validId(String(x.account_id || '')) && /^\d+$/.test(String(x.balance || '')) && String(x.balance) !== '0')
     .map((x) => ({ a: String(x.account_id), raw: String(x.balance) }));
-  const n = Number((((c && c.holders) || [])[0] || {}).count);
-  const count = isFinite(n) && n > 0 ? n : null;
-  return { ok: true, src: 'FastNEAR (list), NearBlocks (count)', at: Date.now(), i: id, count, holders };
+  return { ok: true, src: 'FastNEAR (list), NearBlocks (count)', at: Date.now(), i: id,
+    count: count == null ? null : count, countUnread: count === undefined, holders };
+}
+
+// The count through its own cache: fresh, else asked, else the kept figure, else undefined.
+async function cachedCount(cache, base, id, waitUntil) {
+  const fresh = new Request(base + '/count/fresh'), kept = new Request(base + '/count/kept');
+  const hit = await cache.match(fresh);
+  if (hit) return (await hit.json()).n;
+  const n = await readCount(id);
+  if (n !== undefined) {
+    const put = (req, ttl) => cache.put(req, new Response(JSON.stringify({ n }), {
+      headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=' + ttl } }));
+    waitUntil(Promise.all([put(fresh, COUNT_TTL), put(kept, COUNT_KEEP)]));
+    return n;
+  }
+  const old = await cache.match(kept);
+  return old ? (await old.json()).n : undefined;
 }
 
 export async function onRequestGet(context) {
@@ -61,11 +89,13 @@ export async function onRequestGet(context) {
   const hit = await cache.match(fresh);
   if (hit) return json(await hit.json());
   try {
-    const body = await build(id);
+    const wu = (p) => context.waitUntil(p);
+    const body = await build(id, null, await cachedCount(cache, base, id, wu));
     const put = (req, ttl) => cache.put(req, new Response(JSON.stringify(body), {
       headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=' + ttl } }));
-    context.waitUntil(Promise.all([put(fresh, TTL), put(kept, KEEP)]));
-    return json(body);
+    // An answer still missing its count is kept a minute, so the next visitor asks again.
+    wu(Promise.all([put(fresh, body.countUnread ? 60 : TTL), put(kept, KEEP)]));
+    return json(body, body.countUnread ? 30 : 300);
   } catch (e) {
     const old = await cache.match(kept);
     if (!old) return json({ ok: false, error: 'holders unavailable', why: String((e && e.message) || e).slice(0, 200) }, 0);

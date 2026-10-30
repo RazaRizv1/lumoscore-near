@@ -1790,6 +1790,20 @@
         setTabCount(/holders/i, HL.count != null ? HL.count.toLocaleString('en-US') : '—');
         HL.err = false;
         syncPanel();
+        // The edge could not reach NearBlocks for the count (it allows a few calls a minute per address, and
+        // Cloudflare's is shared). The visitor's own browser has its own allowance: ask once from here.
+        if (j.countUnread) {
+          fetch('https://api.nearblocks.io/v1/fts/' + encodeURIComponent(a.id) + '/holders/count')
+            .then(function (r) { if (!r.ok) throw new Error(String(r.status)); return r.json(); })
+            .then(function (c) {
+              var n = Number((((c && c.holders) || [])[0] || {}).count);
+              if (!(n > 0)) return;
+              HL.count = n;
+              setTabCount(/holders/i, n.toLocaleString('en-US'));
+              syncPanel();
+            })
+            .catch(function () {});
+        }
       })
       .catch(function () {
         HL.busy = false;
