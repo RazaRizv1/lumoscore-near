@@ -133,6 +133,11 @@ const TEXT = [
   // lx-dashblogdata's chain token, retargeted exactly as the XRPL fork's _xrplblogs.js does: the blog
   // card hides posts tagged for ANOTHER chain, and the inherited "stellar" showed Stellar-tagged posts here.
   ['var LXNET="stellar";', 'var LXNET="near";'],
+  // ...and its filter knew only two networks, so a post tagged Arc or Hedera would show on NEAR's dashboard.
+  // A post tagged for ANY other network is dropped; blank, "All" and old topic tags still show.
+  ['return (c!=="stellar"&&c!=="xrpl")||c===LXNET; });', 'return ["stellar","xrpl","near","arc","hedera"].indexOf(c)<0||c===LXNET; });'],
+  // (A failed /lxapi/blog read no longer says "No posts yet.": the Stellar base's own _dashblogs.js fixed that on
+  // 2026-10-31 and NEAR inherits it with the base -- no NEAR change needed for it.)
 ];
 
 function isDashboard(h) { return h.indexOf('id="activityList"') >= 0 && h.indexOf('status-row') >= 0; }
@@ -184,6 +189,9 @@ for (const dev of ['desktop', 'mobile']) {
     h = h.split('<span class="lbl">Stellar price</span>').join('<span class="lbl">NEAR price</span>');
 
     if (h.indexOf('id="lx-dashblogdata"') >= 0 && h.indexOf('var LXNET="near";') < 0) { console.error('  ' + key + ': lx-dashblogdata carries no NEAR LXNET — its chain filter changed shape; aborting'); process.exit(1); }
+    if (h.indexOf('id="lx-dashblogdata"') >= 0 && h.indexOf('["stellar","xrpl","near","arc","hedera"].indexOf(c)<0') < 0) {
+      console.error('  ' + key + ': lx-dashblogdata\'s network filter changed shape — Arc/Hedera posts would show here; aborting'); process.exit(1);
+    }
     h = stripById(h, ID).html;
     h = h.replace(new RegExp('<style id="' + CSS_ID + '">[' + B + 's' + B + 'S]*?<' + B + '/style>', 'g'), '');
     if (h.indexOf('</head>') >= 0) h = h.split('</head>').join(STYLE + '</head>');
