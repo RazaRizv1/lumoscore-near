@@ -88,7 +88,7 @@ Production already carries Stellar + XRPL. Add ONLY NEAR — not Arc, not Hedera
        `<script id="lx-*">` blocks (sha1 per id) of every page in `.deploy/dist` against what lumoscore.com
        serves now. Stellar and XRPL pages: no differences except middleware-injected `lx-ld-core` and the
        NEAR entries in the chain switcher / chooser. NEAR: all new. List `functions/` files against
-       production's: new = NEAR's (`nearmarket`, `nearpools`, `neartoken`, `nearoneclick`, `nearstats`, `neartrades`, `_nearcurated`, the
+       production's: new = NEAR's (`nearmarket`, `nearpools`, `neartoken`, `nearoneclick`, `nearstats`, `neartrades`, `nearholders`, `_nearcurated`, the
        NEAR sitemap module) and nothing else. Any other difference → stop.
 4. [ ] Note the current production deployment id (the rollback target):
        `npx wrangler pages deployment list --project-name=lumoscore | head -6`

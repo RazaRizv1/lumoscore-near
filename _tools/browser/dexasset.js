@@ -557,6 +557,9 @@
     if (pts[0][0] > cut + 3 * 86400000) return null;       // history is shorter than the window
     var base = null;
     for (var i = pts.length - 1; i >= 0; i--) { if (pts[i][0] <= cut) { base = pts[i]; break; } }
+    // History that STARTS within the 3-day tolerance above (HOOT's begins 30 days back to the day) measures
+    // from its first close, rather than the window being declared too long for a series that covers it.
+    if (!base) base = pts[0];
     if (!base || !(base[1] > 0)) return null;
     return (last[1] - base[1]) / base[1] * 100;
   }
@@ -1578,27 +1581,325 @@
   }
   function hideEl(n) { if (n && n.style.display !== 'none') n.style.display = 'none'; }
 
+  // ---- Recent Exchanges and Holders (RAZA 2026-10-29: "for all near assets, why aren't the recent activity
+  // and holders showing") ---------------------------------------------------------------------------------
+  //
+  // RECENT EXCHANGES: the token's busiest deep pool against wNEAR (gtPool -- the same pool the chart draws),
+  // its latest trades from GeckoTerminal: up to 300, newest first, each with the trading account, the side,
+  // both amounts and the transaction. Asked by the page, as the chart is (GeckoTerminal refuses Cloudflare),
+  // kept a minute, retried on the chart's schedule. ONE POOL, said in the footer: a trade routed through
+  // another pool is not in this list, as a Stellar trade on another order book is not in Stellar's.
+  //
+  // HOLDERS: /lxapi/nearholders, the 100 largest accounts as the chain holds them now (FastNEAR -- NearBlocks'
+  // own ranking turned out to be stale, see that Function), 50 a page; the total count from NearBlocks where
+  // it has one. The share of supply is against the contract's own total supply, the figure the Supply box
+  // shows.
+  //
+  // Both draw Stellar's markup (its stylesheet is on this page), on desktop and phone alike.
+  var EXPL_TX = 'https://nearblocks.io/txns/', EXPL_ACCT = 'https://nearblocks.io/address/';
+  var XPO = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>';
+  var ACCT_RE = /^[a-z0-9._-]{2,64}$/;
+  function escH(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+  // A 5x5 mirrored identicon from the account id (the one search.js draws), so each wallet has its own mark.
+  function identSvg(addr, size) {
+    var pal = ['#6f5ded', '#ef4444', '#22c55e', '#a855f7', '#06b6d4', '#f59e0b', '#ec4899', '#84cc16', '#ff894c', '#0ea5e9', '#14b8a6', '#facc15'];
+    var h = 2166136261, i;
+    addr = String(addr || '');
+    for (i = 0; i < addr.length; i++) { h ^= addr.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+    var bg = pal[h % pal.length], fg = pal[(h >>> 7) % pal.length];
+    if (fg === bg) fg = pal[(h % pal.length + 5) % pal.length];
+    var c = size / 5, rects = '', bits = h;
+    function rect(x, y) { return '<rect x="' + (x * c).toFixed(2) + '" y="' + (y * c).toFixed(2) + '" width="' + c.toFixed(2) + '" height="' + c.toFixed(2) + '" fill="' + fg + '"></rect>'; }
+    for (var y = 0; y < 5; y++) {
+      for (var x = 0; x < 3; x++) {
+        bits = Math.imul(bits ^ (x * 7 + y * 13 + 1), 2654435761) >>> 0;
+        if ((bits >>> 13) & 1) { rects += rect(x, y); if (x < 2) rects += rect(4 - x, y); }
+      }
+    }
+    return '<svg width="' + size + '" height="' + size + '" viewBox="0 0 ' + size + ' ' + size + '" style="border-radius:50%;background:' + bg
+      + ';display:block;flex:none" xmlns="http://www.w3.org/2000/svg">' + rects + '</svg>';
+  }
+  function shortAcct(a) { a = String(a || ''); return a.length > 20 ? (a.slice(0, 6) + '…' + a.slice(-4)) : a; }
+  function ago(ms) {
+    var s = Math.max(0, Math.round((Date.now() - ms) / 1000));
+    if (s < 60) return s + 's ago';
+    if (s < 3600) return Math.floor(s / 60) + 'm ago';
+    if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+    return Math.floor(s / 86400) + 'd ago';
+  }
+  function wallet(a, size) {
+    return '<a class="lx-acct wallet-cell" href="/account/near/' + encodeURIComponent(a) + '">' + identSvg(a, size)
+      + '<span class="mono wa">' + escH(shortAcct(a)) + '</span></a>';
+  }
+
+  // ---- trades ----
+  var TR = { rows: null, err: false, none: false, page: 1, min: 0, pool: null, at: 0, mine: false };
+  function myAcct() { try { return (window.lxn && window.lxn.account && window.lxn.account()) || ''; } catch (e) { return ''; } }
+
+  // MY TRADES, at the right end of the tab row as on Stellar and XRPL (RAZA 2026-10-30: "where's my trades on
+  // right side"). A filter on Recent Exchanges, as Stellar's is. ITS REACH IS THE FEED'S: the latest trades on
+  // the token's main pool -- no free NEAR source lists one account's swaps (NearBlocks' per-account token
+  // history came back empty for an account trading that minute, 2026-10-30) -- so the panel names that range
+  // instead of implying a full history.
+  function myTradesBtn() {
+    var bar = document.querySelector('.tabs-bar');
+    if (!bar) return;
+    var b = bar.querySelector('.lx-mytrades');
+    if (!b) {
+      b = document.createElement('button');
+      b.type = 'button'; b.className = 'lx-mytrades';
+      b.setAttribute('data-logoed', '1');
+      b.innerHTML = '<span class="lx-mtlabel">My Trades</span>';
+      b.style.cssText = 'margin-left:auto;background:none;border:0;padding:6px 2px;font:inherit;font-size:13.5px;font-weight:700;cursor:pointer';
+      bar.appendChild(b);
+      if (getComputedStyle(bar).display === 'flex') bar.style.alignItems = 'center';
+    }
+    // Literal colours with !important, as Stellar's: the tab bar colours its buttons with an !important rule.
+    var l = b.querySelector('.lx-mtlabel') || b;
+    l.style.setProperty('color', TR.mine ? '#ea6a2c' : '#8a8fa3', 'important');
+    l.style.setProperty('text-decoration', TR.mine ? 'underline' : 'none', 'important');
+  }
+  var TR_PER = 50;
+  function loadTrades(attempt) {
+    var d = window.__lxnAssetData, pool = gtPool(d);
+    if (!pool) { TR.none = true; TR.rows = []; syncPanel(); return; }
+    TR.pool = pool;
+    var at = attempt || 0;
+    getJsonOnce('lumos.nearGtTr.v1.' + pool.id, 'https://api.geckoterminal.com/api/v2/networks/near/pools/'
+      + encodeURIComponent(pool.id) + '/trades', 60000, function (j) {
+      var out = [];
+      ((j && j.data) || []).forEach(function (x) {
+        var a = x && x.attributes;
+        if (!a) return;
+        var buy = a.to_token_address === d.i, sell = a.from_token_address === d.i;
+        if (!buy && !sell) return;
+        var amt = +(buy ? a.to_token_amount : a.from_token_amount), nearAmt = +(buy ? a.from_token_amount : a.to_token_amount);
+        var addr = String(a.tx_from_address || ''), t = Date.parse(a.block_timestamp || '');
+        if (!(amt > 0) || !(nearAmt > 0) || !isFinite(t) || !ACCT_RE.test(addr)) return;
+        out.push({ addr: addr, side: buy ? 'buy' : 'sell', amt: amt, near: nearAmt, px: nearAmt / amt, t: t,
+          hash: /^[A-Za-z0-9]{20,64}$/.test(a.tx_hash || '') ? a.tx_hash : '' });
+      });
+      out.sort(function (p, q) { return q.t - p.t; });
+      return out.length ? out : [{ empty: 1 }];               // an empty pool is an answer, not a failure
+    }).then(function (rows) {
+      TR.rows = rows.length === 1 && rows[0].empty ? [] : rows;
+      TR.err = false; TR.at = Date.now();
+      syncPanel();
+    }, function () {
+      if (at < CH_RETRY.length) { setTimeout(function () { loadTrades(at + 1); }, CH_RETRY[at]); return; }
+      TR.err = true; syncPanel();
+    });
+  }
+  function paintTrades(panel, phone) {
+    var tb = phone ? document.getElementById('mdxaExList') : document.getElementById('dxaExTable');
+    var filt = document.getElementById(phone ? 'mdxaPanelFilters' : 'dxaPanelFilters');
+    var foot = phone ? null : panel.querySelector('.panel-foot');
+    var empty = panel.querySelector('.' + (phone ? 'mdxa' : 'dxa') + '-empty-state[data-lxn]');
+    var holder = phone ? tb : (tb && tb.closest('table'));
+    var msg = null;
+    if (TR.none) msg = ['No trades to show', 'This token has no pool against NEAR on Rhea Finance.'];
+    else if (TR.err) msg = ['Recent trades unavailable', 'The trade feed did not answer. Reload the page to try again.'];
+    else if (!TR.rows) msg = ['Loading recent trades…', ''];
+    if (msg || !tb) {
+      if (holder) hideEl(holder);
+      hideEl(filt); hideEl(foot);
+      if (empty && empty.getAttribute('data-lxmsg') !== msg[0]) { empty.parentNode.removeChild(empty); empty = null; }
+      if (!empty && msg) {
+        empty = emptyState((phone ? 'mdxa' : 'dxa') + '-empty-state', msg[0], msg[1]);
+        empty.setAttribute('data-lxmsg', msg[0]);
+        panel.appendChild(empty);
+      }
+      return;
+    }
+    if (empty) empty.parentNode.removeChild(empty);
+    [holder, filt, foot].forEach(function (n) { if (n && n.style.display === 'none') n.style.display = ''; });
+    var me = TR.mine ? myAcct() : '';
+    var all = TR.rows.filter(function (r) { return r.near >= TR.min && (!TR.mine || (me && r.addr === me)); });
+    var pages = Math.max(1, Math.ceil(all.length / TR_PER));
+    if (TR.page > pages) TR.page = pages;
+    var from = (TR.page - 1) * TR_PER, rows = all.slice(from, from + TR_PER);
+    var c = (window.__lxnAssetData && window.__lxnAssetData.symbol) || '';
+    var sig = TR.at + '|' + TR.min + '|' + TR.page + '|' + rows.length + '|' + (phone ? 1 : 0) + '|' + (TR.mine ? 'm' + me : '');
+    if (tb.__lxnSig === sig && tb.querySelector('[data-lxda]')) return;
+    tb.__lxnSig = sig;
+    var span = TR.rows.length ? ago(TR.rows[TR.rows.length - 1].t).replace(' ago', '') : '';
+    if (!rows.length) {
+      var pool = TR.pool ? TR.pool.pair + ' on Rhea' : 'this pool';
+      var none = TR.mine
+        ? (!me ? 'Connect a wallet to see your own trades in this asset.'
+          : ('No trades from ' + escH(shortAcct(me)) + ' among the latest ' + TR.rows.length + ' on ' + escH(pool) + (span ? ' (the last ' + span + ')' : '') + '.'))
+        : TR.min > 0 ? ('No trades of ' + TR.min.toLocaleString('en-US') + '+ NEAR among the latest ' + TR.rows.length + '.') : 'No trades on this pool recently.';
+      tb.innerHTML = phone
+        ? '<div class="lxda-ex-empty" data-lxda="1" style="text-align:center;padding:26px 12px;color:var(--text-soft,#8a8fa3);font-size:13.5px">' + none + '</div>'
+        : '<tr class="lxda-ex-empty" data-lxda="1"><td colspan="6" style="text-align:center;padding:26px 12px;color:var(--text-soft,#8a8fa3);font-size:13.5px">' + none + '</td></tr>';
+    } else if (phone) {
+      tb.innerHTML = rows.map(function (r) {
+        var flow = r.side === 'buy' ? (amount(r.near) + ' NEAR → ' + amount(r.amt) + ' ' + escH(c)) : (amount(r.amt) + ' ' + escH(c) + ' → ' + amount(r.near) + ' NEAR');
+        return '<div class="ex-row" data-lxda="1"><span class="ex-ident">' + identSvg(r.addr, 28) + '</span>'
+          + '<div class="ex-meta"><div class="nm mono"><a class="lx-acct" href="/account/near/' + encodeURIComponent(r.addr) + '">' + escH(shortAcct(r.addr)) + '</a></div>'
+          + '<div class="ex-sub"><span class="type-badge ' + r.side + '">' + (r.side === 'buy' ? '▲ Buy' : '▼ Sell') + '</span></div></div>'
+          + '<div class="ex-num">' + xrp(r.px) + ' NEAR<span class="sub">' + flow + '</span></div>'
+          + '<div class="ex-time">' + ago(r.t) + '</div>'
+          + (r.hash ? '<a class="row-link lxda-exlink" href="' + EXPL_TX + r.hash + '" target="_blank" rel="noopener nofollow" aria-label="View this trade on NearBlocks">' + XPO + '</a>' : '<span></span>')
+          + '</div>';
+      }).join('');
+    } else {
+      tb.innerHTML = rows.map(function (r) {
+        return '<tr data-lxda="1"><td>' + wallet(r.addr, 26) + '</td>'
+          + '<td><span class="type-badge ' + r.side + '">' + (r.side === 'buy' ? '▲ Buy' : '▼ Sell') + '</span></td>'
+          + '<td><span class="mono">' + xrp(r.px) + ' NEAR</span></td>'
+          + '<td><span class="mono">' + amount(r.amt) + ' ' + escH(c) + '</span><span class="lx-extot">' + amount(r.near) + ' NEAR</span></td>'
+          + '<td><span class="time">' + ago(r.t) + '</span></td>'
+          + '<td style="text-align:right">' + (r.hash ? '<a class="row-link" href="' + EXPL_TX + r.hash + '" target="_blank" rel="noopener nofollow" aria-label="View this trade on NearBlocks">' + XPO + '</a>' : '') + '</td></tr>';
+      }).join('');
+    }
+    tb.classList.add('lxda');
+    try { tb.setAttribute('data-logoed', '1'); } catch (e) {}
+    var info = document.getElementById('dxaPanelInfo');
+    if (info) {
+      var it = (TR.mine ? 'Your trades · ' : '') + (all.length ? ('Showing ' + (from + 1) + '–' + (from + rows.length) + ' of ' + all.length + ' recent trades') : 'Showing 0 recent trades')
+        + (TR.min > 0 ? ' · ≥ ' + TR.min.toLocaleString('en-US') + ' NEAR' : '')
+        + (TR.pool ? ' · ' + TR.pool.pair + ' on Rhea' : '') + (span ? ' · last ' + span : '');
+      if (info.textContent !== it) info.textContent = it;
+    }
+    var pg = foot && foot.querySelector('.pgn');
+    if (pg) {
+      var ps = TR.page + '/' + pages;
+      if (pg.getAttribute('data-lxnpg') !== ps) {
+        pg.setAttribute('data-lxnpg', ps);
+        pg.innerHTML = '<button type="button" data-lxpg="prev"' + (TR.page <= 1 ? ' disabled' : '') + '>‹</button>'
+          + '<button type="button" class="active">' + TR.page + '</button>'
+          + '<button type="button" data-lxpg="next"' + (TR.page >= pages ? ' disabled' : '') + '>›</button>';
+      }
+    }
+  }
+
+  // ---- holders ----
+  var HL = { list: null, count: null, page: 1, err: false, busy: false };
+  function loadHolders(attempt) {
+    var a = window.__lxnAssetRef;
+    if (!a || HL.busy || HL.list) return;
+    HL.busy = true;
+    fetch('/lxapi/nearholders?i=' + encodeURIComponent(a.id))
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        HL.busy = false;
+        if (!j || !j.ok) throw new Error('down');
+        HL.list = j.holders || [];
+        HL.count = j.count != null ? Number(j.count) : null;
+        setTabCount(/holders/i, HL.count != null ? HL.count.toLocaleString('en-US') : '—');
+        HL.err = false;
+        syncPanel();
+      })
+      .catch(function () {
+        HL.busy = false;
+        var at = attempt || 0;
+        if (at < 2) { setTimeout(function () { loadHolders(at + 1); }, CH_RETRY[at + 1]); return; }
+        HL.err = true; setTabCount(/holders/i, '—');
+        syncPanel();
+      });
+  }
+  function paintHolders(extra, phone) {
+    var d = window.__lxnAssetData, dec = d && d.decimals != null ? +d.decimals : null, sup = d && d.supply > 0 ? +d.supply : 0;
+    var pre = phone ? 'mdxa' : 'dxa';
+    var all = HL.list, list = all ? all.slice((HL.page - 1) * 50, HL.page * 50) : null;
+    var state = (HL.err && !all) ? 'err' : (!all || dec == null) ? 'load' : !all.length ? 'none' : 'ok';
+    var sig = state + '|' + HL.page + '|' + (all ? all.length : 0) + '|' + HL.count;
+    if (extra.__lxnSig === sig && extra.classList.contains('lxda')) return;
+    extra.__lxnSig = sig;
+    extra.classList.add('lxda');
+    if (state !== 'ok') {
+      extra.innerHTML = '';
+      var m = state === 'none' ? ['No holders found', 'No account holds a balance of this token.']
+        : state === 'err' ? ['Holders unavailable', 'The holder list could not be loaded just now. Reload the page to try again.']
+        : ['Loading holders…', ''];
+      extra.appendChild(emptyState(pre + '-empty-state', m[0], m[1]));
+      if (state === 'load' && !HL.busy) loadHolders();
+      return;
+    }
+    var scale = Math.pow(10, dec);
+    var rows = list.map(function (h) { return { a: h.a, bal: Number(h.raw) / scale }; });
+    var t10 = 0, t50 = 0;
+    all.forEach(function (h, i) { var b = Number(h.raw) / scale; if (i < 10) t10 += b; if (i < 50) t50 += b; });
+    var pct = function (v) { return sup > 0 ? Math.min(100, v / sup * 100) : null; };
+    var share = function (v) { var p = pct(v); return p == null ? '—' : (p >= 0.001 ? p.toFixed(3) : '<0.001') + '%'; };
+    var top = function (v) { var p = pct(v); return p == null ? '—' : p.toFixed(1) + '%'; };
+    var base = (HL.page - 1) * 50;
+    var count = HL.count != null ? Number(HL.count) : null;
+    var more = base + 50 < all.length;
+    var stat = function (lbl, val) { return '<div class="' + pre + '-hl-stat"><span class="lbl">' + lbl + '</span><span class="val mono lxp">' + val + '</span></div>'; };
+    var h = '<div class="' + pre + '-hl-head">' + stat('Holders', count != null ? count.toLocaleString('en-US') : '—')
+      + stat(phone ? 'Top 10' : 'Top 10 hold', top(t10)) + stat(phone ? 'Top 50' : 'Top 50 hold', top(t50)) + '</div>';
+    if (phone) {
+      h += '<div class="mdxa-hl-list" data-lxbuilt="p' + HL.page + '">' + rows.map(function (r, i) {
+        return '<div class="mdxa-hl-row lxda-hlrow"><span class="mdxa-hl-rank">#' + (base + i + 1) + '</span>'
+          + '<span class="mdxa-hl-ident">' + identSvg(r.a, 28) + '</span>'
+          + '<div class="mdxa-hl-meta"><div class="mdxa-hl-addr mono"><a class="lx-acct" href="/account/near/' + encodeURIComponent(r.a) + '">' + escH(shortAcct(r.a)) + '</a></div></div>'
+          + '<div class="mdxa-hl-vals"><div class="mdxa-hl-bal mono">' + statAmt(r.bal) + '</div><div class="mdxa-hl-pct mono">' + share(r.bal) + '</div></div>'
+          + '<a class="mdxa-hl-explorer lxda-hlx" href="' + EXPL_ACCT + encodeURIComponent(r.a) + '" target="_blank" rel="noopener nofollow" aria-label="View on NearBlocks" title="View on NearBlocks">' + XPO + '</a></div>';
+      }).join('') + '</div>';
+    } else {
+      h += '<table class="ex-table dxa-hl-table"><thead><tr><th>#</th><th>Wallet</th><th>Balance</th><th>% supply</th><th style="text-align:right">Explorer</th></tr></thead>'
+        + '<tbody data-lxbuilt="p' + HL.page + '">' + rows.map(function (r, i) {
+          return '<tr><td class="dxa-hl-rank">' + (base + i + 1) + '</td><td><div class="lxda-hcell">' + wallet(r.a, 24) + '</div></td>'
+            + '<td class="mono">' + statAmt(r.bal) + '</td><td class="mono">' + share(r.bal) + '</td>'
+            + '<td style="text-align:right"><a class="dxa-hl-explorer" href="' + EXPL_ACCT + encodeURIComponent(r.a) + '" target="_blank" rel="noopener nofollow" aria-label="View on NearBlocks">' + XPO + '</a></td></tr>';
+        }).join('') + '</tbody></table>';
+    }
+    // The list is the largest 100, so the line says so rather than implying all of them can be paged.
+    h += '<div class="' + pre + '-hl-pgn"><div class="info lxp">Showing ' + (base + 1) + '–' + (base + rows.length) + ' of the top '
+      + all.length + ' holders' + (count != null ? ' (' + count.toLocaleString('en-US') + ' in all)' : '') + '</div><div class="pgn">'
+      + '<button type="button" data-lxhp="prev"' + (HL.page <= 1 ? ' disabled' : '') + '>‹ Prev</button>'
+      + '<button type="button" data-lxhp="next"' + (more ? '' : ' disabled') + '>Next ›</button></div></div>';
+    extra.innerHTML = h;
+    try { extra.setAttribute('data-logoed', '1'); } catch (e) {}
+  }
+
+  // Filter chips, the exchanges pager and the holders pager. Window capture, as on Stellar: the design's own
+  // handlers repaint their mock rows on these clicks otherwise.
+  if (!window.__lxnPanelClicks) {
+    window.__lxnPanelClicks = 1;
+    window.addEventListener('click', function (e) {
+      var t = e.target && e.target.closest ? e.target : null;
+      if (!t) return;
+      var chip = t.closest('#dxaPanelFilters .chip, #mdxaPanelFilters .chip');
+      var pgb = t.closest('[data-lxpg]'), hpb = t.closest('[data-lxhp]'), mtb = t.closest('.lx-mytrades');
+      if (!chip && !pgb && !hpb && !mtb) return;
+      e.preventDefault(); e.stopImmediatePropagation();
+      if (mtb) {
+        TR.mine = !TR.mine; TR.page = 1;
+        myTradesBtn();
+        // A filter on the Exchanges panel: take the reader there (the design owns the tab switch).
+        var ex = [].filter.call(document.querySelectorAll('.tabs-bar .tab'), function (x) { return /exchanges/i.test(x.textContent || ''); })[0];
+        if (TR.mine && ex && !ex.classList.contains('active')) { try { ex.click(); } catch (er) {} }
+      } else if (chip) {
+        [].forEach.call(chip.parentNode.querySelectorAll('.chip'), function (o) { o.classList.toggle('active', o === chip); });
+        TR.min = parseFloat(chip.getAttribute('data-min-xlm')) || 0; TR.page = 1;
+      } else if (pgb) {
+        if (pgb.disabled) return;
+        TR.page += pgb.getAttribute('data-lxpg') === 'next' ? 1 : -1;
+      } else {
+        if (hpb.disabled) return;
+        HL.page = Math.max(1, HL.page + (hpb.getAttribute('data-lxhp') === 'next' ? 1 : -1));
+      }
+      syncPanel();
+    }, true);
+  }
+
   function syncPanel() {
     var panel = panelEl();
     if (!panel) return;
     var phone = panel.id === 'mdxaPanel';
     var pre = phone ? 'mdxa' : 'dxa';
-    if (activeTab() === 'exchanges' && !panel.querySelector('.' + pre + '-tab-extra')) {
-      hideEl(phone ? document.getElementById('mdxaExList') : panel.querySelector('.ex-table'));
-      hideEl(document.getElementById(phone ? 'mdxaPanelFilters' : 'dxaPanelFilters'));
-      hideEl(panel.querySelector('.panel-foot'));
-      if (!panel.querySelector('.' + pre + '-empty-state[data-lxn]')) {
-        panel.appendChild(emptyState(pre + '-empty-state', 'No exchanges yet',
-          'Trade history for NEAR tokens is not available yet.'));
-      }
-    }
-    var hl = panel.querySelector('.' + pre + '-tab-extra.' + pre + '-holders:not(.lxda)');
-    if (hl) {
-      hl.innerHTML = '';
-      hl.appendChild(emptyState(pre + '-empty-state', 'No holder data yet',
-        'Holder lists for NEAR tokens are not available yet.'));
-      hl.classList.add('lxda');
-    }
+    myTradesBtn();
+    // No count on Exchanges, as on Stellar -- and the design writes its mock "2,142" back on every tab switch.
+    [].forEach.call(document.querySelectorAll('.tabs-bar .tab'), function (x) {
+      var cn = /exchanges/i.test(x.textContent || '') && x.querySelector('.count');
+      if (cn && cn.style.display !== 'none') cn.style.display = 'none';
+    });
+    if (activeTab() === 'exchanges' && !panel.querySelector('.' + pre + '-tab-extra')) paintTrades(panel, phone);
+    var hl = panel.querySelector('.' + pre + '-tab-extra.' + pre + '-holders');
+    if (hl) paintHolders(hl, phone);
     var pl = panel.querySelector('.' + pre + '-tab-extra.' + pre + '-pools:not(.lxda)');
     if (pl && DONE) {
       if (window.__lxnAssetData) paintPools(window.__lxnAssetData, pl);
@@ -2550,10 +2851,16 @@
       if (asset) liftIdentity();                          // no token in the URL: the mock header stays gated
       // Identity-bearing gates (trade-panel labels, chips) lift only now, with the token's own words in.
       root.classList.add('lxn-dxa-id');
-      setTabCount(/exchanges/i, '—');
+      // Stellar shows no count on Exchanges; Holders gets NearBlocks' figure once it lands.
+      (function () {
+        var et = [].filter.call(document.querySelectorAll('.tabs-bar .tab'), function (t) { return /exchanges/i.test(t.textContent || ''); })[0];
+        var ec = et && et.querySelector('.count');
+        if (ec) ec.style.display = 'none';
+      })();
       setTabCount(/holders/i, '—');
       syncPanel();
       if (!window.__lxnAssetData) {
+        TR.err = true; HL.err = true; syncPanel();
         setTabCount(/pools/i, '—'); PERF.h1 = PERF.long = 'done'; paintPerf(null);
         if (asset) note('Could not read the order book right now.');
         return;
@@ -2570,6 +2877,8 @@
       poolCounts(window.__lxnAssetData);
       syncPanel();
       loadBook(asset, window.__lxnAssetData);
+      loadTrades();
+      loadHolders();
     };
 
     if (!asset) { window.__lxnAssetMiss = 'nottoken'; finish(null); return; }
