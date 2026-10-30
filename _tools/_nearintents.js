@@ -208,6 +208,23 @@ for (const dev of ['desktop', 'mobile']) {
       const n = h.split(from).length - 1;
       if (n) { h = h.split(from).join(to); marks += n; }
     }
+    // THE SOURCE CHIP'S MARK, IN THE MARKUP (RAZA 2026-10-30: "it shows stellar logo for split seconds when
+    // the page is refreshed"). Stellar's chip ships its logo inline and nibridge's paintSource() replaces it
+    // only once it runs -- a JS fix for a flash in markup that precedes it never works (lumoscore-flash-pattern).
+    // Whatever image the chip's icon holds becomes NEAR's here, before the page is served. Idempotent.
+    const chipRe = /(<div class="br-netchip"><span class="br-ic"[^>]*>)<img src="(?!\/assets\/networks\/near\.png)[^"]*"/g;
+    const chipN = (h.match(chipRe) || []).length;
+    if (chipN) { h = h.replace(chipRe, '$1<img src="' + NEAR_IMG + '"'); marks += chipN; }
+    // The same Stellar mark on the hidden steps: step 2's source-address row (not the receiving row, which is
+    // .brw-in) and step 3's "You send" asset. Repainted before anyone reaches them, but the markup should not
+    // hold another chain's logo at all.
+    for (const re of [
+      /(<div class="br-wallet"><span class="br-ic lx-netic"[^>]*>)<img src="(?!\/assets\/networks\/near\.png)[^"]*"/g,
+      /(You send<\/div><div class="v"><span class="ic lx-rvnet" data-rvnet><\/span><span class="ic"[^>]*>)<img src="(?!\/assets\/networks\/near\.png)[^"]*"/g,
+    ]) {
+      const n = (h.match(re) || []).length;
+      if (n) { h = h.replace(re, '$1<img src="' + NEAR_IMG + '"'); marks += n; }
+    }
     const bi = h.lastIndexOf('</' + 'body>');
     if (bi < 0) { console.error('  ' + key + ': no closing body — aborting'); process.exit(1); }
     json[key] = h.slice(0, bi) + SCRIPT + h.slice(bi);
