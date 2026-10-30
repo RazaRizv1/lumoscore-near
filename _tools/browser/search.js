@@ -372,11 +372,21 @@
   }
 
   // ---- pools, accounts, and the exact id the lists do not hold -----------------------------------------
+  // POOL URLS NAME THE PAIR (RAZA 2026-10-30: "The url for Pools-pool page on near needs to be fixed" -> "Use the
+  // pair name"): /pools/near/stnear-wnear/3514. The symbols make it readable; the Rhea pool id stays as the last
+  // segment because one pair can have several pools (classic, stable, different fees), so the name alone would
+  // not say which. Symbols are chosen by whoever deployed the token, so only [a-z0-9] survive. Same function in
+  // pools.js, search.js and pooldetail.js.
+  function poolHref(id, syms) {
+    var slug = (syms || []).map(function (x) { return String(x || '').toLowerCase().replace(/[^a-z0-9]/g, ''); })
+      .filter(Boolean).join('-').slice(0, 60).replace(/-+$/, '');
+    return '/pools/near/' + (slug || 'pool') + '/' + encodeURIComponent(id);
+  }
   function poolRow(p) {
     var a = document.createElement('a');
     a.className = 'sp-row sp-row--asset lx-searow';
     a.setAttribute('data-chain', 'near');
-    a.href = '/pools/near/id/' + encodeURIComponent(p.id);
+    a.href = poolHref(p.id, (p.tokens || []).map(function (x) { return x && x.s; }));
     var toks = (p.tokens || []).slice(0, 4);
     a.__lxnT = { k: 'p', i: String(p.id), s: toks.map(function (x) { return { i: x.i, s: x.s }; }) };
     var ico = el('div', 'sp-ico lx-spico-on lx-poolico');

@@ -107,6 +107,17 @@
   // A token's symbol as its contract's metadata states it. Arbitrary text, so it only ever reaches the
   // page through textContent.
   function nameOf(t) { return (t && t.s) ? String(t.s) : '?'; }
+  // POOL URLS NAME THE PAIR (RAZA 2026-10-30: "The url for Pools-pool page on near needs to be fixed" -> "Use the
+  // pair name"): /pools/near/stnear-wnear/3514. The symbols make it readable; the Rhea pool id stays as the last
+  // segment because one pair can have several pools (classic, stable, different fees), so the name alone would
+  // not say which. Symbols are chosen by whoever deployed the token, so only [a-z0-9] survive. Same function in
+  // pools.js, search.js and pooldetail.js.
+  function poolHref(id, syms) {
+    var slug = (syms || []).map(function (x) { return String(x || '').toLowerCase().replace(/[^a-z0-9]/g, ''); })
+      .filter(Boolean).join('-').slice(0, 60).replace(/-+$/, '');
+    return '/pools/near/' + (slug || 'pool') + '/' + encodeURIComponent(id);
+  }
+  function hrefOf(p) { return poolHref(p.id, ((p && p.tokens) || []).map(function (t) { return t && t.s; })); }
   function pairName(p) {
     return ((p && p.tokens) || []).map(nameOf).join(' / ') || '?';
   }
@@ -290,7 +301,7 @@
       if (!t || !t.closest) return;
       // The phone's cards are anchors in #panelAll; the design's nav shim claims those exactly as it
       // claims the desktop rows, so both are taken here.
-      var a = t.closest('#panelAll a.pool-card[href*="/pools/near/id/"]');
+      var a = t.closest('#panelAll a.pool-card[href*="/pools/near/"]');
       if (!a) {
         var tr = t.closest('#poolsBody tr');
         if (!tr) return;
@@ -335,7 +346,7 @@
     // `div > div.pair-name` — 15.5px/700 from the design's own stylesheet. This drew 22px discs beside a
     // bare span, so the name took the table's 15px/400 and every row sat 17px shorter.
     var wrap = el('a', 'pool-pair pair-cell');
-    wrap.href = '/pools/near/id/' + encodeURIComponent(p.id);
+    wrap.href = hrefOf(p);
     wrap.style.cssText = 'display:flex;align-items:center;gap:10px;color:inherit;text-decoration:none';
     var icons = el('div', 'pair-icons');
     // TWO GUARDS, BECAUSE THE HEALER HAS TWO ROUTINES AND THEY READ DIFFERENT ATTRIBUTES.
@@ -421,7 +432,7 @@
   // this project. It is the same one.
   function card(p, rank) {
     var a = el('a', 'pool-card');
-    a.href = '/pools/near/id/' + encodeURIComponent(p.id);
+    a.href = hrefOf(p);
 
     var head = el('div', 'pc-head');
     var icons = el('div', 'pair-icons');

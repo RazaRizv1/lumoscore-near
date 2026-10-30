@@ -108,7 +108,18 @@
     return null;
   }
 
-  // /pools/near/id/<id> -- the route the Pools table links to. The phone file and a direct visit to the
+  // POOL URLS NAME THE PAIR (RAZA 2026-10-30: "The url for Pools-pool page on near needs to be fixed" -> "Use the
+  // pair name"): /pools/near/stnear-wnear/3514. The symbols make it readable; the Rhea pool id stays as the last
+  // segment because one pair can have several pools (classic, stable, different fees), so the name alone would
+  // not say which. Symbols are chosen by whoever deployed the token, so only [a-z0-9] survive. Same function in
+  // pools.js, search.js and pooldetail.js.
+  function poolHref(id, syms) {
+    var slug = (syms || []).map(function (x) { return String(x || '').toLowerCase().replace(/[^a-z0-9]/g, ''); })
+      .filter(Boolean).join('-').slice(0, 60).replace(/-+$/, '');
+    return '/pools/near/' + (slug || 'pool') + '/' + encodeURIComponent(id);
+  }
+  // /pools/near/<pair>/<id> -- the route the Pools table links to (/pools/near/id/<id>, the older form, still
+  // resolves and is rewritten to the pair form once the tokens are known). The phone file and a direct visit to the
   // page file can carry it as ?pool= or ?id= instead.
   function fromUrl() {
     try {
@@ -116,7 +127,7 @@
       var q = sp.get('pool') || sp.get('id');
       if (q && /^\d{1,9}$/.test(q)) return q;
     } catch (e) {}
-    var m = window.location.pathname.match(/\/pools\/near\/id\/(\d{1,9})\/?$/);
+    var m = window.location.pathname.match(/\/pools\/near\/[a-z0-9-]{1,60}\/(\d{1,9})\/?$/i);
     return m ? m[1] : null;
   }
 
@@ -1132,6 +1143,12 @@
       });
     });
     try { document.title = pair + ' liquidity pool on NEAR | LumosCore'; } catch (e) {}
+    // The address bar shows the pair form whichever way the page was reached (an /id/ link, a stale slug).
+    try {
+      var want = poolHref(id, T.map(function (s) { return s.name; }));
+      if (location.pathname.indexOf('/pools/near/') === 0 && location.pathname.replace(/\/$/, '') !== want)
+        history.replaceState(history.state, '', want + location.search + location.hash);
+    } catch (e) {}
     $$('.crumb a[data-lxback]').forEach(function (bk) { bk.setAttribute('href', '/pools/near'); });
 
     // The pool's identity line: its Rhea id (what the copy button copies), its kind and its fee.
