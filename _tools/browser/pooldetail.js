@@ -197,19 +197,9 @@
     [].forEach.call(svg.querySelectorAll('text'), function (t) { t.textContent = '—'; });
   }
 
-  // The chart's own controls (range, line/bar, TVL/volume) are claimed at window capture and do
-  // nothing: the design's handlers would redraw its mock series, and there is no NEAR history to switch
-  // between. The note stays as the one honest statement.
-  if (!window.__lxnChartModes) {
-    window.__lxnChartModes = 1;
-    window.addEventListener('click', function (e) {
-      var t = e.target;
-      if (!t || !t.closest || !$('.pool-header')) return;
-      if (!t.closest('.tf-mini button, .chart-type button, .chart-mode-menu button, .chart-mode-select')) return;
-      e.preventDefault();
-      e.stopImmediatePropagation();
-    }, true);
-  }
+  // The chart's own controls (range, line/bar, price/volume) now drive the real series: wireChartControls
+  // below. The blocker that used to swallow them here (when there was no NEAR history) is gone -- it ran first
+  // and would have stopped the real handler too.
 
   // ---- Pool Transactions: the empty state ------------------------------------------------------------
   // Desktop is table.tx (non-.lx-txrow rows are hidden by the inherited sheet); the phone is a list of
@@ -240,16 +230,7 @@
       box.appendChild(d);
     }
   }
-  if (!window.__lxnTxFilters) {
-    window.__lxnTxFilters = 1;
-    window.addEventListener('click', function (e) {
-      var b = e.target && e.target.closest && e.target.closest('.tx-filter button, .tx-filter-m button');
-      if (!b) return;
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      [].forEach.call(b.parentNode.querySelectorAll('button'), function (x) { x.classList.toggle('active', x === b); });
-    }, true);
-  }
+  // The filters are wired with the swaps list (wireTx below).
 
   // ---- Participants: the empty state ------------------------------------------------------------------
   // The pill (desktop .side-head, phone .card-head) and the desktop foot. The foot is hidden by the
@@ -275,6 +256,572 @@
     return v.toLocaleString('en-US', { maximumFractionDigits: 2, minimumFractionDigits: 2 }) + '%';
   }
   function feeText(f) { return f == null || !isFinite(f) ? '—' : (+f).toLocaleString('en-US', { maximumFractionDigits: 3 }) + '%'; }
+
+  // ==== THE POOL'S LIVE HALF (RAZA 2026-10-30: "nothing on pools-pool page is being shown") ===============
+  //
+  // Phase 1 left five parts of this page as empty states. They are filled now, each from the one source that
+  // has it, all asked by the page (GeckoTerminal refuses Cloudflare, as on the token page):
+  //   24h stats     DexScreener (the endpoint) where it lists the pool, else GeckoTerminal's pool record --
+  //                 which also says when a pool genuinely had no trades, so a dead pool reads 0, not "—".
+  //   Pool Activity GeckoTerminal OHLCV for this pool: the price of one side in the other, with volume under
+  //                 it, per range. NOT the pool's TVL over time, which nothing publishes for NEAR pools, so the
+  //                 design's "Pool TVL" choice is relabelled "Price" rather than drawn from a guess.
+  //   Transactions  GeckoTerminal's latest trades on this pool -- SWAPS. Deposits and withdrawals have no NEAR
+  //                 source (Rhea's indexer stopped in Dec 2024), and their filters say so.
+  //   My Position   Rhea itself: get_pool_shares and the pool's shares_total_supply, read when a wallet is set.
+  //   Balances      each token's ft_balance_of (NEAR's own balance for the wNEAR side, which a deposit wraps).
+  // XRPL's drawing code is reused as it stands there (same design, same SVG); only the series differ.
+  var GT = 'https://api.geckoterminal.com/api/v2/networks/near/pools/';
+  var NSVG = 'http://www.w3.org/2000/svg';
+  var RPC = ['https://free.rpc.fastnear.com', 'https://near.drpc.org'];
+  function gtId(id) { return 'refv1-' + id; }
+  function gtGet(path, key, ttl) {
+    try {
+      var c = JSON.parse(localStorage.getItem(key) || 'null');
+      if (c && c.v && Date.now() - c.ts < ttl) return Promise.resolve(c.v);
+    } catch (e) {}
+    return fetch(GT + path).then(function (r) { if (!r.ok) throw new Error(String(r.status)); return r.json(); })
+      .then(function (j) { try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), v: j })); } catch (e) {} return j; });
+  }
+  // A view call on NEAR, each RPC in turn.
+  function nview(account, method, args) {
+    var body = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'query', params: { request_type: 'call_function', finality: 'final',
+      account_id: account, method_name: method, args_base64: btoa(JSON.stringify(args || {})) } });
+    var go = function (k) {
+      return fetch(RPC[k], { method: 'POST', headers: { 'content-type': 'application/json' }, body: body })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          if (!j.result || !j.result.result) throw new Error(method);
+          return JSON.parse(String.fromCharCode.apply(null, j.result.result));
+        })
+        .catch(function (e) { if (k + 1 < RPC.length) return go(k + 1); throw e; });
+    };
+    return go(0);
+  }
+  function nativeBal(me) {
+    var body = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'query', params: { request_type: 'view_account', finality: 'final', account_id: me } });
+    return fetch(RPC[0], { method: 'POST', headers: { 'content-type': 'application/json' }, body: body })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        var a = j && j.result; if (!a) throw new Error('view_account');
+        var amt = BigInt(a.amount), stor = BigInt(a.storage_usage || 0) * BigInt('10000000000000000000'), lk = BigInt(a.locked || '0');
+        var keep = stor > lk ? stor - lk : BigInt(0);
+        return amt > keep ? (amt - keep).toString() : '0';
+      });
+  }
+  function scaled(raw, dec) {
+    var s = String(raw || '0').replace(/^0+(?=\d)/, '');
+    if (!dec) return Number(s);
+    var neg = s.length <= dec ? ('0'.repeat(dec - s.length + 1) + s) : s;
+    return Number(neg.slice(0, neg.length - dec) + '.' + neg.slice(neg.length - dec));
+  }
+  var DEC = {};
+  function decOf(id) {
+    if (DEC[id] != null) return Promise.resolve(DEC[id]);
+    return nview(id, 'ft_metadata', {}).then(function (m) { DEC[id] = +m.decimals; return DEC[id]; });
+  }
+
+  // ---- 24h stats from GeckoTerminal, where the endpoint has none -----------------------------------------
+  function gtStats(id, row) {
+    if (row.vol != null) return;
+    gtGet(gtId(id), 'lumos.nearGtPool.v1.' + id, 120000).then(function (j) {
+      var a = j && j.data && j.data.attributes;
+      if (!a || !USD) return;
+      var volUsd = +((a.volume_usd || {}).h24 || 0);
+      var vol = volUsd / USD;
+      var feeFrac = (+row.fee || 0) / 100;
+      var fees = vol * feeFrac;
+      var liqUsd = +a.reserve_in_usd || (row.liq != null ? row.liq * USD : 0);
+      var apr = liqUsd > 0 ? (fees * USD * 365 / liqUsd) * 100 : null;
+      [['vol', vol], ['fees', fees]].forEach(function (x) {
+        var cell = statCell(x[0]);
+        if (!cell) return;
+        unitVal(cell.querySelector('.v'), num(x[1], 2), 'NEAR');
+        var s = cell.querySelector('.s');
+        if (s) s.textContent = x[1] > 0 ? ('≈ ' + usdShort(x[1] * USD)) : 'no trades in 24h';
+      });
+      var ap = $('.ph-stat.lx-partstat') || statCell('apr') || statCell('participant');
+      if (ap) {
+        var av = ap.querySelector('.v');
+        if (av) av.textContent = apr != null ? pct(apr) : '—';
+        var as = ap.querySelector('.s');
+        if (as) as.textContent = apr != null ? 'from 24h fees' : '';
+      }
+    }, function () {});
+  }
+
+  // ---- Pool Activity --------------------------------------------------------------------------------------
+  function axisNum(v) {
+    var a = Math.abs(v);
+    if (a >= 1e6) return (v / 1e6).toFixed(2) + 'M';
+    if (a >= 1e3) return (v / 1e3).toFixed(1) + 'K';
+    if (a >= 1) return v.toFixed(2);
+    if (a >= 0.0001) return v.toFixed(5);
+    return v.toPrecision(3);
+  }
+  function tipWhen(ms, spanMs) {
+    var d = new Date(ms), mo = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    var two = function (v) { return (v < 10 ? '0' : '') + v; };
+    return mo[d.getMonth()] + ' ' + d.getDate() + (spanMs < 8 * 86400000 ? ', ' + two(d.getHours()) + ':' + two(d.getMinutes()) : (', ' + d.getFullYear()));
+  }
+  function wirePoolHover(host) {
+    if (host.__lxnHovWired) return;
+    host.__lxnHovWired = 1;
+    try { if (getComputedStyle(host).position === 'static') host.style.position = 'relative'; } catch (e) {}
+    function mk(css) {
+      var d = document.createElement('div');
+      d.className = 'lx-chov';
+      d.setAttribute('data-logoed', '1');
+      d.style.cssText = 'position:absolute;pointer-events:none;opacity:0;transition:opacity .08s linear;' + css;
+      host.appendChild(d);
+      return d;
+    }
+    var vline = mk('top:0;bottom:0;width:1px;background:rgba(180,180,200,.55);z-index:4');
+    var dot = mk('width:11px;height:11px;border-radius:50%;border:2px solid var(--surface);background:var(--accent,#ea6a2c);transform:translate(-50%,-50%);z-index:6');
+    var box = mk("background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:7px 10px;font-size:14px;font-family:'Hanken Grotesk',system-ui,sans-serif;box-shadow:0 8px 22px rgba(0,0,0,.22);min-width:140px;z-index:8;color:var(--text)");
+    function hide() { vline.style.opacity = '0'; dot.style.opacity = '0'; box.style.opacity = '0'; }
+    function line(text, css) { var e = el('div', null, text); e.setAttribute('data-logoed', '1'); e.style.cssText = css; return e; }
+    function row(label, value) {
+      var w = document.createElement('div');
+      w.appendChild(line(label, 'color:var(--text-soft,#8a8fa3);font-size:11px;font-weight:600'));
+      w.appendChild(line(value, 'color:var(--text);font-size:14px;font-weight:800;font-variant-numeric:tabular-nums;margin-top:1px'));
+      return w;
+    }
+    function at(cx, cy) {
+      var S = host.__lxnHov, svg = host.querySelector('svg');
+      if (!S || !svg || !S.pts || S.pts.length < 2) return hide();
+      var hr = host.getBoundingClientRect();
+      if (cx < hr.left || cx > hr.right || cy < hr.top || cy > hr.bottom) return hide();
+      var m = null;
+      try { m = svg.getScreenCTM(); } catch (e) {}
+      if (!m) return hide();
+      var pt = svg.createSVGPoint(); pt.x = cx; pt.y = cy;
+      var vx = pt.matrixTransform(m.inverse()).x;
+      var n = S.pts.length, k = Math.max(0, Math.min(n - 1, Math.round(vx / S.PW * (n - 1))));
+      var p = S.pts[k];
+      var sp = svg.createSVGPoint();
+      sp.x = (k / (n - 1)) * S.PW;
+      sp.y = S.BOT - ((p[1] - S.mn) / S.rg) * (S.BOT - S.TOP);
+      var scr = sp.matrixTransform(m), lx = scr.x - hr.left, ly = scr.y - hr.top;
+      vline.style.left = lx + 'px'; vline.style.opacity = '1';
+      dot.style.left = lx + 'px'; dot.style.top = ly + 'px'; dot.style.opacity = '1';
+      box.textContent = '';
+      box.appendChild(line(tipWhen(p[0], S.span), 'color:var(--text-soft,#8a8fa3);font-size:11px;font-weight:600;margin-bottom:4px'));
+      if (S.metric === 'vol') box.appendChild(row('Volume', S.volUsd ? usdShort(p[1] * S.volUsd) : (axisNum(p[1]) + ' ' + S.unit)));
+      else box.appendChild(row('Price of ' + S.base, num(p[1], 6) + ' ' + S.unit));
+      if (S.metric !== 'vol' && +p[5] > 0) {
+        var r2 = row('Volume', S.volUsd ? usdShort(+p[5] * S.volUsd) : (axisNum(+p[5]) + ' ' + S.unit));
+        r2.style.marginTop = '8px'; box.appendChild(r2);
+      }
+      box.style.opacity = '1';
+      var bw = box.offsetWidth || 160, bh = box.offsetHeight || 74;
+      var bx = lx + 14; if (bx + bw > hr.width) bx = lx - bw - 14; if (bx < 4) bx = 4;
+      var by = ly - 24; if (by + bh > hr.height) by = hr.height - bh - 4; if (by < 4) by = 4;
+      box.style.left = bx + 'px'; box.style.top = by + 'px';
+    }
+    host.addEventListener('mousemove', function (e) { at(e.clientX, e.clientY); });
+    host.addEventListener('mouseleave', hide);
+    var t0 = null;
+    host.addEventListener('touchstart', function (e) {
+      var t = e.touches && e.touches[0]; if (!t) return;
+      t0 = { x: t.clientX, y: t.clientY }; at(t.clientX, t.clientY);
+    }, { passive: true });
+    host.addEventListener('touchmove', function (e) {
+      var t = e.touches && e.touches[0]; if (!t) return;
+      if (t0 && Math.abs(t.clientX - t0.x) > Math.abs(t.clientY - t0.y)) e.preventDefault();
+      at(t.clientX, t.clientY);
+    }, { passive: false });
+  }
+  // The design's own geometry, read off its labels (see the XRPL file for why it is not assumed).
+  function drawChart(pts, meta) {
+    var wrap = $('.chart-svg-wrap');
+    var svg = wrap && wrap.querySelector('svg');
+    if (!svg || !pts || pts.length < 2) return;
+    chartNote('');
+    [].slice.call(svg.querySelectorAll('rect:not(.lx-ch)')).forEach(function (n) { n.parentNode.removeChild(n); });
+    [].slice.call(svg.querySelectorAll('.lx-chcandle, .lx-chvol')).forEach(function (n) { n.parentNode.removeChild(n); });
+    var vb = (svg.getAttribute('viewBox') || '0 0 400 220').split(/[\s,]+/).map(Number);
+    var W = vb[2] || 400, H = vb[3] || 220;
+    var allText = [].slice.call(svg.querySelectorAll('text'));
+    var footY = Math.max.apply(null, allText.map(function (t) { return parseFloat(t.getAttribute('y')) || 0; }));
+    var yLab = allText.filter(function (t) { return (parseFloat(t.getAttribute('y')) || 0) < footY; });
+    if (!yLab.length) yLab = allText.slice(0, Math.max(1, allText.length - 5));
+    var labX = Math.min.apply(null, yLab.map(function (t) { return parseFloat(t.getAttribute('x')) || W; }));
+    var labYs = yLab.map(function (t) { return parseFloat(t.getAttribute('y')) || 0; }).sort(function (a, b) { return a - b; });
+    var RIGHT = Math.max(0, W - labX) + 12;
+    var TOP = labYs.length ? labYs[0] : 10;
+    var BOT = labYs.length ? labYs[labYs.length - 1] : (H - 24);
+    var PW = W - RIGHT;
+    var vals = pts.map(function (p) { return p[1]; });
+    var mn = Math.min.apply(null, vals), mx = Math.max.apply(null, vals);
+    var rg = (mx - mn) || Math.abs(mx) || 1;
+    var d = '', i;
+    for (i = 0; i < pts.length; i++) {
+      var x = (i / (pts.length - 1)) * PW;
+      var y = BOT - ((vals[i] - mn) / rg) * (BOT - TOP);
+      d += (i ? 'L' : 'M') + x.toFixed(1) + ' ' + y.toFixed(1);
+    }
+    var paths = svg.querySelectorAll('path');
+    var area = paths[0], ln = paths[1] || paths[0];
+    if (area) area.setAttribute('d', d + ' L' + PW + ' ' + H + ' L0 ' + H + ' Z');
+    if (ln && ln !== area) ln.setAttribute('d', d);
+    var dot = svg.querySelector('circle');
+    if (dot) {
+      dot.setAttribute('r', dot.getAttribute('r') === '0' ? '4' : (dot.getAttribute('r') || '4'));
+      dot.setAttribute('cx', String(PW));
+      dot.setAttribute('cy', (BOT - ((vals[vals.length - 1] - mn) / rg) * (BOT - TOP)).toFixed(1));
+    }
+    var vmax = 0;
+    pts.forEach(function (p) { var v = +p[5] || 0; if (v > vmax) vmax = v; });
+    if (vmax > 0 && meta.metric !== 'vol') {
+      var VH = (BOT - TOP) * 0.24, bwid = Math.max(1, Math.min(10, PW / pts.length * 0.6)), vroot = Math.sqrt(vmax);
+      var firstPath = svg.querySelector('path');
+      pts.forEach(function (p, k) {
+        var v = +p[5] || 0;
+        if (!(v > 0)) return;
+        var bh = Math.max(2, (Math.sqrt(v) / vroot) * VH), bx = (k / (pts.length - 1)) * PW;
+        var r = document.createElementNS(NSVG, 'rect');
+        r.setAttribute('class', 'lx-ch lx-chvol');
+        r.setAttribute('x', (bx - bwid / 2).toFixed(1)); r.setAttribute('y', (BOT - bh).toFixed(1));
+        r.setAttribute('width', bwid.toFixed(1)); r.setAttribute('height', bh.toFixed(1)); r.setAttribute('rx', '1');
+        r.setAttribute('fill', '#8b7bf0'); r.setAttribute('fill-opacity', '0.45');
+        svg.insertBefore(r, firstPath);
+      });
+    }
+    var host = document.getElementById('tvlChart') || wrap;
+    host.__lxnHov = { pts: pts, PW: PW, TOP: TOP, BOT: BOT, mn: mn, rg: rg, unit: meta.unit, base: meta.base,
+      metric: meta.metric, volUsd: meta.volUsd, span: pts[pts.length - 1][0] - pts[0][0] };
+    wirePoolHover(host);
+    yLab.slice().sort(function (p, q) { return (parseFloat(p.getAttribute('y')) || 0) - (parseFloat(q.getAttribute('y')) || 0); })
+      .forEach(function (t, k, arr) { t.textContent = axisNum(mn + rg * (1 - k / Math.max(1, arr.length - 1))); });
+    var span = pts[pts.length - 1][0] - pts[0][0];
+    allText.filter(function (t) { return yLab.indexOf(t) < 0; })
+      .sort(function (p, q) { return (parseFloat(p.getAttribute('x')) || 0) - (parseFloat(q.getAttribute('x')) || 0); })
+      .forEach(function (t, k, arr) {
+        var dt = new Date(pts[Math.round((k / Math.max(1, arr.length - 1)) * (pts.length - 1))][0]);
+        var two = function (v) { return (v < 10 ? '0' : '') + v; };
+        var mo = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        t.textContent = span < 2 * 86400000 ? (two(dt.getHours()) + ':00')
+          : (span < 90 * 86400000 ? (mo[dt.getMonth()] + ' ' + dt.getDate()) : (mo[dt.getMonth()] + " '" + String(dt.getFullYear()).slice(2)));
+      });
+    try { document.documentElement.classList.add('lx-chartready'); } catch (e) {}
+  }
+  function chartBars(kind) {
+    var host = document.getElementById('tvlChart') || $('.chart-svg-wrap');
+    var svg = host && host.querySelector('svg'), S = host && host.__lxnHov;
+    if (!svg || !S || !S.pts || S.pts.length < 2) return;
+    [].forEach.call(svg.querySelectorAll('path'), function (p) { p.setAttribute('d', ''); });
+    var dot = svg.querySelector('circle');
+    if (dot) dot.setAttribute('r', '0');
+    var n = S.pts.length, w = Math.max(1.5, Math.min(14, S.PW / n * 0.62));
+    var Y = function (val) { return S.BOT - ((val - S.mn) / S.rg) * (S.BOT - S.TOP); };
+    S.pts.forEach(function (p, k) {
+      var x = (k / (n - 1)) * S.PW, y1, y2, col;
+      if (kind === 'vol') { y1 = Y(p[1]); y2 = S.BOT; col = '#8b7bf0'; }
+      else {
+        var o = (p[4] > 0) ? p[4] : (k ? S.pts[k - 1][1] : p[1]);
+        y1 = Math.min(Y(o), Y(p[1])); y2 = Math.max(Y(o), Y(p[1]));
+        col = p[1] >= o ? '#22c55e' : '#ff5b5b';
+      }
+      var r = document.createElementNS(NSVG, 'rect');
+      r.setAttribute('class', 'lx-ch lx-chcandle');
+      r.setAttribute('x', (x - w / 2).toFixed(1)); r.setAttribute('y', y1.toFixed(1));
+      r.setAttribute('width', w.toFixed(1)); r.setAttribute('height', Math.max(1.5, y2 - y1).toFixed(1));
+      r.setAttribute('rx', '1'); r.setAttribute('fill', col);
+      svg.appendChild(r);
+    });
+  }
+  var CH = { range: '1M', type: 'line', metric: 'price', pts: null, gen: 0 };
+  var CH_R = {
+    '1D': { tf: 'minute', agg: 15, limit: 96, ttl: 300000 }, '1W': { tf: 'hour', agg: 1, limit: 168, ttl: 900000 },
+    '1M': { tf: 'hour', agg: 4, limit: 180, ttl: 1800000 }, '3M': { tf: 'day', agg: 1, limit: 90, ttl: 3600000 },
+    '1Y': { tf: 'day', agg: 1, limit: 365, ttl: 3600000 }, 'ALL': { tf: 'day', agg: 1, limit: 1000, ttl: 3600000 }
+  };
+  function chartSides() {
+    var p = window.__lxnPool;
+    if (!p) return null;
+    var nearSide = p.a.i === 'wrap.near' ? p.a : (p.b.i === 'wrap.near' ? p.b : null);
+    var quote = nearSide || p.b, base = nearSide ? (nearSide === p.a ? p.b : p.a) : p.a;
+    return { base: base, quote: quote, unit: quote.i === 'wrap.near' ? 'NEAR' : quote.name };
+  }
+  function renderChart() {
+    var s = chartSides(), v = CH.pts;
+    if (!s || !v) return;
+    var volUsd = s.quote.i === 'wrap.near' ? USD : null;
+    if (CH.metric === 'vol') {
+      drawChart(v.map(function (q) { return [q[0], +q[5] || 0, 0, 0, 0, 0]; }), { unit: s.unit, base: s.base.name, metric: 'vol', volUsd: volUsd });
+      chartBars('vol');
+    } else {
+      drawChart(v, { unit: s.unit, base: s.base.name, metric: 'price', volUsd: volUsd });
+      if (CH.type === 'bar') chartBars('candle');
+    }
+  }
+  function loadPoolChart(range) {
+    var p = window.__lxnPool, s = chartSides();
+    if (!p || !s || !$('.chart-svg-wrap')) return;
+    if (range) CH.range = range;
+    $('.tf-mini button').forEach(function (b) { b.classList.toggle('active', (b.textContent || '').trim().toUpperCase() === CH.range); });
+    var R = CH_R[CH.range] || CH_R['1M'], gen = ++CH.gen, at = 0;
+    var go = function () {
+      gtGet(gtId(p.id) + '/ohlcv/' + R.tf + '?aggregate=' + R.agg + '&limit=' + R.limit + '&currency=token&token=' + encodeURIComponent(s.base.i),
+        'lumos.nearGtPoolOhlc.v1.' + p.id + '.' + CH.range + '.' + s.base.i, R.ttl)
+        .then(function (j) {
+          if (gen !== CH.gen) return;
+          var seen = {}, list = ((j && j.data && j.data.attributes && j.data.attributes.ohlcv_list) || [])
+            .filter(function (c) { if (!c || !(c[4] > 0) || seen[c[0]]) return false; seen[c[0]] = 1; return true; })
+            .map(function (c) { return [c[0] * 1000, +c[4], +c[2], +c[3], +c[1], +c[5]]; })
+            .sort(function (x, y) { return x[0] - y[0]; });
+          if (list.length < 2) { CH.pts = null; clearChart(); chartNote('No trades in this pool over this range.'); return; }
+          CH.pts = list;
+          renderChart();
+        })
+        .catch(function () {
+          if (gen !== CH.gen) return;
+          if (at < 3) { at++; chartNote('The price feed is busy — retrying…'); setTimeout(go, [3000, 15000, 30000][at - 1]); return; }
+          chartNote('Could not load this pool’s history. Reload to try again.');
+        });
+    };
+    go();
+  }
+  // The design's controls, driven for real: ranges, Line / Bar, and Price / Volume ("Pool TVL" relabelled).
+  function wireChartControls() {
+    if (window.__lxnPoolChartWired) return;
+    window.__lxnPoolChartWired = 1;
+    $('.chart-mode-menu button[data-metric]').forEach(function (b) {
+      if (b.getAttribute('data-metric') !== 'vol') { b.textContent = 'Price'; b.setAttribute('data-logoed', '1'); }
+    });
+    var sel = $('.chart-mode-select');
+    if (sel) [].forEach.call(sel.childNodes, function (nd) { if (nd.nodeType === 3 && nd.nodeValue.trim()) nd.nodeValue = ' Price '; });
+    window.addEventListener('click', function (e) {
+      var t = e.target;
+      if (!t || !t.closest || !$('.pool-header')) return;
+      var rb = t.closest('.tf-mini button'), tb = t.closest('.chart-type button'), mb = t.closest('.chart-mode-menu button[data-metric]');
+      if (!rb && !tb && !mb) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (rb) { var l = (rb.textContent || '').trim().toUpperCase(); if (CH_R[l]) loadPoolChart(l); return; }
+      if (tb) {
+        var btns = [].slice.call(tb.parentNode.querySelectorAll('button'));
+        btns.forEach(function (b) { b.classList.toggle('active', b === tb); });
+        CH.type = btns.indexOf(tb) === 0 ? 'line' : 'bar';
+      }
+      if (mb) {
+        CH.metric = mb.getAttribute('data-metric') === 'vol' ? 'vol' : 'price';
+        [].forEach.call(mb.parentNode.querySelectorAll('button'), function (b) { b.classList.toggle('active', b === mb); });
+        var s2 = $('.chart-mode-select');
+        if (s2) [].forEach.call(s2.childNodes, function (nd) { if (nd.nodeType === 3 && nd.nodeValue.trim()) nd.nodeValue = ' ' + (CH.metric === 'vol' ? 'Volume' : 'Price') + ' '; });
+        mb.parentNode.classList.remove('open');
+        if (mb.parentNode.style.display === 'block') mb.parentNode.style.display = 'none';
+      }
+      renderChart();
+    }, true);
+  }
+
+  // ---- Pool Transactions: swaps -----------------------------------------------------------------------------
+  var TX = { rows: null, err: false, filter: 'all', page: 1, ext: '' };
+  var TX_PER = 15, ACCT_RE = /^[a-z0-9._-]{2,64}$/;
+  function txAmt(v) { return v >= 1000 ? num(v, 2) : num(v, 6); }
+  function loadTx() {
+    var p = window.__lxnPool;
+    if (!p) return;
+    var at = 0;
+    var go = function () {
+      gtGet(gtId(p.id) + '/trades', 'lumos.nearGtPoolTr.v1.' + p.id, 60000).then(function (j) {
+        TX.rows = ((j && j.data) || []).map(function (x) {
+          var a = x && x.attributes;
+          if (!a) return null;
+          var amtOf = function (tok) {
+            if (a.from_token_address === tok.i) return +a.from_token_amount;
+            if (a.to_token_address === tok.i) return +a.to_token_amount;
+            return 0;
+          };
+          var who = String(a.tx_from_address || '');
+          return { kind: 'swap', a: amtOf(p.a), b: amtOf(p.b), who: ACCT_RE.test(who) ? who : '',
+            t: Date.parse(a.block_timestamp || '') || 0, hash: /^[A-Za-z0-9]{20,64}$/.test(a.tx_hash || '') ? a.tx_hash : '',
+            from: a.from_token_address === p.a.i ? p.a.name : p.b.name, to: a.to_token_address === p.a.i ? p.a.name : p.b.name,
+            fromAmt: +a.from_token_amount, toAmt: +a.to_token_amount };
+        }).filter(Boolean);
+        TX.err = false;
+        renderTx();
+      }, function () {
+        if (at < 3) { at++; setTimeout(go, [3000, 15000, 30000][at - 1]); return; }
+        TX.err = true; renderTx();
+      });
+    };
+    go();
+  }
+  function txNote() {
+    if (TX.filter === 'deposit' || TX.filter === 'withdraw') {
+      return 'Deposits and withdrawals are not published for NEAR pools — Rhea’s activity index stopped in December 2024. Only swaps are listed.';
+    }
+    if (TX.err) return 'Recent swaps could not be loaded right now. Reload to try again.';
+    if (!TX.rows) return 'Reading this pool’s recent swaps…';
+    return 'No swaps in this pool recently.';
+  }
+  function renderTx() {
+    var p = window.__lxnPool;
+    if (!p) return;
+    var list = (TX.rows || []).filter(function () { return TX.filter === 'all' || TX.filter === 'swap'; });
+    var pages = Math.max(1, Math.ceil(list.length / TX_PER));
+    if (TX.page > pages) TX.page = pages;
+    var from = (TX.page - 1) * TX_PER, slice = list.slice(from, from + TX_PER);
+    var card = $('.tx-card'), body = card && card.querySelector('table.tx tbody');
+    if (body) {
+      body.innerHTML = '';
+      if (!slice.length) {
+        var tr0 = document.createElement('tr');
+        tr0.className = 'lx-txrow';
+        var td0 = el('td', null, txNote());
+        td0.colSpan = 6;
+        td0.style.cssText = 'padding:22px 12px;text-align:center;opacity:.7';
+        tr0.appendChild(td0);
+        body.appendChild(tr0);
+      }
+      slice.forEach(function (r) {
+        var tr = document.createElement('tr');
+        tr.className = 'lx-txrow';
+        var c1 = document.createElement('td');
+        c1.appendChild(el('span', 'type-pill swap', 'Swap'));
+        tr.appendChild(c1);
+        [[r.a, p.a.name], [r.b, p.b.name]].forEach(function (x) {
+          var td = document.createElement('td');
+          var s = el('span', 'num', x[0] > 0 ? (txAmt(x[0]) + ' ' + x[1]) : '—');
+          s.setAttribute('data-logoed', '1');
+          td.appendChild(s);
+          tr.appendChild(td);
+        });
+        var cw = document.createElement('td');
+        if (r.who) {
+          var wl = el('a', 'wallet-cell', short(r.who));
+          wl.href = '/account/near/' + encodeURIComponent(r.who);
+          wl.title = r.who;
+          wl.style.cssText = 'color:inherit;text-decoration:none';
+          cw.appendChild(wl);
+        } else cw.textContent = '—';
+        tr.appendChild(cw);
+        tr.appendChild(el('td', 'time-cell', r.t ? tipWhen(r.t, 0) : '—'));
+        var cl = document.createElement('td');
+        if (r.hash) {
+          var a = el('a', 'ext-link');
+          a.href = 'https://nearblocks.io/txns/' + r.hash;
+          a.target = '_blank'; a.rel = 'noopener nofollow';
+          a.setAttribute('aria-label', 'View this transaction on NearBlocks');
+          a.innerHTML = TX.ext;
+          cl.appendChild(a);
+        }
+        tr.appendChild(cl);
+        body.appendChild(tr);
+      });
+      var foot = card.querySelector('.tx-foot');
+      if (foot) {
+        if (foot.firstElementChild) foot.firstElementChild.textContent = list.length
+          ? ('Showing ' + (from + 1) + '–' + (from + slice.length) + ' of ' + list.length + ' recent swaps') : 'Showing 0 transactions';
+        var nb = foot.querySelectorAll('.controls button');
+        if (nb[0]) nb[0].disabled = TX.page <= 1;
+        if (nb[1]) nb[1].disabled = TX.page >= pages;
+      }
+    }
+    // The phone: the design's own .tx-item shape, the latest 20.
+    var box = ($('.tx-filter-m') || {}).parentNode;
+    if (box) {
+      $('.tx-item, .lxn-txnote', box).forEach(function (n) { n.parentNode.removeChild(n); });
+      var mlist = list.slice(0, 20);
+      if (!mlist.length) {
+        var d0 = el('div', 'lxn-txnote', txNote());
+        d0.style.cssText = 'padding:20px 8px;text-align:center;opacity:.7;font-size:13.5px';
+        box.appendChild(d0);
+      }
+      mlist.forEach(function (r) {
+        var it = el('div', 'tx-item');
+        it.setAttribute('data-logoed', '1');
+        it.innerHTML = '<div class="tx-icon swap"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg></div>';
+        var info = el('div', 'tx-info');
+        info.appendChild(el('div', 'tx-type swap', 'Swap'));
+        info.appendChild(el('div', 'tx-amounts', txAmt(r.fromAmt) + ' ' + r.from + ' → ' + txAmt(r.toAmt) + ' ' + r.to));
+        info.appendChild(el('div', 'tx-meta', short(r.who) || '—'));
+        it.appendChild(info);
+        it.appendChild(el('div', 'tx-time', r.t ? tipWhen(r.t, 0) : '—'));
+        box.appendChild(it);
+      });
+    }
+  }
+  function wireTx() {
+    var card = $('.tx-card');
+    if (window.__lxnPoolTxWired) return;
+    window.__lxnPoolTxWired = 1;
+    var svg = card && card.querySelector('.ext-link svg');
+    TX.ext = svg ? svg.outerHTML : '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>';
+    window.addEventListener('click', function (e) {
+      var b = e.target && e.target.closest && e.target.closest('.tx-filter button, .tx-filter-m button, .tx-card .tx-foot .controls button');
+      if (!b || !$('.pool-header')) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (b.closest('.controls')) {
+        var bs = [].slice.call(b.parentNode.querySelectorAll('button'));
+        TX.page += bs.indexOf(b) === 0 ? -1 : 1;
+        if (TX.page < 1) TX.page = 1;
+      } else {
+        [].forEach.call(b.parentNode.querySelectorAll('button'), function (x) { x.classList.toggle('active', x === b); });
+        var l = (b.textContent || '').trim().toLowerCase();
+        TX.filter = /swap/.test(l) ? 'swap' : (/deposit/.test(l) ? 'deposit' : (/withdraw/.test(l) ? 'withdraw' : 'all'));
+        TX.page = 1;
+      }
+      renderTx();
+    }, true);
+  }
+
+  // ---- My Position and the deposit card's balances -----------------------------------------------------
+  function loadMine() {
+    var p = window.__lxnPool, me = addr();
+    if (!p || !me) return;
+    Promise.all([
+      nview('v2.ref-finance.near', 'get_pool_shares', { pool_id: +p.id, account_id: me }),
+      nview('v2.ref-finance.near', 'get_pool', { pool_id: +p.id }),
+      Promise.all(p.tokens.map(function (t) { return decOf(t.i); }))
+    ]).then(function (r) {
+      var mine = String(r[0] || '0'), pool = r[1] || {}, decs = r[2];
+      var supply = String(pool.shares_total_supply || '0');
+      var share = (supply !== '0') ? Number(BigInt(mine) * BigInt(1000000000) / BigInt(supply)) / 1e9 : 0;
+      p.myShares = mine; p.supply = supply; p.decs = decs;
+      p.reserves = (pool.amounts || []).map(function (x, k) { return scaled(x, decs[k]); });
+      var amts = bothPos('asset-amt');
+      [0, 1].forEach(function (k) { if (amts[k]) amts[k].textContent = share > 0 ? num(p.reserves[k] * share, 6) : '0'; });
+      bothPos('asset-name').forEach(function (n, i) { n.textContent = (i % 2 === 0) ? p.a.name : p.b.name; });
+      paintPositionIdentity();
+      var fees = bothPos('fee-val');
+      if (fees[0]) fees[0].textContent = '—';                         // Rhea keeps no per-LP fee record
+      if (fees[1]) fees[1].textContent = share > 0 ? num(scaled(mine, 24), 6) : '0';
+      $('.position-share-pill, .my-position-m .mpm-share').forEach(function (pill) {
+        pill.textContent = share > 0 ? ((share * 100) < 0.0001 ? '<0.0001%' : (share * 100).toFixed(4) + '%') : '0%';
+      });
+      var value = null;
+      if (share > 0 && USD && window.__lxnPoolRow && window.__lxnPoolRow.liq != null) value = window.__lxnPoolRow.liq * USD * share;
+      bothPos('amount').forEach(function (amt) { amt.textContent = share > 0 ? (value != null ? usdShort(value) : num(scaled(mine, 24), 4) + ' LP') : 'No position'; });
+      $('#dwWithdraw .balance').forEach(function (b) { b.textContent = 'Your LP: ' + (share > 0 ? num(scaled(mine, 24), 6) : '0'); });
+    }, function () {});
+    // Balances: the wNEAR side shows NEAR, which a deposit wraps.
+    p.tokens.slice(0, 2).forEach(function (t, k) {
+      var q = t.i === 'wrap.near'
+        ? nativeBal(me).then(function (raw) { return scaled(raw, 24); })
+        : Promise.all([nview(t.i, 'ft_balance_of', { account_id: me }), decOf(t.i)]).then(function (x) { return scaled(x[0], x[1]); });
+      q.then(function (v) {
+        p['bal' + k] = v;
+        var b = $('#dwDeposit .balance')[k];
+        if (b) b.textContent = 'Balance: ' + num(v, 6) + (t.i === 'wrap.near' ? ' NEAR' : '');
+      }, function () {});
+    });
+  }
+
+  function live(id, row) {
+    window.__lxnPoolRow = row;
+    gtStats(id, row);
+    wireChartControls();
+    loadPoolChart();
+    wireTx();
+    renderTx();
+    loadTx();
+    loadMine();
+  }
 
   function paint(id, row) {
     var T = (row.tokens || []).map(function (t) {
@@ -409,8 +956,7 @@
     paintDwStatic();
     paintPositionIdentity();
     holdDw();
-    chartNote('Pool history is not available on NEAR yet.');
-    emptyTx('Pool transactions are not available on NEAR yet.');
+    live(id, row);
     emptyParticipants('Liquidity providers are not listed on NEAR yet.');
     liftPage();
   }
@@ -551,8 +1097,15 @@
     return (t && t.getAttribute('data-dw')) === 'withdraw' ? 'withdraw' : 'deposit';
   }
   function holdDw() {
-    $$('#dwDeposit .balance').forEach(function (b) { b.textContent = 'Balance: —'; });
-    $$('#dwWithdraw .balance').forEach(function (b) { b.textContent = 'Your LP: —'; });
+    // Balances already read stay on screen when the tabs switch (loadMine fills them).
+    var P = window.__lxnPool || {};
+    $$('#dwDeposit .balance').forEach(function (b, k) {
+      var v = P['bal' + k], t = P.tokens && P.tokens[k];
+      b.textContent = 'Balance: ' + (v != null ? num(v, 6) + (t && t.i === 'wrap.near' ? ' NEAR' : '') : '—');
+    });
+    $$('#dwWithdraw .balance').forEach(function (b) {
+      b.textContent = 'Your LP: ' + (P.myShares != null ? (P.myShares !== '0' ? num(Number(P.myShares) / 1e24, 6) : '0') : '—');
+    });
     try { document.documentElement.classList.add('lx-dwready'); } catch (e) {}
     $$('#dwDeposit input, #dwWithdraw input').forEach(function (i) {
       i.value = '';
