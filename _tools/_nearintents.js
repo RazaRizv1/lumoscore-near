@@ -48,7 +48,9 @@ const STRIP = ['lx-cctp-js', 'lx-lz-js', 'lx-nearintents', 'lx-bridge3js', 'lx-b
 
 const swap = require(__dirname + '/near-router.js').stamp(fs.readFileSync(__dirname + '/browser/nearswap.js', 'utf8'));
 let page = fs.readFileSync(__dirname + '/browser/nibridge.js', 'utf8');
-for (const [n, src] of [['nearswap.js', swap], ['nibridge.js', page]]) {
+// Omni Bridge and Wormhole (window.lxnBr), between the two: it reads lxnSwap and nibridge reads it.
+let bridges = fs.readFileSync(__dirname + '/browser/nearbridges.js', 'utf8');
+for (const [n, src] of [['nearswap.js', swap], ['nearbridges.js', bridges], ['nibridge.js', page]]) {
   if (src.indexOf('</' + 'script') >= 0) { console.error('  browser/' + n + ' contains a closing script tag — aborting'); process.exit(1); }
 }
 
@@ -96,10 +98,31 @@ for (const tok of ['__LX_ICONV__', '__LX_NI_TOKENS__', '__LX_NET_FILES__']) {
 page = page.split('__LX_ICONV__').join(ICONV)
   .split('__LX_NI_TOKENS__').join(JSON.stringify(NI_TOKENS))
   .split('__LX_NET_FILES__').join(JSON.stringify(NET_FILES));
+// ---- THE OMNI / WORMHOLE ROUTE TABLE, stamped in -------------------------------------------------------
+// From _tools/_nearbridgeroutes.js (run by hand before a release, like the holder counts). A token whose
+// art already ships under /assets/tokens/ni loses its inline logo here, so the page carries each image once.
+// '<' is escaped so nothing in a logo can end the script element.
+const ROUTES_FILE = path.join(__dirname, 'nearbridgeroutes.generated.json');
+if (!fs.existsSync(ROUTES_FILE)) { console.error('  nearbridgeroutes.generated.json is missing — run node _tools/_nearbridgeroutes.js'); process.exit(1); }
+const ROUTES = JSON.parse(fs.readFileSync(ROUTES_FILE, 'utf8'));
+for (const k of ['wh_chain', 'meta', 'om', 'wh']) {
+  if (!ROUTES[k] || typeof ROUTES[k] !== 'object') { console.error('  nearbridgeroutes.generated.json has no ' + k + ' — aborting'); process.exit(1); }
+}
+Object.keys(ROUTES.meta).forEach((id) => {
+  const m = ROUTES.meta[id];
+  if (m.logo && NI_TOKENS[String(m.s || '').replace(/[^A-Za-z0-9._-]/g, '')]) delete m.logo;
+});
+const ROUTES_AGE = (Date.now() - Date.parse(ROUTES.generated)) / 86400000;
+if (ROUTES_AGE > 30) console.warn('  WARNING: the Omni/Wormhole route table is ' + Math.round(ROUTES_AGE) + ' days old — re-run node _tools/_nearbridgeroutes.js');
+if (bridges.indexOf('__LX_BR_ROUTES__') < 0) { console.error('  __LX_BR_ROUTES__ is not in browser/nearbridges.js — aborting'); process.exit(1); }
+delete ROUTES.generated;
+bridges = bridges.split('__LX_BR_ROUTES__').join(JSON.stringify(ROUTES).replace(/</g, B + 'u003c'));
+if (bridges.indexOf('</' + 'script') >= 0) { console.error('  the stamped route table contains a closing script tag — aborting'); process.exit(1); }
+
 const want = [...(page.match(/var NET_FILE = \{([\s\S]*?)\n  \};/) || [null, ''])[1].matchAll(/:\s*'([a-z0-9]+)'/g)].map((m) => m[1]);
 const noArt = [...new Set(want.filter((f) => !NET_FILES[f]))];
 
-const SCRIPT = '<script id="' + ID + '">' + '\n' + swap + '\n' + page + '\n</' + 'script>';
+const SCRIPT = '<script id="' + ID + '">' + '\n' + swap + '\n' + bridges + '\n' + page + '\n</' + 'script>';
 
 // ---- lx-brstep2, patched in place ----------------------------------------------------------------------
 // Exact strings from Stellar's _bridgepolish.js output. Every anchor must be present exactly once, or the

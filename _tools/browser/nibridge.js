@@ -27,6 +27,12 @@
 //     registered on the token, a storage_deposit for it goes first in the same transaction, paid by the
 //     sender (about 0.00125 NEAR), because an ft_transfer to an unregistered account fails.
 //
+// TWO MORE ROUTES (RAZA 2026-10-30: "why only near intents as cross chain bridge on Near. I need 2 more"):
+// OMNI BRIDGE and WORMHOLE, engines in browser/nearbridges.js (window.lxnBr). Both carry THE TOKEN ITSELF
+// as a bridged copy, where NEAR Intents swaps into the destination's own asset -- so which route is in
+// use decides what the reader is told arrives (curRoute), and a hand-picked route is never swapped for
+// another behind their back. NEAR Intents stays first, so with nothing picked the page is as it was.
+//
 // NOTHING HERE FABRICATES A NUMBER. Every delivered figure comes from a live 1Click quote; the one
 // indicative estimate is labelled with the same tilde Stellar uses and is replaced by the quote.
 (function () {
@@ -69,14 +75,20 @@
   var QUOTING = false;              // a quote is in flight -- distinct from having been refused one
   var BEST = '';                    // 'ni' once a quote exists; the panel and the CTA read it
   var LAST_NOTE = '';               // why there is no quote, in words the user can act on
-  var NOTE = { ni: '' };            // the route's own refusal; see quoteReason()
+  var NOTE = { ni: '', om: '', wh: '' };  // each route's own refusal; see quoteReason()
   var HOLD = {};                    // contract -> raw balance the wallet holds
   var HOLD_ME = '';                 // which account HOLD belongs to
   var NEAR_SPEND = null;            // raw NEAR the account can spend after storage and the gas keep
   var FEE_OK = {};                  // contract -> true | false | null (could not ask)
+  var OMQ = null;                   // Omni's answer: { nativeFee, usd, carried }
+  var WHQ = null;                   // Wormhole's: { carried } -- it has no relayer, so no fee to ask about
+  var PICKED = '';                  // a route the reader chose by hand
+  var PICKED_FOR = '';              // the destination it was chosen on; it means nothing anywhere else
+  var NEAR_RAW = null;              // raw NEAR beyond storage, for the bridges' gas checks
   var busy = false;
 
   function S() { return window.lxnSwap; }
+  function BRX() { return window.lxnBr || null; }
   function feeBps() { return (S() && S().FEE_BPS) || 20; }
   function addr() {
     try { if (window.lxn && typeof window.lxn.account === 'function') return window.lxn.account() || ''; } catch (e) {}
@@ -344,9 +356,9 @@
   // transaction may carry. A failed read leaves the figure UNKNOWN (null), never zero.
   function loadBalances() {
     var me = addr();
-    if (!me || !S()) { HOLD = {}; HOLD_ME = ''; NEAR_SPEND = null; return Promise.resolve(); }
-    var pNear = S().balance(me, 'near').then(function (raw) { NEAR_SPEND = S().maxSpend('near', raw); },
-      function () { NEAR_SPEND = null; });
+    if (!me || !S()) { HOLD = {}; HOLD_ME = ''; NEAR_SPEND = null; NEAR_RAW = null; return Promise.resolve(); }
+    var pNear = S().balance(me, 'near').then(function (raw) { NEAR_RAW = raw; NEAR_SPEND = S().maxSpend('near', raw); },
+      function () { NEAR_SPEND = null; NEAR_RAW = null; });
     var pFt = fetch(FT_API + encodeURIComponent(me) + '/ft').then(function (r) {
       if (!r.ok) throw new Error('balances ' + r.status);
       return r.json();
@@ -380,6 +392,12 @@
       out.push({ id: o.contract, native: false, symbol: o.symbol, name: o.name || '', decimals: o.decimals,
         contract: o.contract, assetId: o.assetId, price: o.price, logo: o.logo || '' });
     });
+    // Then the curated tokens only Omni or Wormhole can carry (no assetId: NEAR Intents is not a route).
+    if (BRX()) {
+      var have = {};
+      out.forEach(function (a) { have[a.contract] = 1; });
+      out = out.concat(BRX().extraSources(have));
+    }
     return out;
   }
 
@@ -392,14 +410,31 @@
       var k = norm(NI_CHAIN[c]);
       PLACES[k] = { label: NI_CHAIN[c], ni: c };
     });
+    // Chains Omni or Wormhole reach are places too (all of them are NEAR Intents chains today).
+    if (BRX()) BRX().places().forEach(function (l) { var k = norm(l); if (!PLACES[k]) PLACES[k] = { label: l }; });
     return PLACES;
   }
+  // EVERY ROUTE THAT CAN CARRY THIS ASSET THERE, NEAR Intents first: it is the route this page always had.
+  // Omni and Wormhole only for what their baked tables say they carry (_tools/_nearbridgeroutes.js).
   function routesFor(src, key) {
     var p = PLACES[key];
-    if (!src || !p || !p.ni || !BY_CHAIN[p.ni]) return [];
-    return ['ni'];
+    if (!src || !p) return [];
+    var out = [];
+    if (p.ni && BY_CHAIN[p.ni] && src.assetId) out.push('ni');
+    if (BRX()) ['om', 'wh'].forEach(function (r) { if (BRX().can(r, src, p.label)) out.push(r); });
+    return out;
   }
   function routeFor(src, key) { var r = routesFor(src, key); return r.length ? r[0] : ''; }
+  // THE ROUTE THE PAGE INTENDS TO USE, which also decides what the reader is told arrives: NEAR Intents
+  // delivers the chain's own asset, Omni and Wormhole a bridged copy of the token sent. The route that
+  // will carry it once quoted; before that the reader's pick; before that the first.
+  function curRoute() {
+    var key = destChain(), rs = routesFor(SRC, key);
+    if (!rs.length) return '';
+    if (BEST && rs.indexOf(BEST) >= 0) return BEST;
+    if (PICKED && PICKED_FOR === key && rs.indexOf(PICKED) >= 0) return PICKED;
+    return rs[0];
+  }
   function reachablePlaces() {
     var set = {};
     if (!SRC) return set;
@@ -518,7 +553,7 @@
     if (!had || !now) return;
     var ai = amtInput(); if (ai && ai.value) { ai.value = ''; }
     var ad = $('.br-addr-in'); if (ad && ad.value) { ad.value = ''; }
-    QUOTE = null; BEST = ''; NOTE = { ni: '' };
+    QUOTE = null; BEST = ''; NOTE = { ni: '', om: '', wh: '' }; OMQ = null; WHQ = null;
     try { paintSourceUsd(); } catch (_) {}
     try { paintSteps(); setCta(); } catch (_) {}
     requote();
@@ -669,13 +704,33 @@
     as.classList.toggle('lx-s2pick', !!on);
   }
 
+  // OMNI AND WORMHOLE DELIVER THE TOKEN THAT WAS SENT, as their own bridged copy: the chip names it and
+  // whose copy it is, and is not a picker -- there is nothing else either route can deliver.
+  var CARRIED_BY = { om: 'Bridged by Omni', wh: 'Wormhole-wrapped' };
+  function paintCarried(as, r) {
+    if (!SRC) return;
+    var nm = as.querySelector('.nm');
+    if (nm && nm.textContent !== SRC.symbol) {
+      nm.textContent = SRC.symbol;
+      nm.setAttribute('data-logo', '');
+      nm.setAttribute('data-logoed', '1');
+    }
+    if (as.getAttribute('data-lxfull') !== CARRIED_BY[r]) as.setAttribute('data-lxfull', CARRIED_BY[r]);
+    setIcon(as.querySelector('.br-ic'), rowLogo(SRC), SRC.symbol);
+    setPickable(as, false);
+  }
+
   function paintDestAsset(dst) {
     var key = destChain(), as = ensureDestRow(dst);
     if (!as || !key) return;
-    var chain = routeFor(SRC, key) === 'ni' ? niId(key) : null;
-    if (!chain) { DEST = null; return; }
-    var opts = destTokens(chain);
-    if (!DEST || DEST.chain !== chain) DEST = opts[0] ? { chain: chain, token: opts[0] } : null;
+    // DEST is NEAR Intents' choice and is kept whichever route is in use, so its card can still quote
+    // while another route is picked, and the choice is there again when it is picked back.
+    var chain = routesFor(SRC, key).indexOf('ni') >= 0 ? niId(key) : null;
+    var opts = chain ? destTokens(chain) : [];
+    if (!chain) DEST = null;
+    else if (!DEST || DEST.chain !== chain) DEST = opts[0] ? { chain: chain, token: opts[0] } : null;
+    var cr = curRoute();
+    if (cr === 'om' || cr === 'wh') { paintCarried(as, cr); return; }
     if (!DEST) return;
     var nm = as.querySelector('.nm');
     if (nm && nm.textContent !== DEST.token.symbol) {
@@ -768,7 +823,7 @@
   function toggleDestMenu(as) {
     if (document.getElementById('lx-br-amenu')) { closeMenu(); return; }
     var key = destChain();
-    var chain = key && routeFor(SRC, key) === 'ni' ? niId(key) : null;
+    var chain = key && curRoute() === 'ni' ? niId(key) : null;
     if (!chain) return;
     var opts = destTokens(chain);
     if (opts.length < 2) return;
@@ -855,7 +910,7 @@
       var sub = a.native ? 'Native asset' : (a.contract.length > 22 ? a.contract.slice(0, 8) + '…' + a.contract.slice(-6) : a.contract);
       listHost.appendChild(menuRow(rowLogo(a), a.symbol, a.symbol, sub,
         a.symbol + ' ' + (a.name || '') + ' ' + a.contract, function () {
-          SRC = a; QUOTE = null; BEST = ''; NOTE = { ni: '' };
+          SRC = a; QUOTE = null; BEST = ''; NOTE = { ni: '', om: '', wh: '' }; OMQ = null; WHQ = null;
           try { checkFee(); } catch (_) {}
           refreshDestinations();
           paintSteps(); requote();
@@ -1018,24 +1073,43 @@
   }
 
   function runQuote() {
-    var key = destChain();
+    var key = destChain(), routes = routesFor(SRC, key);
     QUOTE = null; BEST = ''; QUOTING = false;
-    NOTE = { ni: '' };
-    if (!routesFor(SRC, key).length) { paintQuote(null, ''); return; }
+    NOTE = { ni: '', om: '', wh: '' }; OMQ = null; WHQ = null;
+    // A hand-picked route belongs to the destination it was picked on (XRPL).
+    if (PICKED_FOR !== key) { PICKED = ''; PICKED_FOR = ''; }
+    if (!routes.length) { paintQuote(null, ''); return; }
     var seq = ++qSeq;
     QUOTING = true;
-    paintQuote(null, 'Quoting…');
-    quoteNi(niId(key), seq).then(function () { if (seq === qSeq) settle(); }, function () { if (seq === qSeq) settle(); });
+    paintQuote(null, routes.length > 1 ? 'Comparing routes…' : 'Quoting…');
+    var jobs = [];
+    if (routes.indexOf('ni') >= 0) jobs.push(quoteNi(niId(key), seq));
+    if (routes.indexOf('om') >= 0) jobs.push(quoteOm(key, seq));
+    if (routes.indexOf('wh') >= 0) jobs.push(quoteWh(key));
+    // One route refusing is ordinary and must not cost the reader another route's answer.
+    Promise.all(jobs.map(function (p) { return p.catch(function () { return null; }); }))
+      .then(function () { if (seq === qSeq) settle(); });
   }
+  function answered(r) { return r === 'ni' ? !!QUOTE : r === 'om' ? !!OMQ : r === 'wh' ? !!WHQ : false; }
+  // WHICH ROUTE CARRIES IT. A hand-picked route is used only if it answered, and is NOT swapped for
+  // another when it did not (RAZA on XRPL, 2026-10-04: picking THORChain and watching the page move back
+  // to NEAR Intents). Here a swap would be worse than a different price -- each route delivers a
+  // different asset, so falling back would change what arrives. The pick's own reason is shown instead.
+  // With nothing picked, the first route that answered, in routesFor's order.
   function settle() {
     QUOTING = false;
-    BEST = QUOTE ? 'ni' : '';
-    paintQuote(QUOTE, BEST ? '' : quoteReason());
+    var key = destChain(), rs = routesFor(SRC, key);
+    BEST = '';
+    if (PICKED && PICKED_FOR === key && rs.indexOf(PICKED) >= 0) BEST = answered(PICKED) ? PICKED : '';
+    else rs.some(function (r) { if (answered(r)) { BEST = r; return true; } return false; });
+    try { paintSteps(); } catch (_) {}
+    paintQuote(BEST === 'ni' ? QUOTE : null, BEST ? '' : quoteReason());
   }
   // NEVER EMPTY (nibridge-route-click-blanked-the-note): paintQuote sets LAST_NOTE to whatever it is
-  // handed, so every caller passes this rather than ''.
+  // handed, so every caller passes this rather than ''. The route in use speaks first.
   function quoteReason() {
-    return NOTE.ni || (LAST_NOTE && LAST_NOTE.indexOf('…') < 0 ? LAST_NOTE : '') || 'No route for this amount';
+    return NOTE[curRoute()] || NOTE.ni || NOTE.om || NOTE.wh
+      || (LAST_NOTE && LAST_NOTE.indexOf('…') < 0 ? LAST_NOTE : '') || 'No route for this amount';
   }
 
   function quoteNi(chain, seq) {
@@ -1069,6 +1143,35 @@
       });
   }
 
+  // OMNI prices the RELAY: the token arrives as itself, so what lands is what was sent (less LumosCore's
+  // fee, floored to what the bridge carries) and the one unknown is the relayers' fee in NEAR. Asked
+  // without a destination address too -- the fee depends on where, not on who.
+  function quoteOm(key, seq) {
+    var n = amounts(), me = addr(), label = placeLabel(key);
+    if (!n || !SRC || !BRX()) return Promise.resolve();
+    if (!me) { NOTE.om = 'Connect a NEAR wallet to get a quote'; return Promise.resolve(); }
+    var to = recipient();
+    var ae = to ? destAddrError(key, to) : '';
+    if (ae) { NOTE.om = ae; return Promise.resolve(); }
+    var carried = BRX().carried('om', SRC, label, n.net);
+    if (big(carried) <= BigInt(0)) { NOTE.om = 'Too small for Omni Bridge to carry'; return Promise.resolve(); }
+    return BRX().omQuote(SRC, label, carried, me, to).then(function (q) {
+      if (seq !== qSeq) return;
+      if (q.min && big(carried) < big(q.min)) { NOTE.om = 'Minimum ' + fmt(fromUnits(q.min, SRC.decimals), 6) + ' ' + SRC.symbol; return; }
+      OMQ = { nativeFee: q.nativeFee, usd: q.usd, carried: carried };
+    }, function (e) { if (seq === qSeq) NOTE.om = String((e && e.message) || 'Omni Bridge did not answer'); });
+  }
+  // WORMHOLE has nothing to ask: no relayer, so no fee, and the amount is floored to the 8 decimals it
+  // carries. Its cost is the claim on the destination, in that chain's gas, which the panel says.
+  function quoteWh(key) {
+    var n = amounts();
+    if (!n || !SRC || !BRX()) return Promise.resolve();
+    var carried = BRX().carried('wh', SRC, placeLabel(key), n.net);
+    if (big(carried) <= BigInt(0)) NOTE.wh = 'Too small for Wormhole to carry';
+    else WHQ = { carried: carried };
+    return Promise.resolve();
+  }
+
   function paintQuote(q, note) {
     LAST_NOTE = q ? '' : String(note || '');
     var s2 = $('.br-step[data-step="2"]');
@@ -1087,6 +1190,21 @@
         if (!n) return null;
         return { amt: Number(fromUnits(n.net, SRC.decimals)) * px / dpx, sym: DEST.token.symbol };
       };
+      var cr = BEST || curRoute(), cq = cr === 'om' ? OMQ : cr === 'wh' ? WHQ : null;
+      if (cr === 'om' || cr === 'wh') {
+        // The token itself arrives, so the figure is exact -- no tilde -- and the bridge's own cost is
+        // said under it.
+        var n0 = amounts();
+        var c0 = cq ? cq.carried : (n0 && BRX() ? BRX().carried(cr, SRC, placeLabel(destChain()), n0.net) : '');
+        var vt2 = (c0 && big(c0) > BigInt(0)) ? (fmt(fromUnits(c0, SRC.decimals), 6) + ' ' + SRC.symbol) : '—';
+        if (v && v.textContent !== vt2) v.textContent = vt2;
+        var ut2 = cq ? (cr === 'om' ? ('+ ' + fmt(fromUnits(cq.nativeFee, 24), 4) + ' NEAR relayer fee')
+          : ('claimed on ' + placeLabel(destChain()))) : (note || '');
+        if (u && u.textContent !== ut2) u.textContent = ut2;
+        if (u) u.classList.remove('lx-amtnote');
+        paintReview(q); paintRoutePanel(); setCta();
+        return;
+      }
       var est = q ? null : estimate();
       var vt = q ? recvUnit(q.amountOutFormatted, 6, (DEST && DEST.token) ? DEST.token.symbol : '')
         : (est ? recvUnit(est.amt, 6, est.sym) : '—');
@@ -1113,7 +1231,9 @@
       set(sel, txt);
     };
     set('[data-rv="send"]', (amountNum() > 0 ? fmt(typedRaw(), 8) : '0') + ' ' + sym);
-    keep('[data-rv="recv"]', q ? (fmt(q.amountOutFormatted, 6) + ' ' + DEST.token.symbol)
+    var cr = curRoute(), cq = cr === 'om' ? OMQ : cr === 'wh' ? WHQ : null, carriedR = cr === 'om' || cr === 'wh';
+    if (carriedR) keep('[data-rv="recv"]', cq ? (fmt(fromUnits(cq.carried, SRC.decimals), 6) + ' ' + SRC.symbol) : ('— ' + SRC.symbol));
+    else keep('[data-rv="recv"]', q ? (fmt(q.amountOutFormatted, 6) + ' ' + DEST.token.symbol)
       : ('— ' + (DEST && DEST.token ? DEST.token.symbol : '')));
     set('[data-rv="sendnet"]', 'NEAR');
     var trg = $('.brd-trigger'), tn = trg && trg.querySelector('.nm');
@@ -1121,8 +1241,11 @@
     set('[data-rv="src"]', addr() ? short(addr()) : '—');
     set('[data-rv="dst"]', recipient() ? short(recipient()) : '—');
     set('[data-rv="fee"]', n ? (fmt(fromUnits(n.fee, SRC.decimals), 8) + ' ' + sym + ' (' + (feeBps() / 100) + '%)') : '—');
-    keep('[data-rv="eta"]', (q && q.timeEstimate) ? ('~' + q.timeEstimate + 's') : '—');
-    keep('[data-rv="route"]', BEST === 'ni' ? 'NEAR Intents' : '—');
+    keep('[data-rv="eta"]', carriedR ? ROUTE_ETA[cr] : ((q && q.timeEstimate) ? ('~' + q.timeEstimate + 's') : '—'));
+    // The bridge's own cost rides on the route row: the fee row is LumosCore's.
+    keep('[data-rv="route"]', !BEST ? '—' : BEST === 'om' && OMQ
+      ? ('Omni Bridge · +' + fmt(fromUnits(OMQ.nativeFee, 24), 4) + ' NEAR relayer fee')
+      : BEST === 'wh' ? ('Wormhole · claim on ' + placeLabel(destChain())) : ROUTE_META[BEST].name);
     paintReviewLegs();
   }
 
@@ -1134,7 +1257,8 @@
     var legs = s3.querySelectorAll('.br-rv-leg');
     if (legs.length < 2) return;
     var place = placeLabel(destChain());
-    var recvSym = (DEST && DEST.token) ? DEST.token.symbol : '';
+    var carriedR = curRoute() === 'om' || curRoute() === 'wh';
+    var recvSym = carriedR ? (SRC ? SRC.symbol : '') : ((DEST && DEST.token) ? DEST.token.symbol : '');
     var put = function (host, src, fallback) {
       if (!host) return;
       host.setAttribute('data-logo', '');
@@ -1162,17 +1286,28 @@
     put(a.net, netFile('NEAR') || NEAR_LOGO, 'NEAR');
     put(a.asset, SRC ? rowLogo(SRC) : '', SRC ? SRC.symbol : '');
     put(b.net, place ? chainLogo(place) : '', place);
-    put(b.asset, (DEST && DEST.token) ? tokenLogo(DEST.token, destChain()) : '', recvSym);
+    put(b.asset, carriedR ? (SRC ? rowLogo(SRC) : '') : ((DEST && DEST.token) ? tokenLogo(DEST.token, destChain()) : ''), recvSym);
   }
 
   // ---- the ROUTE panel -----------------------------------------------------------------------------
-  // One card. 1Click's own cut: 20 bps with the partner key, 25 without (Stellar's niFeeBps), read from
-  // whether the Function reports itself keyed.
+  // One card per route that can carry this asset there. 1Click's own cut: 20 bps with the partner key, 25
+  // without (Stellar's niFeeBps), read from whether the Function reports itself keyed.
   function niFeeBps() { return KEYED ? 20 : 25; }
   var NI_ETA = '~30 seconds';
+  // Wormhole's mark through the CoinGecko logo proxy (its W token); Omni has no token and no mark we
+  // ship, so a plain monogram rather than borrowing someone else's artwork.
+  var OMNI_MARK = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'
+    + '<circle cx="16" cy="16" r="16" fill="#1d1d22"/><text x="16" y="21.5" text-anchor="middle" '
+    + 'font-family="Georgia,serif" font-size="17" font-weight="700" fill="#fff">Ω</text></svg>');
   var ROUTE_META = {
-    ni: { name: 'NEAR Intents', img: '/assets/tokens/ni/NEAR.png' }
+    ni: { name: 'NEAR Intents', img: '/assets/tokens/ni/NEAR.png' },
+    om: { name: 'Omni Bridge', img: OMNI_MARK },
+    wh: { name: 'Wormhole', img: API + '?op=logo&id=wormhole' }
   };
+  // A range, not a number: neither publishes one. Wormhole's guardians sign NEAR transfers in ~15 min.
+  var ROUTE_ETA = { om: 'a few minutes', wh: '~15 min, then claim' };
+  var GAS_CUR = { Ethereum: 'ETH', 'BNB Chain': 'BNB', Polygon: 'POL', Avalanche: 'AVAX', Arbitrum: 'ETH',
+    Optimism: 'ETH', Base: 'ETH' };
   var SICON = {
     recv: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>',
     fee: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg>',
@@ -1202,7 +1337,8 @@
     if (overBalance()) return 'Amount exceeds your balance (' + balFigure(balRaw(SRC), SRC) + ').';
     var dc = destChain();
     if (dc) { var ae = destAddrError(dc, recipient()); if (ae) return ae; }
-    if (!QUOTING && !BEST && amounts() && dc && NOTE.ni && !/^(Enter a destination|Connect a NEAR)/.test(NOTE.ni)) return NOTE.ni;
+    var rn = NOTE[curRoute()] || '';
+    if (!QUOTING && !BEST && amounts() && dc && rn && !/^(Enter a destination|Connect a NEAR)/.test(rn)) return rn;
     return '';
   }
   function step2Err(msg) {
@@ -1219,17 +1355,24 @@
     if (!SRC || !key) return [];
     return routesFor(SRC, key).map(function (r) {
       var o = { route: r, meta: ROUTE_META[r], state: 'ok', recv: '', eta: '', error: '' };
-      if (QUOTE) {
+      var bq = r === 'om' ? OMQ : r === 'wh' ? WHQ : null;
+      if (r === 'ni' && QUOTE) {
         o.recv = fmt(QUOTE.amountOutFormatted, 6) + ' ' + ((DEST && DEST.token) ? DEST.token.symbol : '');
         if (QUOTE.timeEstimate != null) o.eta = '~' + QUOTE.timeEstimate + 's';
+      } else if (bq) {
+        o.recv = fmt(fromUnits(bq.carried, SRC.decimals), 6) + ' ' + SRC.symbol;
+        o.eta = ROUTE_ETA[r];
       } else o.state = QUOTING ? 'wait' : 'none';
       if (o.state === 'none' && !amountNum()) o.state = 'idle';
       if (o.state === 'none') o.error = overBalance() || NOTE[r] || 'No quote for this amount.';
       return o;
     });
   }
-  function routeFee() {
-    return (feeBps() / 100) + '% + ' + (niFeeBps() / 100) + '% NEAR';
+  function routeFee(r) {
+    var ours = (feeBps() / 100) + '%';
+    if (r === 'om') return ours + ' + ' + (OMQ ? fmt(fromUnits(OMQ.nativeFee, 24), 4) + ' NEAR relayer fee' : 'a relayer fee in NEAR');
+    if (r === 'wh') return ours + ' + gas to claim';
+    return ours + ' + ' + (niFeeBps() / 100) + '% NEAR';
   }
 
   function paintRoutePanel() {
@@ -1241,7 +1384,7 @@
     var rows = routeRows();
     if (!rows.length) { panel.hidden = true; return; }
     panel.hidden = false;
-    var shown = BEST || (rows[0] && rows[0].route) || '';
+    var shown = curRoute() || (rows[0] && rows[0].route) || '';
     var h = '';
     rows.forEach(function (o) {
       var sel = o.route === shown;
@@ -1272,17 +1415,31 @@
         return '<div class="lx-brs-row"><span class="lx-brs-ic">' + SICON[ic] + '</span>'
           + '<span class="lx-brs-k">' + k + '</span><span class="lx-brs-v">' + esc2(v) + '</span></div>';
       };
-      var recvAsset = (DEST && DEST.token) ? DEST.token.symbol : '—';
-      var eta = cur.eta || NI_ETA;
       var place = placeLabel(destChain());
+      var carriedR = cur.route === 'om' || cur.route === 'wh';
+      var recvAsset = carriedR ? SRC.symbol : ((DEST && DEST.token) ? DEST.token.symbol : '—');
+      var eta = cur.eta || (carriedR ? ROUTE_ETA[cur.route] : NI_ETA);
       // NAMES THE THIRD PARTY HOLDING THE FUNDS (memory note: "never held by us" stays true, but the copy
       // must say who does hold them, for the ~30 seconds the solver takes).
       var note = (recvAsset !== '—')
         ? ('Delivered as ' + recvAsset + ' to your address automatically — no claim, and no gas needed on '
            + place + '. NEAR Intents holds the transfer at its deposit account for the ~30 seconds it takes.')
         : 'Delivered straight to the address you gave — there is nothing to claim on the other side.';
+      // WHOSE COPY ARRIVES, with its address, and what the reader has to do: nothing for Omni, a claim
+      // with an EVM wallet for Wormhole. Both need more NEAR on hand for gas than a NEAR Intents deposit.
+      if (cur.route === 'om') {
+        var ot = BRX() && BRX().omTo(SRC, place);
+        note = 'Arrives as Omni’s ' + SRC.symbol + ' on ' + place + (ot ? ' (' + short(ot.to) + ')' : '')
+          + '. Omni’s relayers finish the transfer, paid by the fee in NEAR — nothing to claim. Keep about '
+          + fmt(fromUnits(BRX().KEEP.om, 24), 2) + ' NEAR for gas.';
+      } else if (cur.route === 'wh') {
+        var wt = BRX() && BRX().whTo(SRC, place);
+        note = 'Arrives as Wormhole-wrapped ' + SRC.symbol + ' on ' + place + (wt ? ' (' + short(wt.to) + ')' : '')
+          + '. Nobody relays NEAR transfers on Wormhole: once its guardians sign (about 15 minutes) you claim it in'
+          + ' Recent transactions below, with an EVM wallet holding a little ' + (GAS_CUR[place] || 'gas') + '.';
+      }
       sh = row('recv', 'Receive', recvAsset)
-        + row('fee', 'Bridge fee', routeFee())
+        + row('fee', 'Bridge fee', routeFee(cur.route))
         + row('time', 'Estimated time', eta)
         + '<div class="lx-brs-note">' + esc2(note) + '</div>';
     }
@@ -1290,11 +1447,17 @@
     stats.hidden = !sh;
   }
 
-  // Clicking the one card re-paints with the route's own reason (never a blank one).
+  // A CARD IS A CHOICE, kept for this destination. It is used only once it has answered (settle), and the
+  // page repaints with its own reason when it has not -- never a blank one.
   document.addEventListener('click', function (e) {
     var b = e.target && e.target.closest && e.target.closest('[data-lxroutepick]');
     if (!b) return;
     e.preventDefault(); e.stopPropagation();
+    var r = b.getAttribute('data-lxroutepick'), key = destChain();
+    if (!r || !key || routesFor(SRC, key).indexOf(r) < 0) return;
+    PICKED = r; PICKED_FOR = key;
+    if (!QUOTING) BEST = answered(r) ? r : '';
+    try { paintSteps(); } catch (_) {}
     paintQuote(BEST === 'ni' ? QUOTE : null, BEST ? '' : quoteReason());
   }, true);
 
@@ -1315,7 +1478,8 @@
         // A refunded or failed transfer delivered nothing: the quote's figure would read as received.
         var none = r.status === 'REFUNDED' || r.status === 'FAILED';
         return { at: r.at, hash: r.hash, sent: r.inAmt, sentSym: r.srcSym || '', recv: none ? null : r.out,
-          recvSym: r.sym || '', place: NI_CHAIN[r.chain] || '', from: r.from || '', to: r.to || '' };
+          recvSym: r.sym || '', place: r.route ? (r.chain || '') : (NI_CHAIN[r.chain] || ''), from: r.from || '', to: r.to || '',
+          route: r.route || 'ni', status: r.status || '', claimTx: r.claimTx || '' };
       })
       .sort(function (a, b) { return (b.at || 0) - (a.at || 0); });
   }
@@ -1350,11 +1514,39 @@
     + '<path d="M10 14 21 3"></path><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h6">'
     + '</path></svg>';
   function txExplorer(hash) { return 'https://nearblocks.io/txns/' + encodeURIComponent(hash); }
-  function txRoute() {
+  function txRoute(route, r) {
+    var m = ROUTE_META[route] || ROUTE_META.ni;
+    var img = route === 'om' || route === 'wh' ? m.img
+      : (NET_HAVE.nearintents ? ('/assets/networks/nearintents.png?v=' + ICONV) : '');
     return '<span class="lx-buse-r">'
-      + (NET_HAVE.nearintents ? ('<img src="/assets/networks/nearintents.png?v=' + ICONV + '" alt="" '
+      + (img ? ('<img src="' + esc2(img) + '" alt="" '
         + 'style="width:18px;height:18px;border-radius:50%;object-fit:cover;display:inline-block;vertical-align:-4px;margin-right:6px">') : '')
-      + '<span>NEAR Intents</span></span>';
+      + '<span>' + esc2(m.name) + '</span></span>' + (r ? txState(r) : '');
+  }
+  // WHERE A BRIDGED TRANSFER HAS GOT TO, under the route's name. A Wormhole transfer the guardians have
+  // signed is the reader's to claim, so that row carries the button.
+  var CLAIMING = {}, CLAIM_ERR = {};
+  var ST_CSS = 'display:block;margin-top:4px;font-size:12px;line-height:1.35;color:var(--text-soft)';
+  function txState(r) {
+    if (r.route === 'wh') {
+      if (r.status === 'READY') {
+        return '<button type="button" class="lx-whclaim" data-whclaim="' + esc2(r.hash) + '" style="display:inline-flex;'
+          + 'align-items:center;margin-top:6px;padding:6px 11px;border-radius:9px;border:0;cursor:pointer;font:600 12.5px/1.2 inherit;'
+          + 'background:var(--accent,#ea6a2c);color:#fff"' + (CLAIMING[r.hash] ? ' disabled' : '') + '>'
+          + esc2(CLAIMING[r.hash] || ('Claim on ' + r.place)) + '</button>'
+          + (CLAIM_ERR[r.hash] ? '<span style="' + ST_CSS + ';color:var(--danger,#e5484d)">' + esc2(CLAIM_ERR[r.hash]) + '</span>' : '');
+      }
+      if (r.status === 'SUCCESS') {
+        var ex = r.claimTx && BRX() ? BRX().evmExplorer(r.place) : '';
+        return '<span style="' + ST_CSS + '">' + (ex ? ('<a href="' + esc2(ex + '/tx/' + r.claimTx) + '" target="_blank" rel="noopener">Claimed</a>') : 'Claimed') + '</span>';
+      }
+      return '<span style="' + ST_CSS + '">Waiting for Wormhole’s guardians (~15 min)</span>';
+    }
+    if (r.route === 'om') {
+      return '<span style="' + ST_CSS + '">' + (r.status === 'SUCCESS' ? 'Delivered' : r.status === 'FAILED' ? 'Failed'
+        : 'Omni is delivering it') + '</span>';
+    }
+    return '';
   }
   var TX_HEAD = '<tr><th>Time</th><th>From</th><th>Source address</th><th>To</th>'
     + '<th>Destination address</th><th>Bridge used</th>'
@@ -1387,7 +1579,7 @@
                 + encodeURIComponent(src) + '" target="_blank" rel="noopener">' + esc2(short(src)) + '</a>') : '—') + '</td>'
               + '<td>' + txAmt(r.recv, r.recvSym, r.place) + '</td>'
               + '<td class="mono">' + (r.to ? esc2(short(r.to)) : '—') + '</td>'
-              + '<td class="lx-buse">' + txRoute() + '</td>'
+              + '<td class="lx-buse">' + txRoute(r.route, r) + '</td>'
               + '<td class="br-xp"><a class="br-xplink" href="' + esc2(txExplorer(r.hash))
               + '" target="_blank" rel="noopener" aria-label="View on NearBlocks" '
               + 'title="View this transaction on NearBlocks">' + XP_ICON + '</a></td>'
@@ -1438,8 +1630,8 @@
             + '" target="_blank" rel="noopener" title="View this transaction on NearBlocks">' + XP_ICON + '</a></div>'
             + '<div class="brm-flow">' + txAmt(r.sent, r.sentSym, 'NEAR')
             + '<span class="br-ar">→</span>' + txAmt(r.recv, r.recvSym, r.place) + '</div>'
-            + (r.to ? ('<div class="brm-recv">To ' + esc2(short(r.to)) + ' · via ' + txRoute() + '</div>')
-              : ('<div class="brm-recv">via ' + txRoute() + '</div>'))
+            + (r.to ? ('<div class="brm-recv">To ' + esc2(short(r.to)) + ' · via ' + txRoute(r.route, r) + '</div>')
+              : ('<div class="brm-recv">via ' + txRoute(r.route, r) + '</div>'))
             + '</div>';
         });
       }
@@ -1546,7 +1738,8 @@
     var chain = destChain();
     if (!chain) return 'Choose a destination';
     if (!routesFor(SRC, chain).length) return (SRC ? SRC.symbol : 'This asset') + ' cannot reach ' + placeLabel(chain);
-    if (!DEST) return 'Choose a destination asset';
+    var cr = curRoute();
+    if (cr === 'ni' && !DEST) return 'Choose a destination asset';
     if (!amounts()) return 'Enter an amount';
     var ob = overBalance();
     if (ob) return ob;
@@ -1555,10 +1748,24 @@
     if (!recipient()) return 'Enter a destination address';
     var addrBad = destAddrError(chain, recipient());
     if (addrBad) return addrBad;
-    if (!QUOTE) return QUOTING ? 'Quoting…' : (LAST_NOTE || 'Waiting for a quote');
+    if (!answered(cr)) return QUOTING ? 'Quoting…' : (NOTE[cr] || LAST_NOTE || 'Waiting for a quote');
     if (fs !== true) return 'Checking the fee setup…';
-    if (!BEST) return 'No route can deliver ' + DEST.token.symbol + ' to ' + placeLabel(chain) + '.';
-    return '';
+    if (!BEST) return 'No route can deliver ' + (cr === 'ni' && DEST ? DEST.token.symbol : SRC.symbol) + ' to ' + placeLabel(chain) + '.';
+    return gasShort(BEST);
+  }
+
+  // NEAR FOR THE BRIDGE'S GAS AND FEES, said before the wallet is asked (near-wallet-error-is-not-a-
+  // verdict: HOT answers "User rejected the request" when it cannot cover the gas it reserves). Omni and
+  // Wormhole attach far more gas than a NEAR Intents deposit. Checked again at send, on the real figures.
+  function gasShort(r) {
+    if ((r !== 'om' && r !== 'wh') || NEAR_RAW == null || !BRX()) return '';
+    var n = amounts();
+    if (!n) return '';
+    var need = big(BRX().KEEP[r]);
+    if (SRC.native) need += big(n.gross);
+    if (r === 'om' && OMQ) need += big(OMQ.nativeFee);
+    if (big(NEAR_RAW) >= need) return '';
+    return 'Keep ' + fmt(fromUnits(need.toString(), 24), 3) + ' NEAR for this transfer and its gas';
   }
 
   // DO NOT CALL paintQuote() FROM HERE: it ends by calling setCta(), and that cycle once recursed until
@@ -1658,6 +1865,7 @@
     if (busy) return;
     var why = blockReason();
     if (why) return;
+    if (BEST === 'om' || BEST === 'wh') { sendBridge(BEST); return; }
     busy = true;
     var me = addr(), src = SRC, dest = DEST, n = amounts(), to = recipient();
     var b = ctaButton();
@@ -1710,6 +1918,154 @@
       });
   }
 
+  // ---- Omni and Wormhole: sending, following, claiming ----------------------------------------------
+  // The wallet's own words when it refuses (neardcl's walletErr): "rejected" is not proof the reader said
+  // no, and with more than one transaction an earlier one may already have landed.
+  function walletSaid(e, multi) {
+    var m = String((e && e.message) || e || '').replace(/\s+/g, ' ').slice(0, 180);
+    try { console.warn('[LumosCore bridge] wallet error:', e); } catch (x) {}
+    if (multi) return 'The wallet stopped: "' + (m || 'no reason given') + '". A step may already have gone through — check your wallet activity before trying again.';
+    return 'Nothing was sent. The wallet said: "' + (m || 'no reason given') + '".';
+  }
+  function signMany(txs) {
+    if (!window.lxn || typeof window.lxn.wallet !== 'function') return Promise.reject(new Error('Connect a NEAR wallet first.'));
+    return window.lxn.wallet().then(function (w) {
+      if (!w) throw new Error('No NEAR wallet is connected.');
+      if (typeof w.signAndSendTransactions === 'function') {
+        return w.signAndSendTransactions({ signerId: txs[0].signerId, transactions: txs.map(function (t) {
+          return { receiverId: t.receiverId, actions: t.actions };
+        }) });
+      }
+      if (txs.length === 1 && typeof w.signAndSendTransaction === 'function') {
+        return w.signAndSendTransaction({ signerId: txs[0].signerId, receiverId: txs[0].receiverId, actions: txs[0].actions })
+          .then(function (r) { return [r]; });
+      }
+      throw new Error('This wallet cannot sign these transactions here.');
+    }).catch(function (e) {
+      var err = (e instanceof Error) ? e : new Error(String((e && e.message) || e || ''));
+      err.lxnWallet = true;
+      err.lxnMulti = txs.length > 1;
+      throw err;
+    });
+  }
+  // The outcome of the transaction that carries the transfer (by its receiver), not merely the last one.
+  // ft_transfer_call answers with the amount the receiver KEPT: "0" means the bridge refused it and the
+  // token handed it back.
+  function outcomeFor(res, receiver) {
+    var arr = Array.isArray(res) ? res : (res ? [res] : []);
+    var hit = null;
+    arr.forEach(function (x) { if (x && x.transaction && x.transaction.receiver_id === receiver) hit = x; });
+    var o = outcomeOf(hit ? [hit] : arr);
+    var sv = hit && hit.status && hit.status.SuccessValue;
+    if (sv) { try { if (JSON.parse(atob(sv)) === '0') o.refused = true; } catch (_) {} }
+    return o;
+  }
+
+  function sendBridge(r) {
+    busy = true;
+    var me = addr(), src = SRC, n = amounts(), to = recipient(), label = placeLabel(destChain());
+    var name = ROUTE_META[r].name;
+    var b = ctaButton();
+    if (b) { b.style.pointerEvents = 'none'; b.style.opacity = '.7'; }
+    var amt = { fee: n.fee, carried: BRX().carried(r, src, label, n.net) };
+    say(r === 'om' ? 'Asking Omni for its fee…' : 'Preparing the transaction…');
+    // Omni is asked again: the fee on screen may be minutes old, and it is paid in the same transaction.
+    var built = r === 'om'
+      ? BRX().omQuote(src, label, amt.carried, me, to).then(function (q) { return BRX().omBuild(me, src, label, amt, to, q.nativeFee); })
+      : BRX().whBuild(me, src, label, amt, to);
+    built.then(function (x) {
+      return S().balance(me, 'near').then(function (raw) {
+        var need = big(x.nearOut) + big(BRX().KEEP[r]);
+        if (big(raw) < need) {
+          throw new Error('This needs ' + fmt(fromUnits(need.toString(), 24), 3) + ' NEAR in the wallet (the transfer, '
+            + name + '’s costs and gas); it holds ' + fmt(fromUnits(raw, 24), 3) + '. Nothing was sent.');
+        }
+        return x;
+      });
+    }).then(function (x) {
+      say(x.txs.length > 1 ? ('Confirm the ' + x.txs.length + ' transactions in your wallet…') : 'Confirm the transfer in your wallet…');
+      return signMany(x.txs).then(function (out) { return { x: x, o: outcomeFor(out, x.main) }; });
+    }).then(function (res) {
+      if (res.o.failed) throw new Error('The transfer failed on NEAR. Nothing was bridged.');
+      if (res.o.refused) throw new Error(name + ' refused the transfer and the token returned it to your wallet (LumosCore’s 0.2% was not).');
+      recordBr(r, res.o.hash, src, label, me, to, amt);
+      say(r === 'om' ? 'Sent — Omni is delivering it' : 'Sent — claim it below once Wormhole signs (~15 min)');
+      if (res.o.hash) follow(res.o.hash, 0);
+      setTimeout(function () { busy = false; setCta(); resetAfterDelivery(); }, 5000);
+    }).catch(function (e) {
+      say(e && e.lxnWallet ? walletSaid(e, e.lxnMulti) : String((e && e.message) || 'Transfer failed'));
+      setTimeout(function () { busy = false; setCta(); }, 6000);
+    });
+  }
+
+  function txList() {
+    try { var l = JSON.parse(localStorage.getItem(TX_KEY) || '[]'); return Array.isArray(l) ? l : []; } catch (e) { return []; }
+  }
+  function txFind(hash) { return txList().filter(function (x) { return x && x.hash === hash; })[0] || null; }
+  function patchRec(hash, f) {
+    try {
+      var list = txList();
+      list.forEach(function (x) { if (x && x.hash === hash) f(x); });
+      localStorage.setItem(TX_KEY, JSON.stringify(list));
+    } catch (e) {}
+    try { paintTxs(); } catch (_) {}
+  }
+  function recordBr(r, hash, src, label, me, to, amt) {
+    if (!hash) return;
+    try {
+      var list = txList();
+      list.unshift({ at: Date.now(), hash: hash, route: r, inAmt: typedRaw(), srcSym: src.symbol,
+        out: fromUnits(amt.carried, src.decimals), sym: src.symbol, chain: label, from: me, to: to, status: 'PENDING' });
+      localStorage.setItem(TX_KEY, JSON.stringify(list.slice(0, 50)));
+    } catch (e) {}
+    try { paintTxs(); } catch (_) {}
+  }
+  // WHERE IT HAS GOT TO. Omni until its relayers finish; Wormhole until the guardians sign (then it is the
+  // reader's to claim) and on until a claim lands, from here or anywhere else. Every 20 s for an hour, and
+  // resumed on the next visit for anything under a week old that has not finished.
+  var FOLLOWING = {};
+  function follow(hash, tries) {
+    var rec = txFind(hash);
+    if (!rec || !BRX() || (tries === 0 && FOLLOWING[hash])) return;
+    FOLLOWING[hash] = 1;
+    if (tries > 180) { delete FOLLOWING[hash]; return; }
+    var p = rec.route === 'om' ? BRX().omStatus(hash).then(function (st) { return { status: st }; }) : BRX().whStatus(hash);
+    p.then(function (s) {
+      if (s.status && (s.status !== rec.status || (s.claimTx && s.claimTx !== rec.claimTx))) {
+        patchRec(hash, function (x) { x.status = s.status; if (s.claimTx) x.claimTx = s.claimTx; });
+      }
+      if (s.status === 'SUCCESS' || s.status === 'FAILED') { delete FOLLOWING[hash]; return; }
+      setTimeout(function () { follow(hash, tries + 1); }, 20000);
+    }, function () { setTimeout(function () { follow(hash, tries + 1); }, 30000); });
+  }
+  // A CLAIM ASKS WORMHOLESCAN AGAIN FIRST: the signed message is not stored, and the transfer may have
+  // been claimed from somewhere else since the row was painted.
+  function claim(hash) {
+    var rec = txFind(hash);
+    if (!rec || CLAIMING[hash] || !BRX()) return;
+    CLAIM_ERR[hash] = '';
+    var setS = function (s) { CLAIMING[hash] = s; try { paintTxs(); } catch (_) {} };
+    var done = function (claimTx) { patchRec(hash, function (x) { x.status = 'SUCCESS'; if (claimTx) x.claimTx = claimTx; }); };
+    setS('Checking…');
+    BRX().whStatus(hash).then(function (s) {
+      if (s.status === 'SUCCESS') { done(s.claimTx); return null; }
+      if (!s.vaa) throw new Error('Wormhole has not signed this transfer yet — try again in a few minutes.');
+      return BRX().whClaim(rec.chain, s.vaa, setS);
+    }).then(function (res) {
+      delete CLAIMING[hash];
+      if (res && res.ok === true) done(res.hash);
+      else if (res && res.ok === false) CLAIM_ERR[hash] = 'The claim transaction failed on ' + rec.chain + '.';
+      else if (res) CLAIM_ERR[hash] = 'Submitted — ' + rec.chain + ' has not confirmed it yet.';
+      try { paintTxs(); } catch (_) {}
+    }).catch(function (e) {
+      delete CLAIMING[hash];
+      var m = String((e && e.message) || 'Claim failed');
+      if (/^Already claimed/.test(m)) done('');
+      else CLAIM_ERR[hash] = m;
+      try { paintTxs(); } catch (_) {}
+    });
+  }
+
   function record(r, src, dest, me, to) {
     try {
       var list = JSON.parse(localStorage.getItem(TX_KEY) || '[]');
@@ -1725,7 +2081,7 @@
   function resetAfterDelivery() {
     try {
       var ai = amtInput(); if (ai) ai.value = '';
-      QUOTE = null; BEST = ''; NOTE = { ni: '' };
+      QUOTE = null; BEST = ''; NOTE = { ni: '', om: '', wh: '' }; OMQ = null; WHQ = null;
       try { paintSourceUsd(); } catch (_) {}
       try { loadBalances().then(paintSteps); } catch (_) {}
       try { paintSteps(); setCta(); } catch (_) {}
@@ -1860,12 +2216,20 @@
     try { document.documentElement.classList.add('lx-chainready'); } catch (e) {}
     paintOptionCss();
     try { paintTxs(); } catch (_) {}
+    try {
+      txList().forEach(function (r) {
+        if (r && r.hash && (r.route === 'om' || r.route === 'wh') && r.status !== 'SUCCESS' && r.status !== 'FAILED'
+            && Date.now() - (r.at || 0) < 7 * 86400000) follow(r.hash, 0);
+      });
+    } catch (_) {}
 
     if (!window.__lxnNiWired) {
       window.__lxnNiWired = 1;
       window.addEventListener('click', function (e) {
         var t = e.target;
         if (!t || !t.closest) return;
+        var cl = t.closest('[data-whclaim]');
+        if (cl) { e.preventDefault(); e.stopPropagation(); claim(cl.getAttribute('data-whclaim')); return; }
         var hit = t.closest('[data-lxni-cta]');
         if (hit && !blockReason()) { e.preventDefault(); e.stopPropagation(); send(); return; }
         var added = t.closest('.brd-opt[data-lxadded]');
