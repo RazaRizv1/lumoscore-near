@@ -1,0 +1,21 @@
+# NEAR pool indexer: every Rhea pool's swaps, deposits and withdrawals, read off the chain each minute.
+# Deploy:  cd workers/near-pool-indexer && npx wrangler deploy
+# Schema:  npx wrangler d1 execute lumoscore-near-pooltxs --remote --file=schema.sql
+# Status:  https://near-pool-indexer.<subdomain>.workers.dev/status
+name = "near-pool-indexer"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+workers_dev = true
+
+# PAUSED 2026-10-30: from Cloudflare, neardata.xyz (free) allows ~28 reads a minute and NEAR makes ~100
+# blocks a minute. Restore ["* * * * *"] once the source is one that keeps up (FastNEAR key, NEAR Lake, or a VPS).
+[triggers]
+crons = []
+
+[[d1_databases]]
+binding = "DB"
+database_name = "lumoscore-near-pooltxs"
+database_id = "52dc5bcf-e8fb-4399-8445-13231a91e2c8"
+
+[observability]
+enabled = true

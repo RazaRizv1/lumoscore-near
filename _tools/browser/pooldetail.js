@@ -800,9 +800,67 @@
   // transactions on Pools-pool page ... please compare with Stellar"). _ammdata.js: TXPP 20, .lx-txpg chip.
   var TX_PER = 20, ACCT_RE = /^[a-z0-9._-]{2,64}$/;
   function txAmt(v) { return v >= 1000 ? num(v, 2) : num(v, 6); }
+  // OUR OWN INDEX OF RHEA, READ OFF THE CHAIN (workers/near-pool-indexer; RAZA 2026-10-30: "it must show the
+  // pool trxs"). Every pool's swaps, deposits and withdrawals, from the minute it started plus a backfill. It is
+  // the ONLY source of deposits and withdrawals on NEAR, and of swaps in the pools GeckoTerminal does not track
+  // (every 3- and 4-token stable pool). GeckoTerminal still supplies the swaps where it has them: its history
+  // runs further back than ours yet.
+  // SWITCHED OFF ('') until the indexer has a block source that keeps up with the chain: from Cloudflare the free
+  // neardata.xyz allows ~28 reads a minute against ~100 blocks a minute, so its cron is paused and its rows would
+  // be stale. Set back to 'https://near-pool-indexer.usa282.workers.dev' when it runs again.
+  var IDX = '';
+  var TXI = { rows: null, from: null, failed: false };
+  function tokName(id) {
+    var p = window.__lxnPool, t = p && p.tokens.filter(function (x) { return x.i === id; })[0];
+    return t ? t.name : (id.length > 14 ? id.slice(0, 6) + '…' : id);
+  }
+  function loadIdx() {
+    var p = window.__lxnPool;
+    if (!p) return;
+    if (!IDX) { TXI.off = true; return; }
+    fetch(IDX + '/pool?id=' + encodeURIComponent(p.id) + '&limit=300').then(function (r) { return r.json(); }).then(function (d) {
+      if (!d || !d.ok) throw new Error('index');
+      var ids = p.tokens.map(function (t) { return t.i; });
+      return Promise.all(ids.map(function (i) { return decOf(i).catch(function () { return null; }); })).then(function (decs) {
+        var dec = {}; ids.forEach(function (i, k) { dec[i] = decs[k]; });
+        var amt = function (raw, tok) { return dec[tok] != null ? scaled(raw, dec[tok]) : null; };
+        TXI.from = d.from || null;
+        TXI.rows = (d.rows || []).map(function (x) {
+          var r = { kind: x.kind === 'add' ? 'deposit' : x.kind === 'remove' ? 'withdraw' : 'swap', who: ACCT_RE.test(x.who || '') ? x.who : '',
+            t: +x.t || 0, hash: /^[A-Za-z0-9]{20,64}$/.test(x.tx || '') ? x.tx : '', src: 'idx' };
+          if (r.kind === 'swap') {
+            r.fromAmt = amt(x.aa, x.ta); r.toAmt = amt(x.ab, x.tb); r.from = tokName(x.ta); r.to = tokName(x.tb);
+            r.a = x.ta === p.a.i ? r.fromAmt : (x.tb === p.a.i ? r.toAmt : 0);
+            r.b = x.ta === p.b.i ? r.fromAmt : (x.tb === p.b.i ? r.toAmt : 0);
+            r.cells = [r.fromAmt != null ? txAmt(r.fromAmt) + ' ' + r.from : '—', r.toAmt != null ? txAmt(r.toAmt) + ' ' + r.to : '—'];
+          } else {
+            // Every token the deposit or withdrawal moved, then the LP shares it minted or burned.
+            var toks = ((x.extra && x.extra.tokens) || []).filter(function (y) { return y && y.a && y.a !== '0'; });
+            r.cells = [toks.length ? toks.map(function (y) { var v = amt(y.a, y.t); return (v != null ? txAmt(v) : '?') + ' ' + tokName(y.t); }).join(' + ') : '—',
+              x.extra && x.extra.shares ? txAmt(scaled(x.extra.shares, 24)) + ' LP' : '—'];
+          }
+          return r;
+        });
+        TXI.failed = false;
+        mergeTx();
+      });
+    }).catch(function () { TXI.failed = true; mergeTx(); });
+  }
+  // GeckoTerminal's swaps where it has them, the index's otherwise; deposits and withdrawals always the index's.
+  var GTROWS = null;
+  function mergeTx() {
+    var gt = GTROWS, idx = TXI.rows;
+    if (gt == null && idx == null && !TXI.failed && TX.err !== 'untracked' && !TX.err) return;   // nothing back yet
+    var swaps = (gt && gt.length) ? gt : (idx || []).filter(function (r) { return r.kind === 'swap'; });
+    var liq = (idx || []).filter(function (r) { return r.kind !== 'swap'; });
+    var all = swaps.concat(liq).sort(function (x, y) { return (y.t || 0) - (x.t || 0); });
+    if (all.length || idx != null) { TX.rows = all; if (all.length) TX.err = false; }
+    renderTx();
+  }
   function loadTx() {
     var p = window.__lxnPool;
     if (!p) return;
+    loadIdx();
     var at = 0;
     var go = function () {
       gtGet(gtId(p.id) + '/trades', 'lumos.nearGtPoolTr.v1.' + p.id, 60000).then(function (j) {
@@ -820,13 +878,14 @@
             from: a.from_token_address === p.a.i ? p.a.name : p.b.name, to: a.to_token_address === p.a.i ? p.a.name : p.b.name,
             fromAmt: +a.from_token_amount, toAmt: +a.to_token_amount };
         }).filter(Boolean);
+        GTROWS = TX.rows;
         TX.err = false;
-        renderTx();
+        mergeTx();
       }, function (e) {
         // A 404 IS AN ANSWER, NOT A HICCUP (RAZA 2026-10-30: "why aren't pool trxs loading for such pools?").
         // GeckoTerminal does not track Rhea's 3- and 4-token stable pools at all; retrying for 48 seconds and
         // then saying "could not be loaded" told the reader to try again for something that will never come.
-        if (String(e && e.message) === '404') { TX.err = 'untracked'; renderTx(); return; }
+        if (String(e && e.message) === '404') { TX.err = 'untracked'; GTROWS = []; mergeTx(); return; }
         if (at < 3) { at++; setTimeout(go, [3000, 15000, 30000][at - 1]); return; }
         TX.err = true; renderTx();
       });
@@ -834,10 +893,15 @@
     go();
   }
   function txNote() {
+    var since = TXI.from ? new Date(TXI.from).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
     if (TX.filter === 'deposit' || TX.filter === 'withdraw') {
-      return 'Deposits and withdrawals are not published for NEAR pools — Rhea’s activity index stopped in December 2024. Only swaps are listed.';
+      if (TXI.off) return 'Deposits and withdrawals are not published for NEAR pools yet. Only swaps are listed.';
+      if (TXI.rows == null && !TXI.failed) return 'Reading this pool’s ' + (TX.filter === 'deposit' ? 'deposits' : 'withdrawals') + '…';
+      return 'No ' + (TX.filter === 'deposit' ? 'deposits' : 'withdrawals') + ' in this pool' + (since ? ' since ' + since : '') + '.';
     }
-    if (TX.err === 'untracked') return 'This pool’s swaps are not published by any feed LumosCore reads (GeckoTerminal does not track it, and Rhea’s activity index stopped in December 2024), so they cannot be listed here yet.';
+    if (TX.err === 'untracked' && TXI.rows == null && !TXI.failed) return 'Reading this pool’s recent swaps…';
+    if (TX.err === 'untracked' && TXI.off) return 'This pool’s swaps are not published by any feed LumosCore reads yet (GeckoTerminal does not track it), so they cannot be listed here.';
+    if (TX.err === 'untracked') return 'No swaps in this pool' + (since ? ' since ' + since : ' recently') + '.';
     if (TX.err) return 'Recent swaps could not be loaded right now. Reload to try again.';
     if (!TX.rows) return 'Reading this pool’s recent swaps…';
     return 'No swaps in this pool recently.';
@@ -845,7 +909,7 @@
   function renderTx() {
     var p = window.__lxnPool;
     if (!p) return;
-    var list = (TX.rows || []).filter(function () { return TX.filter === 'all' || TX.filter === 'swap'; });
+    var list = (TX.rows || []).filter(function (r) { return TX.filter === 'all' || TX.filter === r.kind; });
     var pages = Math.max(1, Math.ceil(list.length / TX_PER));
     if (TX.page > pages) TX.page = pages;
     var from = (TX.page - 1) * TX_PER, slice = list.slice(from, from + TX_PER);
@@ -865,11 +929,15 @@
         var tr = document.createElement('tr');
         tr.className = 'lx-txrow';
         var c1 = document.createElement('td');
-        c1.appendChild(el('span', 'type-pill swap', 'Swap'));
+        c1.appendChild(el('span', 'type-pill ' + (r.kind || 'swap'), r.kind === 'deposit' ? 'Deposit' : r.kind === 'withdraw' ? 'Withdraw' : 'Swap'));
         tr.appendChild(c1);
-        [[r.a, p.a.name], [r.b, p.b.name]].forEach(function (x) {
+        // Two-token swaps read by token (column A is always the first token), as GeckoTerminal's rows always
+        // have; the index's rows on a 3- or 4-token pool, and every deposit / withdrawal, carry their own cells.
+        var cells = (r.cells && (p.tokens.length > 2 || r.kind !== 'swap')) ? r.cells
+          : [r.a > 0 ? (txAmt(r.a) + ' ' + p.a.name) : '—', r.b > 0 ? (txAmt(r.b) + ' ' + p.b.name) : '—'];
+        cells.forEach(function (txt) {
           var td = document.createElement('td');
-          var s = el('span', 'num', x[0] > 0 ? (txAmt(x[0]) + ' ' + x[1]) : '—');
+          var s = el('span', 'num', txt);
           s.setAttribute('data-logoed', '1');
           td.appendChild(s);
           tr.appendChild(td);
@@ -928,8 +996,11 @@
         it.setAttribute('data-logoed', '1');
         it.innerHTML = '<div class="tx-icon swap"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg></div>';
         var info = el('div', 'tx-info');
-        info.appendChild(el('div', 'tx-type swap', 'Swap'));
-        info.appendChild(el('div', 'tx-amounts', txAmt(r.fromAmt) + ' ' + r.from + ' → ' + txAmt(r.toAmt) + ' ' + r.to));
+        var kd = r.kind || 'swap';
+        info.appendChild(el('div', 'tx-type ' + kd, kd === 'deposit' ? 'Deposit' : kd === 'withdraw' ? 'Withdraw' : 'Swap'));
+        info.appendChild(el('div', 'tx-amounts', kd === 'swap'
+          ? (txAmt(r.fromAmt) + ' ' + r.from + ' → ' + txAmt(r.toAmt) + ' ' + r.to)
+          : ((r.cells && r.cells[0]) || '—')));
         info.appendChild(el('div', 'tx-meta', short(r.who) || '—'));
         it.appendChild(info);
         it.appendChild(el('div', 'tx-time', r.t ? tipWhen(r.t, 0) : '—'));
