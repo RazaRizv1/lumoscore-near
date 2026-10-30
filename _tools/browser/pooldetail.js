@@ -494,7 +494,8 @@
       dot.style.left = lx + 'px'; dot.style.top = ly + 'px'; dot.style.opacity = '1';
       box.textContent = '';
       box.appendChild(line(tipWhen(p[0], S.span), 'color:var(--text-soft,#8a8fa3);font-size:11px;font-weight:600;margin-bottom:4px'));
-      if (S.metric === 'vol') box.appendChild(row('Volume', S.volUsd ? usdShort(p[1] * S.volUsd) : (axisNum(p[1]) + ' ' + S.unit)));
+      if (S.metric === 'tvl') box.appendChild(row('TVL', usdShort(p[1])));
+      else if (S.metric === 'vol') box.appendChild(row('Volume', S.volUsd ? usdShort(p[1] * S.volUsd) : (axisNum(p[1]) + ' ' + S.unit)));
       else box.appendChild(row('Price of ' + S.base, num(p[1], 6) + ' ' + S.unit));
       if (S.metric !== 'vol' && +p[5] > 0) {
         var r2 = row('Volume', S.volUsd ? usdShort(+p[5] * S.volUsd) : (axisNum(+p[5]) + ' ' + S.unit));
@@ -580,7 +581,7 @@
       metric: meta.metric, volUsd: meta.volUsd, span: pts[pts.length - 1][0] - pts[0][0] };
     wirePoolHover(host);
     yLab.slice().sort(function (p, q) { return (parseFloat(p.getAttribute('y')) || 0) - (parseFloat(q.getAttribute('y')) || 0); })
-      .forEach(function (t, k, arr) { t.textContent = axisNum(mn + rg * (1 - k / Math.max(1, arr.length - 1))); });
+      .forEach(function (t, k, arr) { t.textContent = (meta.pre || '') + axisNum(mn + rg * (1 - k / Math.max(1, arr.length - 1))); });
     var span = pts[pts.length - 1][0] - pts[0][0];
     allText.filter(function (t) { return yLab.indexOf(t) < 0; })
       .sort(function (p, q) { return (parseFloat(p.getAttribute('x')) || 0) - (parseFloat(q.getAttribute('x')) || 0); })
@@ -618,7 +619,42 @@
       svg.appendChild(r);
     });
   }
-  var CH = { range: '1M', type: 'line', metric: 'price', pts: null, gen: 0 };
+  // TVL AND VOLUME, AS STELLAR'S POOL PAGE SHOWS THEM (RAZA 2026-10-30: "on Stellar Pools-pool page, we're
+  // showing Volume and TVL not Volume and price"). The line is the pool's TVL and the bars its volume, both in
+  // dollars, from Rhea's own daily history (api.data-service.ref.finance /api/pool/<id>/tvl and /volume,
+  // current to today and back to the pool's creation; CORS open, so each visitor asks it). Daily is what
+  // exists, so 1D is the last two days and 1W the last eight -- a line, never an invented intraday curve.
+  // The price series from GeckoTerminal stays below for nothing but a fallback note.
+  var CH = { range: '1M', type: 'line', metric: 'tvl', pts: null, gen: 0 };
+  var CH_DAYS = { '1D': 2, '1W': 8, '1M': 31, '3M': 91, '1Y': 366, 'ALL': 100000 };
+  var RHEA_DS = 'https://api.data-service.ref.finance/api/pool/';
+  var DAILY = {};                      // pool id -> Promise of [[ms, tvlUsd, 0, 0, 0, volUsd], ...] oldest first
+  function rheaDaily(id) {
+    if (DAILY[id]) return DAILY[id];
+    var key = 'lumos.nearPoolDaily.v1.' + id;
+    try {
+      var c = JSON.parse(sessionStorage.getItem(key) || 'null');
+      if (c && c.t && Date.now() - c.t < 3600000 && Array.isArray(c.v) && c.v.length > 1) return (DAILY[id] = Promise.resolve(c.v));
+    } catch (e) {}
+    var get = function (k) {
+      return fetch(RHEA_DS + encodeURIComponent(id) + '/' + k).then(function (r) { if (!r.ok) throw new Error(k + ' ' + r.status); return r.json(); });
+    };
+    DAILY[id] = Promise.all([get('tvl'), get('volume')]).then(function (r) {
+      var byDay = {};
+      (Array.isArray(r[0]) ? r[0] : []).forEach(function (x) {
+        if (x && +x.time > 0 && isFinite(+x.tvl)) (byDay[+x.time] = byDay[+x.time] || [+x.time, 0, 0, 0, 0, 0])[1] = +x.tvl;
+      });
+      (Array.isArray(r[1]) ? r[1] : []).forEach(function (x) {
+        if (x && +x.time > 0 && byDay[+x.time] && isFinite(+x.volume_dollar)) byDay[+x.time][5] = +x.volume_dollar;
+      });
+      var v = Object.keys(byDay).map(function (k) { return byDay[k]; }).sort(function (a, b) { return a[0] - b[0]; });
+      if (v.length < 2) throw new Error('no history');
+      try { sessionStorage.setItem(key, JSON.stringify({ t: Date.now(), v: v })); } catch (e) {}
+      return v;
+    });
+    DAILY[id].catch(function () { delete DAILY[id]; });
+    return DAILY[id];
+  }
   var CH_R = {
     '1D': { tf: 'minute', agg: 15, limit: 96, ttl: 300000 }, '1W': { tf: 'hour', agg: 1, limit: 168, ttl: 900000 },
     '1M': { tf: 'hour', agg: 4, limit: 180, ttl: 1800000 }, '3M': { tf: 'day', agg: 1, limit: 90, ttl: 3600000 },
@@ -635,6 +671,16 @@
     var s = chartSides(), v = CH.pts;
     if (!s || !v) return;
     var volUsd = s.quote.i === 'wrap.near' ? USD : null;
+    if (CH.src === 'rhea') {
+      if (CH.metric === 'vol') {
+        drawChart(v.map(function (q) { return [q[0], +q[5] || 0, 0, 0, 0, 0]; }), { unit: '', base: s.base.name, metric: 'vol', volUsd: 1, pre: '$' });
+        chartBars('vol');
+      } else {
+        drawChart(v, { unit: '', base: s.base.name, metric: 'tvl', pre: '$' });
+        if (CH.type === 'bar') chartBars('vol');
+      }
+      return;
+    }
     if (CH.metric === 'vol') {
       drawChart(v.map(function (q) { return [q[0], +q[5] || 0, 0, 0, 0, 0]; }), { unit: s.unit, base: s.base.name, metric: 'vol', volUsd: volUsd });
       chartBars('vol');
@@ -649,6 +695,22 @@
     if (range) CH.range = range;
     $$('.tf-mini button').forEach(function (b) { b.classList.toggle('active', (b.textContent || '').trim().toUpperCase() === CH.range); });
     var R = CH_R[CH.range] || CH_R['1M'], gen = ++CH.gen, at = 0;
+    var days = CH_DAYS[CH.range] || 31;
+    var daily = function () {
+      rheaDaily(p.id).then(function (all) {
+        if (gen !== CH.gen) return;
+        var list = all.slice(-days);
+        if (list.length < 2) { CH.pts = null; clearChart(); chartNote('Not enough history for this range yet.'); return; }
+        CH.src = 'rhea'; CH.pts = list;
+        renderChart();
+      }, function () {
+        if (gen !== CH.gen) return;
+        if (at < 3) { at++; chartNote('Rhea’s pool history is busy — retrying…'); setTimeout(daily, [3000, 15000, 30000][at - 1]); return; }
+        chartNote('Could not load this pool’s history. Reload to try again.');
+      });
+    };
+    daily();
+    return;
     var go = function () {
       gtGet(gtId(p.id) + '/ohlcv/' + R.tf + '?aggregate=' + R.agg + '&limit=' + R.limit + '&currency=token&token=' + encodeURIComponent(s.base.i),
         'lumos.nearGtPoolOhlc.v1.' + p.id + '.' + CH.range + '.' + s.base.i, R.ttl)
@@ -675,10 +737,10 @@
     if (window.__lxnPoolChartWired) return;
     window.__lxnPoolChartWired = 1;
     $$('.chart-mode-menu button[data-metric]').forEach(function (b) {
-      if (b.getAttribute('data-metric') !== 'vol') { b.textContent = 'Price'; b.setAttribute('data-logoed', '1'); }
+      if (b.getAttribute('data-metric') !== 'vol') { b.textContent = 'Pool TVL'; b.setAttribute('data-logoed', '1'); }
     });
     var sel = $('.chart-mode-select');
-    if (sel) [].forEach.call(sel.childNodes, function (nd) { if (nd.nodeType === 3 && nd.nodeValue.trim()) nd.nodeValue = ' Price '; });
+    if (sel) [].forEach.call(sel.childNodes, function (nd) { if (nd.nodeType === 3 && nd.nodeValue.trim()) nd.nodeValue = ' Pool TVL '; });
     window.addEventListener('click', function (e) {
       var t = e.target;
       if (!t || !t.closest || !$('.pool-header')) return;
@@ -693,10 +755,10 @@
         CH.type = btns.indexOf(tb) === 0 ? 'line' : 'bar';
       }
       if (mb) {
-        CH.metric = mb.getAttribute('data-metric') === 'vol' ? 'vol' : 'price';
+        CH.metric = mb.getAttribute('data-metric') === 'vol' ? 'vol' : 'tvl';
         [].forEach.call(mb.parentNode.querySelectorAll('button'), function (b) { b.classList.toggle('active', b === mb); });
         var s2 = $('.chart-mode-select');
-        if (s2) [].forEach.call(s2.childNodes, function (nd) { if (nd.nodeType === 3 && nd.nodeValue.trim()) nd.nodeValue = ' ' + (CH.metric === 'vol' ? 'Volume' : 'Price') + ' '; });
+        if (s2) [].forEach.call(s2.childNodes, function (nd) { if (nd.nodeType === 3 && nd.nodeValue.trim()) nd.nodeValue = ' ' + (CH.metric === 'vol' ? 'Volume' : 'Pool TVL') + ' '; });
         mb.parentNode.classList.remove('open');
         if (mb.parentNode.style.display === 'block') mb.parentNode.style.display = 'none';
       }
