@@ -624,7 +624,7 @@
   // dollars, from Rhea's own daily history (api.data-service.ref.finance /api/pool/<id>/tvl and /volume,
   // current to today and back to the pool's creation; CORS open, so each visitor asks it). Daily is what
   // exists, so 1D is the last two days and 1W the last eight -- a line, never an invented intraday curve.
-  // The price series from GeckoTerminal stays below for nothing but a fallback note.
+  // The GeckoTerminal price path in loadPoolChart is left after its `return`, unreached.
   var CH = { range: '1M', type: 'line', metric: 'tvl', pts: null, gen: 0 };
   var CH_DAYS = { '1D': 2, '1W': 8, '1M': 31, '3M': 91, '1Y': 366, 'ALL': 100000 };
   var RHEA_DS = 'https://api.data-service.ref.finance/api/pool/';
@@ -676,7 +676,7 @@
         drawChart(v.map(function (q) { return [q[0], +q[5] || 0, 0, 0, 0, 0]; }), { unit: '', base: s.base.name, metric: 'vol', volUsd: 1, pre: '$' });
         chartBars('vol');
       } else {
-        drawChart(v, { unit: '', base: s.base.name, metric: 'tvl', pre: '$' });
+        drawChart(v, { unit: '', base: s.base.name, metric: 'tvl', volUsd: 1, pre: '$' });
         if (CH.type === 'bar') chartBars('vol');
       }
       return;
