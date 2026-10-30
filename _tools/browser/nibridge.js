@@ -1101,6 +1101,10 @@
     var key = destChain(), rs = routesFor(SRC, key);
     BEST = '';
     if (PICKED && PICKED_FOR === key && rs.indexOf(PICKED) >= 0) BEST = answered(PICKED) ? PICKED : '';
+    // NEAR INTENTS WAITING ON THE READER IS NOT NEAR INTENTS REFUSING. It cannot quote until there is a
+    // wallet and an address; Omni can. Moving to Omni meanwhile would flip the asset on screen (ETH ->
+    // Omni's NEAR) and flip it back the moment the address is typed. Measured on staging 644957c0.
+    else if (rs[0] === 'ni' && !QUOTE && /^(Enter a destination|Connect a NEAR)/.test(NOTE.ni || '')) BEST = '';
     else rs.some(function (r) { if (answered(r)) { BEST = r; return true; } return false; });
     try { paintSteps(); } catch (_) {}
     paintQuote(BEST === 'ni' ? QUOTE : null, BEST ? '' : quoteReason());

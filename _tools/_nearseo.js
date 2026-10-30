@@ -33,12 +33,13 @@ const SEO = {
     'NEAR Wallet — Balances, Send and Receive | LumosCore',
     'View your NEAR and token balances, send and receive, and swap on NEAR. Non-custodial — you sign every transaction yourself.',
   ],
-  // The bridge: NEAR Intents only (2026-10-22). Thirty-five is the destination count CHAINS in
-  // functions/lxapi/nearoneclick.js offers, and the page's runtime title restates it.
+  // The bridge: NEAR Intents, plus Omni Bridge and Wormhole since 2026-10-30. Thirty-five is the
+  // destination count CHAINS in functions/lxapi/nearoneclick.js offers (the other two reach a subset of
+  // those), and the page's runtime title restates it.
   'lumoscore-bridge': [
     'Bridge from NEAR to 35 Networks | LumosCore',
     'Bridge NEAR, USDC, USDT and other NEAR tokens to Bitcoin, Ethereum, Solana and 30+ more networks with '
-      + 'NEAR Intents. One NEAR transaction, delivered as the destination chain’s own token.',
+      + 'NEAR Intents, Omni Bridge or Wormhole — the destination chain’s own token, or the token itself.',
   ],
   'lumoscore-dex': [
     'Trade on NEAR — Swap and Limit Orders | LumosCore',

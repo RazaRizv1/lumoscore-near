@@ -9,10 +9,10 @@
 (function(){
   if(window.__lxBhiw)return; window.__lxBhiw=1;
   var STEPS=[
-    ["Pick a destination and an amount","Choose where the money should arrive, the asset you want there, and how much to send. The list of destinations is read live from NEAR Intents, so the picker cannot offer a network it has stopped serving."],
-    ["One NEAR transaction","You sign a single transaction in your NEAR wallet. It pays LumosCore’s fee and deposits the rest with NEAR Intents in the same step — both happen, or neither does. Sending NEAR itself wraps it to wNEAR inside that same transaction."],
-    ["NEAR Intents delivers it","A NEAR Intents solver holds the deposit for about thirty seconds while it fills the order, then sends the asset you chose to the address you gave — the destination chain’s own token, not a wrapped copy. If it cannot be filled, it is refunded to the NEAR account that paid."],
-    ["Fees, all shown before you sign","LumosCore takes 0.2% of the amount you send. NEAR Intents charges its own fee on top, and the amount you are quoted is what arrives after all of it."]
+    ["Pick a destination, an amount and a route","Choose where the money should arrive and how much to send. The Route panel then lists every route that can carry that asset there — NEAR Intents, Omni Bridge, Wormhole — with what each delivers."],
+    ["Sign in your NEAR wallet","LumosCore’s 0.2% fee and the transfer go in the same NEAR transaction. Sending NEAR itself wraps it to wNEAR on the way where the route needs it; Omni also tops up its storage first, which carries its relayer fee."],
+    ["The route delivers it","NEAR Intents: a solver fills the order in about thirty seconds with the destination chain’s own token, or refunds it. Omni Bridge: its relayers deliver Omni’s copy of the token in a few minutes. Wormhole: its guardians sign in about fifteen minutes, then you claim Wormhole’s copy from Recent transactions with an EVM wallet."],
+    ["Fees, all shown before you sign","LumosCore takes 0.2% of the amount you send. The route’s own cost — NEAR Intents’ fee, Omni’s relayer fee in NEAR, or the gas of a Wormhole claim — is on the Route panel before you sign."]
   ];
   var el=null, trigger=null;
 
@@ -42,13 +42,13 @@
       +'<div class="lx-bhiw-head"><h3>How the bridge works</h3>'
       +'<button class="lx-bhiw-x" type="button" aria-label="Close" data-lxbhiw-close><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>'
       +'<div class="lx-bhiw-body">'
-      +'<p class="lx-bhiw-lede">LumosCore moves assets off NEAR through <b>NEAR Intents</b>, an intent network '
-      +'where solvers compete to fill your transfer. LumosCore never holds your funds; for the half-minute a '
-      +'transfer takes, NEAR Intents does.</p>'
+      +'<p class="lx-bhiw-lede">LumosCore moves assets off NEAR through three routes: <b>NEAR Intents</b>, where '
+      +'solvers swap into the destination chain’s own token, and <b>Omni Bridge</b> and <b>Wormhole</b>, which '
+      +'carry the NEAR token itself. LumosCore never holds your funds; the route does, for as long as it takes.</p>'
       +'<ol class="lx-bhiw-steps">'+steps+'</ol>'
-      +'<div class="lx-bhiw-note"><b>Nothing to claim.</b> The asset is delivered to the address you gave, with '
-      +'no second signature and no gas needed on the destination chain. Circle’s CCTP, which asks you to '
-      +'claim on arrival, does not reach NEAR and is not used here.</div>'
+      +'<div class="lx-bhiw-note"><b>Only Wormhole needs a claim.</b> NEAR Intents and Omni Bridge deliver to the '
+      +'address you gave with no second signature. A Wormhole transfer is claimed on the destination chain, '
+      +'with an EVM wallet holding a little of its gas.</div>'
       +'<div class="lx-bhiw-chains"><b>Where it goes:</b> <span class="lx-bhiw-where"></span></div>'
       +'</div></div>';
     document.body.appendChild(el);
