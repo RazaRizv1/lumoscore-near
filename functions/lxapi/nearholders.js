@@ -19,7 +19,10 @@
 // two tokens it refused -- and the first version turned that refusal into count:null and cached the whole answer
 // for half an hour. Now: a count is kept 6 hours (fresh) and 30 days (fallback); a refused call serves the kept
 // figure; with none, the answer says countUnread and is kept only a minute, and the page asks NearBlocks itself.
-const TTL = 1800, KEEP = 604800, VER = 'v3';
+// Last of all, the count baked into the build from a paced run (_tools/_nearholdercounts.js), so a curated
+// token is never "—" just because NearBlocks was busy -- with its date, as countAt.
+import { CURATED } from './_nearcurated.js';
+const TTL = 1800, KEEP = 604800, VER = 'v4';
 const COUNT_TTL = 21600, COUNT_KEEP = 2592000;
 const TOP = 'https://api.fastnear.com/v1/ft/';
 const COUNT = 'https://api.nearblocks.io/v1/fts/';
@@ -52,15 +55,18 @@ export async function readCount(id, get) {
   return isFinite(n) && n > 0 ? n : null;
 }
 
-export async function build(id, get, count) {
+export async function build(id, get, count, countAt) {
   get = get || getJson;
   const top = await get(TOP + encodeURIComponent(id) + '/top');
   if (!top || !Array.isArray(top.accounts)) throw new Error('fastnear: no list');
   const holders = top.accounts
     .filter((x) => x && validId(String(x.account_id || '')) && /^\d+$/.test(String(x.balance || '')) && String(x.balance) !== '0')
     .map((x) => ({ a: String(x.account_id), raw: String(x.balance) }));
+  // A LIST SHORTER THAN FastNEAR's 100 IS EVERY ACCOUNT -- so its holders are the count, exact and live, for
+  // the small tokens NearBlocks has never indexed (DARK: 25). Preferred over any other figure.
+  if (top.accounts.length < 100) { count = holders.length; countAt = null; }
   return { ok: true, src: 'FastNEAR (list), NearBlocks (count)', at: Date.now(), i: id,
-    count: count == null ? null : count, countUnread: count === undefined, holders };
+    count: count == null ? null : count, countUnread: count === undefined, countAt: countAt || null, holders };
 }
 
 // The count through its own cache: fresh, else asked, else the kept figure, else undefined.
@@ -90,7 +96,12 @@ export async function onRequestGet(context) {
   if (hit) return json(await hit.json());
   try {
     const wu = (p) => context.waitUntil(p);
-    const body = await build(id, null, await cachedCount(cache, base, id, wu));
+    let n = await cachedCount(cache, base, id, wu), at = null;
+    if (n === undefined) {
+      const cur = CURATED.find((c) => c.i === id);
+      if (cur && cur.hc > 0) { n = cur.hc; at = cur.hca || null; }
+    }
+    const body = await build(id, null, n, at);
     const put = (req, ttl) => cache.put(req, new Response(JSON.stringify(body), {
       headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=' + ttl } }));
     // An answer still missing its count is kept a minute, so the next visitor asks again.

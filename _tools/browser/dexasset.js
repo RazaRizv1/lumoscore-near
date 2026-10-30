@@ -1787,6 +1787,7 @@
         if (!j || !j.ok) throw new Error('down');
         HL.list = j.holders || [];
         HL.count = j.count != null ? Number(j.count) : null;
+        HL.countAt = j.countAt || null;                   // set when the figure is the build's, not live
         setTabCount(/holders/i, HL.count != null ? HL.count.toLocaleString('en-US') : '—');
         HL.err = false;
         syncPanel();
@@ -1798,7 +1799,7 @@
             .then(function (c) {
               var n = Number((((c && c.holders) || [])[0] || {}).count);
               if (!(n > 0)) return;
-              HL.count = n;
+              HL.count = n; HL.countAt = null;
               setTabCount(/holders/i, n.toLocaleString('en-US'));
               syncPanel();
             })
@@ -1813,12 +1814,17 @@
         syncPanel();
       });
   }
+  function asOf() {
+    if (!HL.countAt) return '';
+    var d = new Date(HL.countAt + 'T00:00:00Z');
+    return isFinite(d.getTime()) ? ', as of ' + ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()] + ' ' + d.getUTCDate() : '';
+  }
   function paintHolders(extra, phone) {
     var d = window.__lxnAssetData, dec = d && d.decimals != null ? +d.decimals : null, sup = d && d.supply > 0 ? +d.supply : 0;
     var pre = phone ? 'mdxa' : 'dxa';
     var all = HL.list, list = all ? all.slice((HL.page - 1) * 50, HL.page * 50) : null;
     var state = (HL.err && !all) ? 'err' : (!all || dec == null) ? 'load' : !all.length ? 'none' : 'ok';
-    var sig = state + '|' + HL.page + '|' + (all ? all.length : 0) + '|' + HL.count;
+    var sig = state + '|' + HL.page + '|' + (all ? all.length : 0) + '|' + HL.count + '|' + HL.countAt;
     if (extra.__lxnSig === sig && extra.classList.contains('lxda')) return;
     extra.__lxnSig = sig;
     extra.classList.add('lxda');
@@ -1862,7 +1868,7 @@
     }
     // The list is the largest 100, so the line says so rather than implying all of them can be paged.
     h += '<div class="' + pre + '-hl-pgn"><div class="info lxp">Showing ' + (base + 1) + '–' + (base + rows.length) + ' of the top '
-      + all.length + ' holders' + (count != null ? ' (' + count.toLocaleString('en-US') + ' in all)' : '') + '</div><div class="pgn">'
+      + all.length + ' holders' + (count != null ? ' (' + count.toLocaleString('en-US') + ' in all' + asOf() + ')' : '') + '</div><div class="pgn">'
       + '<button type="button" data-lxhp="prev"' + (HL.page <= 1 ? ' disabled' : '') + '>‹ Prev</button>'
       + '<button type="button" data-lxhp="next"' + (more ? '' : ' disabled') + '>Next ›</button></div></div>';
     extra.innerHTML = h;
