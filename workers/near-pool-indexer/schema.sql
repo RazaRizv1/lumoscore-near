@@ -15,3 +15,7 @@ CREATE TABLE IF NOT EXISTS txs (
 CREATE INDEX IF NOT EXISTS txs_pool_block ON txs (pool, block DESC);
 CREATE INDEX IF NOT EXISTS txs_ts ON txs (ts);
 CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT);
+-- Hourly USD prices from Rhea's price list, for the Trade page's day high/low and 7-day curve on tokens CoinGecko
+-- does not list. Only tokens a page has asked for (pxwatch) are kept, 8 days of them.
+CREATE TABLE IF NOT EXISTS px (t TEXT NOT NULL, h INTEGER NOT NULL, usd REAL NOT NULL, PRIMARY KEY (t, h));
+CREATE TABLE IF NOT EXISTS pxwatch (t TEXT PRIMARY KEY, seen INTEGER NOT NULL);

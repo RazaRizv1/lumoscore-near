@@ -283,6 +283,63 @@ async function run(env) {
   return report;
 }
 
+// ---- hourly prices -------------------------------------------------------------------------------------
+// The Trade page's day high/low and 7-day curve come from CoinGecko, which lists 39 of the 73 curated NEAR
+// tokens (RAZA 2026-10-30: "why for some assets ... the last 2 columns are not showing details"). Stellar draws
+// those columns from its own chain's prices; this is NEAR's equivalent: once an hour, Rhea's price list (one
+// call, reachable from Cloudflare) for the tokens a page has asked about -- not all 4,600 it prices. A failed
+// read leaves the hour unmarked, so the next minute's run tries again.
+const PRICE_LIST = 'https://indexer.ref.finance/list-token-price';
+const WNEAR = 'wrap.near';                        // every series is re-priced in NEAR against this one
+const WATCH_MAX = 300, PX_KEEP_H = 8 * 24, WATCH_KEEP_H = 14 * 24;
+const hourOf = (ms) => Math.floor(ms / 3600000);
+const TOKEN_ID = /^(?=.{2,64}$)[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
+async function snapPrices(env) {
+  const db = env.DB, h = hourOf(Date.now());
+  const done = await db.prepare("SELECT v FROM meta WHERE k = 'pxh'").first();
+  if (done && +done.v === h) return { px: 'already' };
+  const w = await db.prepare('SELECT t FROM pxwatch WHERE seen >= ?1').bind(h - WATCH_KEEP_H).all();
+  const ids = new Set((w.results || []).map((r) => r.t));
+  ids.add(WNEAR);
+  const r = await fetch(PRICE_LIST, { headers: { accept: 'application/json', 'user-agent': 'LumosCore/1.0 (+https://lumoscore.com)' } });
+  if (!r.ok) throw new Error('rhea prices ' + r.status);
+  const list = await r.json();
+  const st = [];
+  for (const t of ids) {
+    const v = Number((list[t] || {}).price);
+    if (v > 0 && isFinite(v)) st.push(db.prepare('INSERT OR REPLACE INTO px (t, h, usd) VALUES (?1, ?2, ?3)').bind(t, h, v));
+  }
+  if (!st.length) throw new Error('rhea prices: none of the watched tokens priced');
+  st.push(db.prepare('DELETE FROM px WHERE h < ?1').bind(h - PX_KEEP_H));
+  st.push(db.prepare('DELETE FROM pxwatch WHERE seen < ?1').bind(h - WATCH_KEEP_H));
+  st.push(setMeta(db, 'pxh', h));
+  await db.batch(st);
+  return { px: st.length - 3 };
+}
+// GET /prices?ids=a,b,...  -> { ok, near: [[hour, usd]...], tok: { id: [[hour, usd]...] } }, the last 7 days.
+// Asking registers the ids for the hourly snapshot (up to WATCH_MAX tokens in all).
+async function prices(url, env) {
+  const db = env.DB, h = hourOf(Date.now());
+  const ids = [...new Set(String(url.searchParams.get('ids') || '').split(',').map((s) => s.trim().toLowerCase())
+    .filter((s) => TOKEN_ID.test(s)))].slice(0, 60);
+  if (!ids.length) return json({ ok: false, error: 'no ids' }, 0);
+  const have = await db.prepare('SELECT COUNT(*) AS n FROM pxwatch').first();
+  const room = Math.max(0, WATCH_MAX - ((have && have.n) || 0));
+  const known = await db.prepare('SELECT t FROM pxwatch WHERE t IN (' + ids.map((_, i) => '?' + (i + 1)).join(',') + ')').bind(...ids).all();
+  const isKnown = new Set((known.results || []).map((r) => r.t));
+  const add = ids.filter((t) => !isKnown.has(t)).slice(0, room);
+  const touch = ids.filter((t) => isKnown.has(t)).concat(add);
+  if (touch.length) await db.batch(touch.map((t) => db.prepare('INSERT INTO pxwatch (t, seen) VALUES (?1, ?2) ON CONFLICT(t) DO UPDATE SET seen = ?2').bind(t, h)));
+  const all = ids.concat([WNEAR]);
+  const q = await db.prepare('SELECT t, h, usd FROM px WHERE h >= ?1 AND t IN (' + all.map((_, i) => '?' + (i + 2)).join(',') + ') ORDER BY t, h')
+    .bind(h - 7 * 24, ...all).all();
+  const tok = {};
+  for (const x of q.results || []) (tok[x.t] = tok[x.t] || []).push([x.h, x.usd]);
+  const near = tok[WNEAR] || [];
+  if (ids.indexOf(WNEAR) < 0) delete tok[WNEAR];
+  return json({ ok: true, h, near, tok }, 300);
+}
+
 // ---- read --------------------------------------------------------------------------------------------
 function json(body, maxAge) {
   return new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json; charset=utf-8',
@@ -307,6 +364,7 @@ async function read(url, env) {
 
 export default {
   async scheduled(event, env, ctx) {
+    ctx.waitUntil(snapPrices(env).then((r) => console.log('prices', JSON.stringify(r)), (e) => console.error('price snapshot failed', e && e.message)));
     ctx.waitUntil(run(env).then((r) => console.log('indexed', JSON.stringify(r)), (e) => console.error('index run failed', e && e.message)));
   },
   async fetch(request, env) {
@@ -314,6 +372,9 @@ export default {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET' } });
     if (url.pathname === '/pool') {
       try { return await read(url, env); } catch (e) { return json({ ok: false, error: 'read failed' }, 0); }
+    }
+    if (url.pathname === '/prices') {
+      try { return await prices(url, env); } catch (e) { return json({ ok: false, error: 'read failed' }, 0); }
     }
     if (url.pathname === '/status') {
       const m = await meta(env.DB);

@@ -1571,10 +1571,76 @@
       t.hi = Math.max(x.hi, t.p); t.lo = Math.min(x.lo, t.p); t.w = x.w; t.s = x.s;
     }
   }
+  // ---- ...and from LumosCore's own hourly prices, for the tokens CoinGecko does not list -------------------
+  //
+  // RAZA 2026-10-30: "why for some assets on trade main page, the last 2 columns ... are not showing details" --
+  // 34 of the 73 curated tokens have no CoinGecko id, ETH's bridged contract among them. Stellar draws these
+  // columns from its own chain's prices; the NEAR equivalent is the indexer Worker's hourly snapshot of Rhea's
+  // price list (workers/near-pool-indexer, /prices), backfilled a week from GeckoTerminal's candles. The same
+  // derivation as nearHistory: each hour re-priced in NEAR against NEAR's own hour. The day's high/low needs a
+  // day of hours; the curve and the week's change need most of the week, else those cells keep their dash.
+  var OWN_PX = 'https://near-pool-indexer.usa282.workers.dev/prices?ids=';
+  var OWN_KEY = 'lumos.nearPx.v1';
+  function ownHistory(j) {
+    var out = {};
+    if (!j || !j.ok || !j.tok) return out;
+    var nb = {};
+    (j.near || []).forEach(function (x) { if (x[1] > 0) nb[x[0]] = x[1]; });
+    for (var id in j.tok) {
+      var r = [], hs = [];
+      (j.tok[id] || []).forEach(function (x) { var n = nb[x[0]]; if (x[1] > 0 && n > 0) { r.push(x[1] / n); hs.push(x[0]); } });
+      if (r.length < 24) continue;
+      var last = hs[hs.length - 1];
+      if (last < j.h - 3 || hs[0] > last - 23) continue;          // stale, or not yet a day of hours
+      var day = [];
+      for (var k = 0; k < r.length; k++) if (hs[k] > last - 24) day.push(r[k]);
+      var e = { hi: Math.max.apply(null, day), lo: Math.min.apply(null, day) };
+      if (last - hs[0] >= 6 * 24) {
+        var s = [], step = Math.max(1, Math.floor(r.length / 42));
+        for (var q = 0; q < r.length; q += step) s.push(+r[q].toPrecision(6));
+        s.push(+r[r.length - 1].toPrecision(6));
+        e.w = (r[r.length - 1] / r[0] - 1) * 100; e.s = s;
+      }
+      out[id] = e;
+    }
+    return out;
+  }
+  function applyOwn(d, h) {
+    for (var i = 0; i < d.rows.length; i++) {
+      var t = d.rows[i], x = t.hi == null && h[t.i];
+      if (!x) continue;
+      t.hi = Math.max(x.hi, t.p); t.lo = Math.min(x.lo, t.p);
+      if (x.s) { t.w = x.w; t.s = x.s; }
+    }
+  }
+  // Calls done() synchronously when the answer is cached, so a warm load still paints once, complete.
+  function loadOwn(d, done) {
+    try {
+      var c = JSON.parse(localStorage.getItem(OWN_KEY) || 'null');
+      if (c && c.h && Date.now() - c.ts < HIST_TTL) { applyOwn(d, c.h); done(); return; }
+    } catch (e) {}
+    var ids = [];
+    for (var i = 0; i < d.rows.length; i++) if (d.rows[i].hi == null && d.rows[i].i) ids.push(d.rows[i].i);
+    if (!ids.length) { done(); return; }
+    var chunks = [];
+    for (var k = 0; k < ids.length; k += 60) chunks.push(ids.slice(k, k + 60));
+    Promise.all(chunks.map(function (c) {
+      return fetch(OWN_PX + c.map(encodeURIComponent).join(','))
+        .then(function (r) { if (!r.ok) throw new Error('prices ' + r.status); return r.json(); })
+        .then(ownHistory, function () { return null; });
+    })).then(function (parts) {
+      var h = {}, ok = true;
+      parts.forEach(function (p) { if (!p) { ok = false; return; } for (var id in p) h[id] = p[id]; });
+      applyOwn(d, h);
+      // a failed part is not cached as "no history" -- the next load asks again
+      if (ok) try { localStorage.setItem(OWN_KEY, JSON.stringify({ ts: Date.now(), h: h })); } catch (e) {}
+    }).catch(function () {}).then(done);
+  }
   function loadHist(d, after) {
+    function settle() { loadOwn(d, function () { HIST.state = 'done'; after(); }); }
     try {
       var c = JSON.parse(localStorage.getItem(HIST_KEY) || 'null');
-      if (c && c.h && Date.now() - c.ts < HIST_TTL) { applyHist(d, c.h); HIST.state = 'done'; after(); return; }
+      if (c && c.h && Date.now() - c.ts < HIST_TTL) { applyHist(d, c.h); HIST.state = 'pending'; settle(); return; }
     } catch (e) {}
     var ids = ['near'];
     for (var i = 0; i < d.rows.length; i++) if (d.rows[i].cg && ids.indexOf(d.rows[i].cg) < 0) ids.push(d.rows[i].cg);
@@ -1587,9 +1653,11 @@
         try { localStorage.setItem(HIST_KEY, JSON.stringify({ ts: Date.now(), h: h })); } catch (e) {}
       })
       .catch(function () {})
-      .then(function () { HIST.state = 'done'; after(); });
+      .then(settle);
   }
-  function histPending(t) { return HIST.state === 'pending' && !!(t && t.cg) && t.hi == null; }
+  // Every row still without figures waits while either source is being asked -- never a dash that turns into
+  // a number (GUARDRAILS B).
+  function histPending(t) { return HIST.state === 'pending' && !!t && t.hi == null; }
 
   // Draw what each row carries. While the history call is in flight, the cells stay empty; once it
   // settles, every row without a curve gets its percentage or its em dash.
