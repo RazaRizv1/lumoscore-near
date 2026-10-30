@@ -66,6 +66,13 @@
   var RPC = 'https://free.rpc.fastnear.com';
   var TGAS = '000000000000';
   var MAX_TX_GAS = 300;                               // TGas per transaction
+  // THE SWAP CALL GETS 180 TGas, NOT "WHATEVER IS LEFT UP TO 300". The transaction used to add up to exactly
+  // NEAR's 300 TGas ceiling (10 + 10 + 30 + 250), and HOT refused it twice on mainnet (RAZA 2026-10-30) with
+  // "User rejected the request" after he approved -- while the same session's one-action, 30-TGas
+  // registration went straight through. A transaction AT the ceiling leaves nothing for a wallet that adds
+  // to it. 180 is what Rhea's own app sends with a swap's ft_transfer_call (and what this file's DCL orders
+  // use); real swaps here burned 18-28 TGas end to end. Unused gas is refunded either way.
+  var SWAP_GAS = 180;
   var NEAR_KEEP = '50000000000000000000000';          // 0.05 NEAR left behind by MAX, for gas and storage
   // Mainnet swaps through Rhea burn ~18-28 TGas end to end (measured on four real txs 2026-10-21:
   // 0.0016-0.0026 NEAR). Shown as the figure alone, as Stellar prints its network fee -- RAZA 2026-10-29
@@ -368,7 +375,7 @@
           // ONE action: the gross amount to the router, which takes the fee only if the swap fills.
           actions.push({ type: 'FunctionCall', params: { methodName: 'ft_transfer_call',
             args: { receiver_id: rt, amount: q.amount, msg: JSON.stringify({ fee_bps: feeBps(), actions: acts, skip_unwrap_near: !outNative }) },
-            gas: String(MAX_TX_GAS - used) + TGAS, deposit: '1' } });
+            gas: String(Math.min(SWAP_GAS, MAX_TX_GAS - used)) + TGAS, deposit: '1' } });
         } else {
           actions.push({ type: 'FunctionCall', params: { methodName: 'ft_transfer',
             args: { receiver_id: acct, amount: q.fee, memo: 'LumosCore platform fee ' + (feeBps() / 100) + '%' }, gas: '30' + TGAS, deposit: '1' } });
@@ -376,7 +383,7 @@
           var msg = { force: 0, actions: acts, skip_unwrap_near: !outNative };
           actions.push({ type: 'FunctionCall', params: { methodName: 'ft_transfer_call',
             args: { receiver_id: REF, amount: q.net, msg: JSON.stringify(msg) },
-            gas: String(Math.min(270, MAX_TX_GAS - used)) + TGAS, deposit: '1' } });
+            gas: String(Math.min(SWAP_GAS, MAX_TX_GAS - used)) + TGAS, deposit: '1' } });
         }
         txs.push({ signerId: me, receiverId: inC, actions: actions });
         var dep = BigInt(0);
