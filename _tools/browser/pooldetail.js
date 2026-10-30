@@ -837,7 +837,14 @@
           } else {
             // Every token the deposit or withdrawal moved, then the LP shares it minted or burned.
             var toks = ((x.extra && x.extra.tokens) || []).filter(function (y) { return y && y.a && y.a !== '0'; });
-            r.cells = [toks.length ? toks.map(function (y) { var v = amt(y.a, y.t); return (v != null ? txAmt(v) : '?') + ' ' + tokName(y.t); }).join(' + ') : '—',
+            // A stable pool logs no token amounts; the call's own amounts stand, in the pool's token order
+            // (minimums, marked "≥", for a stable withdrawal by shares).
+            if (!toks.length && x.extra && Array.isArray(x.extra.amounts)) {
+              toks = x.extra.amounts.map(function (a, k) { return { a: String(a), t: (p.tokens[k] || {}).i || '' }; })
+                .filter(function (y) { return y.t && y.a && y.a !== '0'; });
+            }
+            var ge = x.extra && x.extra.atLeast ? '≥ ' : '';
+            r.cells = [toks.length ? toks.map(function (y) { var v = amt(y.a, y.t); return ge + (v != null ? txAmt(v) : '?') + ' ' + tokName(y.t); }).join(' + ') : '—',
               x.extra && x.extra.shares ? txAmt(scaled(x.extra.shares, 24)) + ' LP' : '—'];
           }
           return r;

@@ -33,13 +33,15 @@
 const REF = 'v2.ref-finance.near';
 const RPCS = ['https://near.drpc.org', 'https://free.rpc.fastnear.com'];
 const ND = 'https://mainnet.neardata.xyz/v0';
-const FWD = 600, BACK = 600, BACKFILL_DAYS = 3, KEEP_DAYS = 30, CONC = 4;
-const RUN_MS = 45000;
-// POOLS TOO BUSY TO READ IN FULL: a block that touches only these is not fetched. 6065 (ZEC/wNEAR) is traded by
-// NEAR Intents solvers nearly every block -- 18 of the first 23 swaps indexed -- and alone would use up neardata's
-// ~28 reads a minute. It is a two-token pool GeckoTerminal tracks, so its swaps still show; only its deposits and
-// withdrawals are not indexed.
-const SKIP = { 6065: 1 };                       // a cron every minute must be done before the next run starts
+const FWD = 1200, BACK = 2400, BACKFILL_DAYS = 3, KEEP_DAYS = 30, CONC = 8;
+const RUN_MS = 45000;                       // a cron every minute must be done before the next run starts
+// WHAT IS WORTH A NEARDATA READ (RAZA 2026-10-30: "why only so few? It needs to be just like other pool pages").
+// Reading every block that touched any pool spent neardata's ~28 reads a minute on two-token swaps GeckoTerminal
+// already lists, and left the backfill crawling. Only two things are fetched now:
+//   * a DEPOSIT or WITHDRAWAL in any pool: an LP's share balance changed -- Rhea key 0x02 + u32 pool id +
+//     borsh account (Rhea's own account there is its fee share, which every swap moves, so it does not count);
+//   * any action in a pool of MORE THAN TWO tokens, whose swaps nothing else publishes.
+// That is a few blocks an hour, so the run is bounded by the free RPC (8 in parallel), not by neardata.
 const UA = { 'user-agent': 'LumosCore NEAR pool indexer (+https://lumoscore.com)' };
 const pause = (ms) => new Promise((go) => setTimeout(go, ms));
 
@@ -109,36 +111,61 @@ export function rowsOf(ro, block, ts) {
       });
       return;
     }
+    // Two log shapes: a classic pool says "Liquidity added ["1000 a.near", …], minted N shares" / "N shares of
+    // liquidity removed: receive back [...]"; a stable pool says "Mint N shares for <acct>, fee is …" / "Burn N
+    // shares …" and names no tokens -- then the call's own amounts stand (in the pool's token order; exact for
+    // add_stable_liquidity and remove_liquidity_by_tokens, minimums for a stable remove_liquidity, which is
+    // flagged so the page can say so).
+    const all = logs.join('\n');
     if (m === 'add_liquidity' || m === 'add_stable_liquidity') {
       const l = logs.find((x) => /^Liquidity added/.test(x)) || '';
-      const sh = (/minted (\d+) shares/.exec(l) || [])[1] || '';
+      const sh = (/minted (\d+) shares/.exec(l) || /Mint (\d+) shares/.exec(all) || [])[1] || '';
+      const tk = pairs(l);
       rows.push(Object.assign({}, base, { id: rc.receipt_id + ':' + ai, pool: +args.pool_id, kind: 'add', who,
-        ta: '', aa: '', tb: '', ab: '', extra: JSON.stringify({ shares: sh, tokens: pairs(l) }) }));
+        ta: '', aa: '', tb: '', ab: '', extra: JSON.stringify({ shares: sh, tokens: tk, amounts: tk.length ? null : (args.amounts || null) }) }));
       return;
     }
     if (m === 'remove_liquidity' || m === 'remove_liquidity_by_tokens') {
       const l = logs.find((x) => /shares of liquidity removed/.test(x)) || '';
-      const sh = (/^(\d+) shares/.exec(l) || [])[1] || String(args.shares || '');
+      const sh = (/^(\d+) shares/.exec(l) || /Burn (\d+) shares/.exec(all) || [])[1] || String(args.shares || args.max_burn_shares || '');
+      const tk = pairs(l);
+      const amts = tk.length ? null : (args.amounts || args.min_amounts || null);
       rows.push(Object.assign({}, base, { id: rc.receipt_id + ':' + ai, pool: +args.pool_id, kind: 'remove', who,
-        ta: '', aa: '', tb: '', ab: '', extra: JSON.stringify({ shares: sh, tokens: pairs(l) }) }));
+        ta: '', aa: '', tb: '', ab: '', extra: JSON.stringify({ shares: sh, tokens: tk, amounts: amts, atLeast: !tk.length && !args.amounts }) }));
     }
   });
   return rows.filter((r) => Number.isInteger(r.pool) && r.pool >= 0);
 }
 
 // ---- the chain -------------------------------------------------------------------------------------
-// The pools a block changed, from Rhea's storage: keys of 9 bytes, 0x00 then a little-endian u64 pool id.
-async function poolsChanged(h) {
-  const r = await rpc('EXPERIMENTAL_changes', { block_id: h, changes_type: 'data_changes', account_ids: [REF], key_prefix_base64: 'AA==' });
-  if (!r) return [];
-  const ids = {};
-  for (const c of r.changes || []) {
+// What a block did to Rhea's storage: the pools it changed (key 0x00 + LE u64 pool id) and whether any LP's share
+// balance moved (key 0x02 + LE u32 pool id + borsh account; Rhea's own fee account excepted).
+const REF_BYTES = new TextEncoder().encode(REF);
+export async function storageTouched(h) {
+  const r = await rpc('EXPERIMENTAL_changes', { block_id: h, changes_type: 'data_changes', account_ids: [REF], key_prefix_base64: '' });
+  const pools = {}; let lp = false;
+  for (const c of (r && r.changes) || []) {
     const k = Uint8Array.from(atob((c.change && c.change.key_base64) || ''), (x) => x.charCodeAt(0));
-    if (k.length !== 9 || k[0] !== 0) continue;
-    let id = 0; for (let b = 8; b >= 1; b--) id = id * 256 + k[b];
-    ids[id] = 1;
+    if (k.length === 9 && k[0] === 0) { let id = 0; for (let b = 8; b >= 1; b--) id = id * 256 + k[b]; pools[id] = 1; continue; }
+    if (k[0] === 2 && k.length > 9) {
+      const n = k[5] | (k[6] << 8) | (k[7] << 16) | (k[8] << 24);
+      const acct = k.slice(9, 9 + n);
+      const isRef = acct.length === REF_BYTES.length && acct.every((x, i) => x === REF_BYTES[i]);
+      if (!isRef) lp = true;
+    }
   }
-  return Object.keys(ids).map(Number);
+  return { pools: Object.keys(pools).map(Number), lp };
+}
+// How many tokens a pool holds, asked once per pool per isolate.
+const NTOK = new Map();
+export async function tokenCount(id) {
+  if (NTOK.has(id)) return NTOK.get(id);
+  const p = await rpc('query', { request_type: 'call_function', finality: 'final', account_id: REF, method_name: 'get_pool',
+    args_base64: btoa(JSON.stringify({ pool_id: id })) }).catch(() => null);
+  let n = 2;
+  try { n = JSON.parse(new TextDecoder().decode(new Uint8Array(p.result))).token_account_ids.length; } catch (e) {}
+  NTOK.set(id, n);
+  return n;
 }
 async function blockAt(h) {
   try { const b = await rpc('block', { block_id: h }); return b && b.header ? { h: b.header.height, ts: Math.floor(Number(b.header.timestamp_nanosec || b.header.timestamp) / 1e6) } : null; }
@@ -165,9 +192,12 @@ async function scan(hs, shard, t0, t1, deadline) {
   const why = {}; let hits = 0;
   const note = (e) => { const k = String((e && e.message) || e).slice(0, 60); why[k] = (why[k] || 0) + 1; };
   const per = await pmap(hs, async (h) => {
-    let touched;
-    try { touched = await poolsChanged(h); } catch (e) { note(e); return null; }
-    if (!touched.some((p) => !SKIP[p])) return [];
+    let st;
+    try { st = await storageTouched(h); } catch (e) { note(e); return null; }
+    if (!st.pools.length) return [];
+    let want = st.lp;
+    if (!want) for (const p of st.pools) { if ((await tokenCount(p)) > 2) { want = true; break; } }
+    if (!want) return [];
     hits++;
     // The outcomes are in this block's shard file: a pool's storage changes in the block whose chunk ran it.
     const rows = [];
