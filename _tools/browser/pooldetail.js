@@ -805,10 +805,11 @@
   // the ONLY source of deposits and withdrawals on NEAR, and of swaps in the pools GeckoTerminal does not track
   // (every 3- and 4-token stable pool). GeckoTerminal still supplies the swaps where it has them: its history
   // runs further back than ours yet.
-  // SWITCHED OFF ('') until the indexer has a block source that keeps up with the chain: from Cloudflare the free
-  // neardata.xyz allows ~28 reads a minute against ~100 blocks a minute, so its cron is paused and its rows would
-  // be stale. Set back to 'https://near-pool-indexer.usa282.workers.dev' when it runs again.
-  var IDX = '';
+  // '' switches this off (the page then falls back to GeckoTerminal alone and says what it cannot list). On since
+  // the indexer found a free source that keeps up: a storage-change call per block, the block's logs only where a
+  // pool changed. Pool 6065's deposits/withdrawals are not indexed (see SKIP in the Worker); its swaps come from
+  // GeckoTerminal.
+  var IDX = 'https://near-pool-indexer.usa282.workers.dev';
   var TXI = { rows: null, from: null, failed: false };
   function tokName(id) {
     var p = window.__lxnPool, t = p && p.tokens.filter(function (x) { return x.i === id; })[0];
