@@ -99,6 +99,8 @@ function setDesc(html, desc) {
 // mid-flow steps. Writes the exact value in BOTH directions, so a page moving in or out is corrected.
 const NOINDEX = new Set([
   'lumoscore-home', 'lumoscore-wallet',
+  // Someone else's wallet: platform-wide privacy call (RAZA, 2026-10-31), same as Stellar and XRPL.
+  'lumoscore-account',
   'lumoscore-signin', 'lumoscore-launch-review', 'lumoscore-launch-confirm',
 ]);
 
