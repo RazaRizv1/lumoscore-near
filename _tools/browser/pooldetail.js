@@ -822,7 +822,11 @@
         }).filter(Boolean);
         TX.err = false;
         renderTx();
-      }, function () {
+      }, function (e) {
+        // A 404 IS AN ANSWER, NOT A HICCUP (RAZA 2026-10-30: "why aren't pool trxs loading for such pools?").
+        // GeckoTerminal does not track Rhea's 3- and 4-token stable pools at all; retrying for 48 seconds and
+        // then saying "could not be loaded" told the reader to try again for something that will never come.
+        if (String(e && e.message) === '404') { TX.err = 'untracked'; renderTx(); return; }
         if (at < 3) { at++; setTimeout(go, [3000, 15000, 30000][at - 1]); return; }
         TX.err = true; renderTx();
       });
@@ -833,6 +837,7 @@
     if (TX.filter === 'deposit' || TX.filter === 'withdraw') {
       return 'Deposits and withdrawals are not published for NEAR pools — Rhea’s activity index stopped in December 2024. Only swaps are listed.';
     }
+    if (TX.err === 'untracked') return 'This pool’s swaps are not published by any feed LumosCore reads (GeckoTerminal does not track it, and Rhea’s activity index stopped in December 2024), so they cannot be listed here yet.';
     if (TX.err) return 'Recent swaps could not be loaded right now. Reload to try again.';
     if (!TX.rows) return 'Reading this pool’s recent swaps…';
     return 'No swaps in this pool recently.';
@@ -971,10 +976,13 @@
       var share = (supply !== '0') ? Number(BigInt(mine) * BigInt(1000000000) / BigInt(supply)) / 1e9 : 0;
       p.myShares = mine; p.supply = supply; p.decs = decs;
       p.reserves = (pool.amounts || []).map(function (x, k) { return scaled(x, decs[k]); });
-      var amts = bothPos('asset-amt');
-      [0, 1].forEach(function (k) { if (amts[k]) amts[k].textContent = share > 0 ? num(p.reserves[k] * share, 6) : '0'; });
-      bothPos('asset-name').forEach(function (n, i) { n.textContent = (i % 2 === 0) ? p.a.name : p.b.name; });
       paintPositionIdentity();
+      posRows().forEach(function (rows) {
+        rows.forEach(function (row, k) {
+          var amtEl = row.querySelector('.mp-asset-amt, .mpm-asset-amt');
+          if (amtEl && p.reserves[k] != null) amtEl.textContent = share > 0 ? num(p.reserves[k] * share, 6) : '0';
+        });
+      });
       var fees = bothPos('fee-val');
       if (fees[0]) fees[0].textContent = '—';                         // Rhea keeps no per-LP fee record
       if (fees[1]) fees[1].textContent = share > 0 ? num(scaled(mine, 24), 6) : '0';
@@ -988,7 +996,7 @@
       holdDw();
     }, function () {});
     // Balances: the wNEAR side shows NEAR, which a deposit wraps.
-    p.tokens.slice(0, 2).forEach(function (t, k) {
+    p.tokens.forEach(function (t, k) {
       var q = t.i === 'wrap.near'
         ? nativeBal(me).then(function (raw) { return scaled(raw, 24); })
         : Promise.all([nview(t.i, 'ft_balance_of', { account_id: me }), decOf(t.i)]).then(function (x) { return scaled(x[0], x[1]); });
@@ -1153,17 +1161,35 @@
   // THE POSITION PANEL'S TWO ASSETS, WHATEVER THE CONNECTION. The design ships LUMOS and APT marks and
   // names there (RAZA 2026-09-15: "why's it showing APTOS logo"), and only a connected wallet's position
   // ever repainted the names — never the marks.
+  // ONE ROW PER TOKEN in each position panel (desktop .mp-asset, phone .mpm-asset): the design has two, so a
+  // 3- or 4-token pool gets the last one cloned for each token after it.
+  function posRows() {
+    var p = window.__lxnPool, out = [];
+    if (!p) return out;
+    ['.my-position .mp-asset', '.my-position-m .mpm-asset'].forEach(function (sel) {
+      var rows = $$(sel);
+      if (!rows.length) return;
+      while (rows.length < p.tokens.length) {
+        var c = rows[rows.length - 1].cloneNode(true);
+        c.setAttribute('data-lxextra', '1');
+        rows[rows.length - 1].parentNode.insertBefore(c, rows[rows.length - 1].nextSibling);
+        rows = $$(sel);
+      }
+      out.push(rows.slice(0, p.tokens.length));
+    });
+    return out;
+  }
   function paintPositionIdentity() {
     var p = window.__lxnPool;
     if (!p) return;
-    $$('.my-position .mp-asset, .my-position-m .mpm-asset').forEach(function (row, i) {
-      var s = (i % 2 === 0) ? p.a : p.b;
+    posRows().forEach(function (rows) { rows.forEach(function (row, i) {
+      var s = p.tokens[i];
       tokImg(row.querySelector('.mp-asset-ico, .mpm-asset-ico'), s);
       var nm = row.querySelector('.mp-asset-name, .mpm-asset-name');
       if (nm) { nm.setAttribute('data-logoed', '1'); nm.textContent = s.name; }
       var amtEl = row.querySelector('.mp-asset-amt, .mpm-asset-amt');
       if (amtEl) amtEl.textContent = '—';            // not read on NEAR yet
-    });
+    }); });
     bothPos('fee-val').forEach(function (v) { v.textContent = '—'; });
   }
 
@@ -1207,8 +1233,21 @@
     // THE ASSET ROWS WERE HIDDEN, NOT MISSING (RAZA 2026-09-15: "Logos are missing"). The inherited sheet
     // hides `.dw-field .row .asset:not([data-lxpair])` until a data layer vouches for it; Stellar's sets
     // data-lxpair and puts the token's own image in `.ico`. Both are done here.
-    var fields = $$('#dwDeposit .dw-field');
-    [p.a, p.b].forEach(function (s, i) {
+    // ONE FIELD PER TOKEN (RAZA 2026-10-30: "how can we enable deposit and withdrawal for such pools on
+    // LumosCore"). The design has two; a 3- or 4-token stable pool gets the second cloned, with its "+"
+    // divider, for each token after it. Rhea's add_stable_liquidity and remove_liquidity take any count.
+    var depBox = $('#dwDeposit'), fields = $$('#dwDeposit .dw-field');
+    while (depBox && fields.length >= 2 && fields.length < p.tokens.length) {
+      var plus = depBox.querySelector('.dw-plus');
+      var f2 = fields[fields.length - 1].cloneNode(true);
+      f2.setAttribute('data-lxextra', '1');
+      var fin = f2.querySelector('input'); if (fin) fin.value = '';
+      var bal2 = f2.querySelector('.balance'); if (bal2) bal2.textContent = 'Balance: —';
+      if (plus) depBox.appendChild(plus.cloneNode(true));
+      depBox.appendChild(f2);
+      fields = $$('#dwDeposit .dw-field');
+    }
+    p.tokens.forEach(function (s, i) {
       var f = fields[i];
       if (!f) return;
       var asset = f.querySelector('.asset');
@@ -1235,7 +1274,13 @@
     var recv = $$('#dwWithdraw .dw-field')[1];
     if (recv) {
       var rows = recv.querySelectorAll('.row');
-      [p.a, p.b].forEach(function (s, i) {
+      while (rows.length && rows.length < p.tokens.length) {
+        var rc = rows[rows.length - 1].cloneNode(true);
+        rc.setAttribute('data-lxextra', '1');
+        rows[rows.length - 1].parentNode.insertBefore(rc, rows[rows.length - 1].nextSibling);
+        rows = recv.querySelectorAll('.row');
+      }
+      p.tokens.forEach(function (s, i) {
         if (!rows[i]) return;
         var as = rows[i].querySelector('.asset');
         if (!as) return;
@@ -1268,11 +1313,8 @@
   }
 
   function dwInputs() {
-    return {
-      a: $('#dwDeposit .dw-field:nth-of-type(1) input') || $$('#dwDeposit input')[0],
-      b: $$('#dwDeposit input')[1],
-      lp: $('#dwWithdraw input')
-    };
+    var dep = $$('#dwDeposit .dw-field input');
+    return { a: dep[0], b: dep[1], dep: dep, lp: $('#dwWithdraw input') };
   }
 
   // ---- Deposit / Withdraw ---------------------------------------------------------------------------------
@@ -1327,7 +1369,12 @@
   function fcall(m, args, tgas, dep) { return { type: 'FunctionCall', params: { methodName: m, args: args, gas: String(tgas) + '000000000000', deposit: String(dep) } }; }
   function less(raw, bps) { return (bigI(raw) * BigInt(10000 - bps) / BigInt(10000)).toString(); }
   var DW_KINDS = { SIMPLE_POOL: 1, STABLE_SWAP: 1, RATED_SWAP: 1, DEGEN_SWAP: 1 };
-  function canDw() { var p = window.__lxnPool; return !!(p && DW_KINDS[p.kind] && p.tokens && p.tokens.length === 2); }
+  // Any number of tokens on a curve pool; a classic pool is always two.
+  function canDw() {
+    var p = window.__lxnPool;
+    if (!p || !DW_KINDS[p.kind] || !p.tokens || p.tokens.length < 2) return false;
+    return p.kind !== 'SIMPLE_POOL' || p.tokens.length === 2;
+  }
   function stableKind() { var p = window.__lxnPool; return !!(p && p.kind !== 'SIMPLE_POOL'); }
   // The pool as Rhea holds it, in raw units and in its own token order.
   function poolRaw() {
@@ -1421,22 +1468,32 @@
 
   // ---- the form: amounts, ratio, previews ----
   function inVal(i) { return i ? String(i.value || '').replace(/,/g, '') : ''; }
+  // The other fields follow the one typed in, in the pool's own proportion (a balanced deposit), for any count.
   function syncRatio(from) {
     var p = window.__lxnPool, i = dwInputs();
-    if (!p || !i.a || !i.b) return;
+    var k0 = from === 'a' ? 0 : from === 'b' ? 1 : +from;
+    if (!p || !i.dep[k0] || !p.tokens[k0]) return;
     poolRaw().then(function (R) {
-      var ka = R.ids.indexOf(p.a.i), kb = R.ids.indexOf(p.b.i);
-      var ra = bigI(R.amounts[ka]), rb = bigI(R.amounts[kb]), da = R.decs[p.a.i], db = R.decs[p.b.i];
-      if (!(ra > BigInt(0)) || !(rb > BigInt(0))) return;
-      if (from === 'a') {
-        var xa = toRaw(inVal(i.a), da);
-        i.b.value = xa && xa !== '0' ? fromRaw((bigI(xa) * rb / ra).toString(), db, 6) : '';
-      } else {
-        var xb = toRaw(inVal(i.b), db);
-        i.a.value = xb && xb !== '0' ? fromRaw((bigI(xb) * ra / rb).toString(), da, 6) : '';
-      }
+      var t0 = p.tokens[k0], r0 = bigI(R.amounts[R.ids.indexOf(t0.i)]);
+      if (!(r0 > BigInt(0))) return;
+      var x0 = toRaw(inVal(i.dep[k0]), R.decs[t0.i]);
+      p.tokens.forEach(function (t, k) {
+        if (k === k0 || !i.dep[k]) return;
+        var rk = bigI(R.amounts[R.ids.indexOf(t.i)]);
+        i.dep[k].value = x0 && x0 !== '0' ? fromRaw((bigI(x0) * rk / r0).toString(), R.decs[t.i], 6) : '';
+      });
       previewDeposit(R);
     }, function () {});
+  }
+  // Every field's amount in raw units, keyed by token id; null when one is empty or zero.
+  function depAmounts(R) {
+    var p = window.__lxnPool, ins = dwInputs().dep, amt = {}, ok = true;
+    p.tokens.forEach(function (t, k) {
+      var x = toRaw(inVal(ins[k]), R.decs[t.i]);
+      if (!x || x === '0') ok = false;
+      amt[t.i] = x;
+    });
+    return ok ? amt : null;
   }
   function previewDeposit(R) {
     var p = window.__lxnPool, i = dwInputs();
@@ -1445,9 +1502,9 @@
     var ra = bigI(R.amounts[ka]), sup = bigI(R.supply), mine = bigI(p.myShares || '0');
     if (!xa || xa === '0' || !(ra > BigInt(0)) || !(sup > BigInt(0))) { setSummary('pool share', '—'); return; }
     if (stableKind()) {
-      var xb = toRaw(inVal(i.b), R.decs[p.b.i]);
-      if (!xb || xb === '0') { setSummary('pool share', '—'); return; }
-      var amts = R.ids.map(function (t) { return t === p.a.i ? xa : xb; });
+      var all = depAmounts(R);
+      if (!all) { setSummary('pool share', '—'); return; }
+      var amts = R.ids.map(function (t) { return all[t]; });
       nview(REF, 'predict_add_stable_liquidity', { pool_id: +p.id, amounts: amts }).then(function (got) {
         var m2 = bigI(got);
         var af = Number((mine + m2) * BigInt(1000000) / (sup + m2)) / 1e4;
@@ -1465,7 +1522,7 @@
     poolRaw().then(function (R) {
       var sh = toRaw(inVal(i.lp), 24), sup = bigI(R.supply);
       var recv = $$('#dwWithdraw .dw-field')[1], rows = recv ? recv.querySelectorAll('.row') : [];
-      [p.a, p.b].forEach(function (t, k) {
+      p.tokens.forEach(function (t, k) {
         var out = rows[k] && recvOut(rows[k]);
         if (!out) return;
         var amt = (sh && sup > BigInt(0)) ? (bigI(R.amounts[R.ids.indexOf(t.i)]) * bigI(sh) / sup).toString() : '0';
@@ -1511,12 +1568,9 @@
     var p = window.__lxnPool, me = addr(), i = dwInputs();
     return Promise.all([poolRaw(), nativeBal(me)]).then(function (r0) {
       var R = r0[0], nearHave = bigI(r0[1]);
-      var ka = R.ids.indexOf(p.a.i), kb = R.ids.indexOf(p.b.i);
-      if (ka < 0 || kb < 0) throw new Error('This pool’s tokens could not be matched.');
-      var amt = {};
-      amt[p.a.i] = toRaw(inVal(i.a), R.decs[p.a.i]);
-      amt[p.b.i] = toRaw(inVal(i.b), R.decs[p.b.i]);
-      if (!amt[p.a.i] || amt[p.a.i] === '0' || !amt[p.b.i] || amt[p.b.i] === '0') throw new Error('Enter an amount to deposit.');
+      if (p.tokens.some(function (t) { return R.ids.indexOf(t.i) < 0; })) throw new Error('This pool’s tokens could not be matched.');
+      var amt = depAmounts(R);
+      if (!amt) throw new Error('Enter an amount to deposit.');
       var amounts0 = R.ids.map(function (t) { return amt[t]; });
       return Promise.all([refState(me, R.ids), Promise.all(R.ids.map(function (t) {
         return t === WNEAR ? Promise.resolve(null) : nview(t, 'ft_balance_of', { account_id: me });
@@ -1540,7 +1594,7 @@
             txs.push({ receiverId: WNEAR, actions: w });
           } else {
             if (bigI(bals[k]) < send) {
-              var tk = t === p.a.i ? p.a : p.b;
+              var tk = p.tokens.filter(function (x) { return x.i === t; })[0] || { name: t };
               throw new Error('Insufficient ' + tk.name + ' balance — you have ' + fromRaw(bals[k], R.decs[t], 6));
             }
             txs.push({ receiverId: t, actions: [fcall('ft_transfer_call', { receiver_id: REF, amount: send.toString(), msg: '' }, 100, '1')] });
@@ -1636,7 +1690,7 @@
     job.then(function () {
       DW.busy = false;
       var i = dwInputs();
-      [i.a, i.b, i.lp].forEach(function (x) { if (x) { x.value = ''; x.__lxnAll = false; } });
+      i.dep.concat([i.lp]).forEach(function (x) { if (x) { x.value = ''; x.__lxnAll = false; } });
       var p = window.__lxnPool;
       if (p) p.rawP = null;
       if (sweeping) { DW.sweep = null; dwSay(''); dwToast('Tokens withdrawn to your wallet'); }
@@ -1668,22 +1722,28 @@
       });
     });
     var i = dwInputs();
-    if (i.a) i.a.addEventListener('input', function () { syncRatio('a'); });
-    if (i.b) i.b.addEventListener('input', function () { syncRatio('b'); });
-    if (i.lp) i.lp.addEventListener('input', function () { i.lp.__lxnAll = false; previewWithdraw(); });
-    $$('#dwDeposit .max-btn').forEach(function (btn, k) {
-      btn.addEventListener('click', function (e) {
+    // Delegated: a 3- or 4-token pool's extra fields are cloned after this runs.
+    var depHost = $('#dwDeposit');
+    if (depHost) {
+      depHost.addEventListener('input', function (e) {
+        var k = dwInputs().dep.indexOf(e.target);
+        if (k >= 0) syncRatio(k);
+      });
+      depHost.addEventListener('click', function (e) {
+        var btn = e.target && e.target.closest && e.target.closest('.max-btn');
+        if (!btn) return;
         e.preventDefault();
         var p = window.__lxnPool, ii = dwInputs();
         if (!p || !canDw()) return;
-        var t = k === 0 ? p.a : p.b, v = p['bal' + k];
-        if (v == null) return;
+        var k = $$('#dwDeposit .max-btn').indexOf(btn), t = p.tokens[k], v = p['bal' + k];
+        if (!t || v == null || !ii.dep[k]) return;
         // The NEAR side keeps 0.25 back: 0.2 for gas and room for the deposit's own storage.
         if (t.i === WNEAR) v = Math.max(0, v - 0.25);
-        (k === 0 ? ii.a : ii.b).value = String(Math.floor(v * 1e6) / 1e6);
-        syncRatio(k === 0 ? 'a' : 'b');
+        ii.dep[k].value = String(Math.floor(v * 1e6) / 1e6);
+        syncRatio(k);
       }, true);
-    });
+    }
+    if (i.lp) i.lp.addEventListener('input', function () { i.lp.__lxnAll = false; previewWithdraw(); });
     $$('#dwWithdraw .dw-pct-b').forEach(function (btn) {
       btn.addEventListener('click', function (e) {
         e.preventDefault();
