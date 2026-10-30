@@ -429,9 +429,12 @@
         return 'Only the first step went through: your account is now registered for ' + code + ' (a one-time deposit). '
           + 'The swap itself did not go through — check your wallet activity, then press Swap again: it is one transaction now.';
       }
-      if (/reject|denied|cancel|declin/i.test(m) && registered !== null) return 'The swap was not approved, so nothing was swapped.';
-      if (/reject|denied|cancel|declin/i.test(m) && !reg1) return 'The swap was not approved, so nothing was swapped.';
-      return (m ? 'The wallet stopped: ' + m.slice(0, 160).replace(/\.$/, '') + '. ' : 'The swap could not be completed. ')
+      // THE WALLET'S OWN WORDS, ALWAYS (RAZA's second HOT attempt, 2026-10-30: approved, nothing reached the
+      // chain, and the page said "not approved" -- HOT's error carried one of those words for a refusal of its
+      // own). Which it was is only in that text, so it is shown rather than paraphrased.
+      var words = m ? m.replace(/\s+/g, ' ').slice(0, 180).replace(/\.$/, '') : '';
+      if (/reject|denied|cancel|declin/i.test(m)) return 'Nothing was swapped. The wallet said: "' + words + '".';
+      return (words ? 'The wallet stopped: "' + words + '". ' : 'The swap could not be completed. ')
         + 'Check your wallet activity before trying again.';
     });
   }
