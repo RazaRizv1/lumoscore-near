@@ -682,6 +682,7 @@
     sw.busy = true;
     swapSay('');
     setGo(false, 'Checking the route…');
+    window.__lxnLastSwap = null;
     function stop(text, note) { sw.busy = false; setGo(!!sw.quote, 'Swap'); if (text) swapSay(text, note); }
     // The quote on screen may be seconds old: ask again, and refuse if the price moved past the floor
     // that was shown. Nothing is signed in that case.
@@ -720,7 +721,9 @@
       loadAccount(true).then(function () { paintSwap(); });
     }).catch(function (e) {
       var msg = (e && e.message) || '';
-      stop(/reject|denied|cancel|closed/i.test(msg) ? 'The swap was not approved, so nothing was swapped.' : (msg || 'The swap could not be completed.'));
+      // After signing, the engine asks the chain what the wallet's error left behind (browser/nearswap.js).
+      var signed = !!window.__lxnLastSwap && !(e && e.requote);
+      (signed ? S().afterError(e) : Promise.resolve(msg || 'The swap could not be completed.')).then(function (tx) { stop(tx); });
       if (e && e.requote) setTimeout(quoteSwap, 50);
     });
   }

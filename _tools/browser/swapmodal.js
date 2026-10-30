@@ -451,6 +451,7 @@
     busy = true;
     say('');
     label(P, 'Checking the route…', false);
+    window.__lxnLastSwap = null;
     function stop(text, tone) { busy = false; setCta(P); if (text) say(text, tone || 'bad'); }
     // The quote on screen may be seconds old: ask again, and refuse if the price moved past the floor shown.
     S().quote(shown.from, shown.to, shown.amount).then(function (fresh) {
@@ -487,7 +488,9 @@
       refreshFrom();
     }).catch(function (e) {
       var msg = (e && e.message) || '';
-      stop(/reject|denied|cancel|closed/i.test(msg) ? 'The swap was not approved, so nothing was swapped.' : (msg || 'The swap could not be completed.'));
+      // After signing, the engine asks the chain what the wallet's error left behind (browser/nearswap.js).
+      var signed = !!window.__lxnLastSwap && !(e && e.requote);
+      (signed ? S().afterError(e) : Promise.resolve(msg || 'The swap could not be completed.')).then(function (tx) { stop(tx); });
       if (e && e.requote) setTimeout(doQuote, 50);
     });
   }

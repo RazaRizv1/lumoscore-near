@@ -267,6 +267,7 @@
     busy = true;
     say(p, '');
     if (b) b.textContent = 'Checking the route…';
+    window.__lxnLastSwap = null;
     function stop(text) { busy = false; setCta(p); if (text) say(p, text); }
     // The quote on screen may be seconds old: ask again, and refuse if the price has moved past the floor
     // the user was shown.
@@ -304,8 +305,11 @@
       clearQuote(p);
       loadBal(p);
     }).catch(function (e) {
+      // Before signing (a moved price, a short balance) the message is ours and exact; after it, the engine
+      // asks the chain what the wallet's error actually left behind.
+      var signed = !!window.__lxnLastSwap && !(e && e.requote);
       var m = (e && e.message) || '';
-      stop(/reject|denied|cancel|closed/i.test(m) ? 'The swap was not approved, so nothing was swapped.' : (m || 'The swap could not be completed.'));
+      (signed ? S().afterError(e) : Promise.resolve(m || 'The swap could not be completed.')).then(function (t) { stop(t); loadBal(p); });
       if (e && e.requote) setTimeout(requote, 50);
     });
   }

@@ -389,7 +389,9 @@
 
   // Sign through NEAR Connect. One transaction -> signAndSendTransaction; registration + swap ->
   // signAndSendTransactions (all five pinned launch wallets list it in their manifest features).
+  var LASTSIGN = null;
   function sign(b) {
+    LASTSIGN = { me: b && b.txs && b.txs[0] && b.txs[0].signerId, b: b };
     if (!window.lxn || typeof window.lxn.wallet !== 'function') return Promise.reject(new Error('Connect a NEAR wallet first.'));
     return window.lxn.wallet().then(function (w) {
       if (!w) throw new Error('No NEAR wallet is connected.');
@@ -401,6 +403,36 @@
       return w.signAndSendTransactions({ signerId: b.txs[0].signerId, transactions: b.txs.map(function (t) {
         return { receiverId: t.receiverId, actions: t.actions };
       }) });
+    });
+  }
+
+  // WHAT A WALLET ERROR ACTUALLY MEANT (RAZA 2026-10-30, a real NEAR -> USDC swap from HOT: approved, then "The
+  // swap was not approved, so nothing was swapped"). It was approved: the first of the two transactions -- the
+  // one-time USDC registration -- landed on chain, and the wallet stopped before the swap. The message came from
+  // matching words like "closed" in the error, which says nothing about what reached the chain.
+  //
+  // So every swap screen hands the error here. When the swap began with a registration, the chain is asked
+  // whether that registration now exists; if it does, the person is told exactly that. "Not approved" is said
+  // only when the wallet said so AND nothing landed. Anything else shows the wallet's own words. The raw error
+  // is always kept (window.__lxnLastSwapErr, and the console), so the next report can be read, not guessed.
+  function afterError(e) {
+    var m = String((e && e.message) || e || '');
+    window.__lxnLastSwapErr = m;
+    try { console.warn('[LumosCore swap] wallet error:', e); } catch (x) {}
+    var L = LASTSIGN; LASTSIGN = null;
+    var reg1 = !!(L && L.b && L.b.needOut && L.b.txs && L.b.txs.length > 1);
+    var outC = reg1 ? L.b.txs[0].receiverId : '';
+    var check = reg1 ? storageOf(outC, L.me).then(function (s) { return !!s; }, function () { return null; }) : Promise.resolve(null);
+    return check.then(function (registered) {
+      if (registered === true) {
+        var code = (META[outC] && META[outC].code) || 'the token you are buying';
+        return 'Only the first step went through: your account is now registered for ' + code + ' (a one-time deposit). '
+          + 'The swap itself did not go through — check your wallet activity, then press Swap again: it is one transaction now.';
+      }
+      if (/reject|denied|cancel|declin/i.test(m) && registered !== null) return 'The swap was not approved, so nothing was swapped.';
+      if (/reject|denied|cancel|declin/i.test(m) && !reg1) return 'The swap was not approved, so nothing was swapped.';
+      return (m ? 'The wallet stopped: ' + m.slice(0, 160).replace(/\.$/, '') + '. ' : 'The swap could not be completed. ')
+        + 'Check your wallet activity before trying again.';
     });
   }
 
@@ -431,6 +463,6 @@
     toUnits: toUnits, fromUnits: fromUnits, toNum: toNum, big: big,
     tokenInfo: tokenInfo, remember: remember, meta: function (id) { return META[id] || null; },
     pools: pools, quote: quote, along: along, balance: balance, maxSpend: maxSpend,
-    build: build, sign: sign, verdict: verdict, txHash: txHash, callView: callView
+    build: build, sign: sign, verdict: verdict, txHash: txHash, callView: callView, afterError: afterError
   };
 })();
