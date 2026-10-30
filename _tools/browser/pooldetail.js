@@ -255,7 +255,7 @@
   // Rhea's per-pool list stopped updating on 2026-02-02 -- and reads each account's shares (held + staked in
   // Rhea's farm) against the pool's current total. Someone who joined since February and never staked cannot
   // be seen, so the panel says "largest known", not "all". Drawn in the design's .part-row shape (XRPL's port).
-  var PART = { rows: [], page: 1, per: 17, at: 0 };
+  var PART = { rows: [], page: 1, per: 20, at: 0 };
   if (!window.__lxnPoolAcctNav) {
     window.__lxnPoolAcctNav = 1;
     window.addEventListener('click', function (e) {
@@ -267,7 +267,7 @@
     }, true);
   }
   function loadParticipants(id) {
-    PART = { rows: [], page: 1, per: 17, at: 0 };
+    PART = { rows: [], page: 1, per: 20, at: 0 };
     participants('Reading the liquidity providers…');
     fetch('/lxapi/nearlps?pool=' + encodeURIComponent(id)).then(function (r) { return r.json(); }).then(function (d) {
       if (!d || !d.ok) { emptyParticipants('Could not read the liquidity providers — try again shortly.'); return; }
@@ -290,23 +290,15 @@
         row.appendChild(av);
         row.appendChild(el('div', 'wallet', short(h.a)));
         var share = +h.pct || 0;
-        row.appendChild(el('div', 'share', (share > 0 && share < 0.01 ? '<0.01' : share.toFixed(2)) + '%'));
-        var bar = el('div', 'share-bar'), fill = el('div', 'fill');
-        fill.style.width = Math.max(2, Math.min(100, share)) + '%';
-        bar.appendChild(fill);
-        row.appendChild(bar);
+        // Stellar's row: the share stands at the right on its own, no bar.
+        var sh = el('div', 'share', (share > 0 && share < 0.01 ? '<0.01' : share.toFixed(2)) + '%');
+        sh.style.cssText = 'margin-left:auto;font-weight:800;color:var(--text)';
+        row.appendChild(sh);
         row.title = h.a + (h.staked && h.staked !== '0' ? ' (includes shares staked in Rhea farms)' : '');
         row.setAttribute('data-lxacct', h.a);
         row.style.cursor = 'pointer';
         host.appendChild(row);
       });
-      // Said once, under the last page: what the list is and when the chain was read.
-      if (PART.page * PART.per >= PART.rows.length) {
-        var when = PART.at ? new Date(PART.at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) : '';
-        var note = el('div', 'acc-empty lx-partrow', 'Largest known providers — shares read from the chain' + (when ? ' at ' + when : '') + '.');
-        note.style.cssText = 'padding:12px 8px 6px;text-align:center;opacity:.6;font-size:12px';
-        host.appendChild(note);
-      }
       var card = host.closest('.side-card, .card');
       if (!card) return;
       var pill = card.querySelector('.count-pill');
@@ -315,7 +307,22 @@
       if (!foot) return;
       foot.classList.add('lx-partfoot');
       var info = foot.firstElementChild;
-      if (info) info.textContent = 'Viewing ' + (from + 1) + ' – ' + (from + slice.length) + ' of ' + PART.rows.length + ' largest';
+      // "largest known", and when the chain was read, on hover: the list is the largest accounts Rhea has
+      // recorded, every share read from the chain (see /lxapi/nearlps).
+      if (info) {
+        info.textContent = 'Viewing ' + (from + 1) + '–' + (from + slice.length) + ' of ' + PART.rows.length + ' largest known';
+        info.title = 'Shares read from the chain' + (PART.at ? ' at ' + new Date(PART.at).toLocaleString() : '');
+      }
+      var navEl = foot.querySelector('.nav'), chip = navEl && navEl.querySelector('.lx-pppg');
+      var pagesP = Math.max(1, Math.ceil(PART.rows.length / PART.per));
+      if (navEl && !chip) {
+        chip = el('span', 'lx-pppg');
+        chip.setAttribute('data-logoed', '1');
+        chip.style.cssText = 'margin:0 8px;color:var(--text-soft);font-size:13px;align-self:center';
+        var nbs = navEl.querySelectorAll('button');
+        navEl.insertBefore(chip, nbs[1] || null);
+      }
+      if (chip) chip.textContent = 'Page ' + PART.page + ' of ' + pagesP;
       var nb = foot.querySelectorAll('.nav button');
       if (nb[0] && !nb[0].__lxn) {
         nb[0].__lxn = 1;
@@ -768,7 +775,9 @@
 
   // ---- Pool Transactions: swaps -----------------------------------------------------------------------------
   var TX = { rows: null, err: false, filter: 'all', page: 1, ext: '' };
-  var TX_PER = 15, ACCT_RE = /^[a-z0-9._-]{2,64}$/;
+  // TWENTY A PAGE, with Stellar's "Page X of Y" between the buttons (RAZA 2026-10-30: "On Stellar, it shows 20
+  // transactions on Pools-pool page ... please compare with Stellar"). _ammdata.js: TXPP 20, .lx-txpg chip.
+  var TX_PER = 20, ACCT_RE = /^[a-z0-9._-]{2,64}$/;
   function txAmt(v) { return v >= 1000 ? num(v, 2) : num(v, 6); }
   function loadTx() {
     var p = window.__lxnPool;
@@ -864,10 +873,18 @@
       var foot = card.querySelector('.tx-foot');
       if (foot) {
         if (foot.firstElementChild) foot.firstElementChild.textContent = list.length
-          ? ('Showing ' + (from + 1) + '–' + (from + slice.length) + ' of ' + list.length + ' recent swaps') : 'Showing 0 transactions';
+          ? ('Showing ' + (from + 1) + '–' + (from + slice.length) + ' of ' + list.length.toLocaleString('en-US') + ' transactions') : 'Showing 0 transactions';
         var nb = foot.querySelectorAll('.controls button');
         if (nb[0]) nb[0].disabled = TX.page <= 1;
         if (nb[1]) nb[1].disabled = TX.page >= pages;
+        var ctr = foot.querySelector('.controls'), ind = ctr && ctr.querySelector('.lx-txpg');
+        if (ctr && !ind) {
+          ind = el('span', 'lx-txpg');
+          ind.setAttribute('data-logoed', '1');
+          ind.style.cssText = 'margin:0 12px;color:var(--text-soft);font-size:13px';
+          ctr.insertBefore(ind, nb[1] || null);
+        }
+        if (ind) ind.textContent = 'Page ' + TX.page + ' of ' + pages;
       }
     }
     // The phone: the design's own .tx-item shape, the latest 20.
@@ -1238,8 +1255,18 @@
   }
 
   // ---- Deposit / Withdraw ---------------------------------------------------------------------------------
-  // RAZA 2026-10-30: "Yes, build Deposit and Withdraw for NEAR pools next." CLASSIC (SIMPLE_POOL) Rhea pools,
-  // which is what this page lists; a stable / rated pool says why it cannot take a deposit here.
+  // RAZA 2026-10-30: "Yes, build Deposit and Withdraw for NEAR pools next." Then, the same day, on a rated pool
+  // (rNEAR / wNEAR): "its showing 'Adding liquidity to this pool type is not supported here' ... Make it list what
+  // we have on Stellar and XRPL" -- where every listed pool takes a deposit. So every two-token Rhea pool does:
+  //   CLASSIC (SIMPLE_POOL)               add_liquidity({pool_id, amounts, min_amounts: 99.5%})
+  //   STABLE / RATED / DEGEN              add_stable_liquidity({pool_id, amounts, min_shares}), min_shares 99.5%
+  //                                       of Rhea's own predict_add_stable_liquidity -- these pools mint on their
+  //                                       curve, not the reserve ratio. 100 TGas, 0.01 NEAR: exactly what Rhea's
+  //                                       app sent for a degen pool on 2026-10-30 (tx ACBgAYtu…), with no rate
+  //                                       refresh beforehand (update_token_rate has no mainnet calls).
+  // The amounts are still entered in the pool's own proportion (a balanced deposit) on every kind. Withdraw is
+  // remove_liquidity on every kind: Rhea's predict_remove_liquidity on the rated pool returned the plain
+  // proportional figures. Pools of three or more tokens (the two-field form cannot express them) say so.
   //
   // DEPOSIT, the transactions the launchpad already signs on mainnet (browser/nearmint.js, pool 8978):
   //   Rhea      [storage_deposit for the shortfall], register_tokens(the pool's tokens not yet in the account)
@@ -1278,7 +1305,9 @@
   }
   function fcall(m, args, tgas, dep) { return { type: 'FunctionCall', params: { methodName: m, args: args, gas: String(tgas) + '000000000000', deposit: String(dep) } }; }
   function less(raw, bps) { return (bigI(raw) * BigInt(10000 - bps) / BigInt(10000)).toString(); }
-  function canDw() { var p = window.__lxnPool; return !!(p && p.kind === 'SIMPLE_POOL' && p.tokens && p.tokens.length === 2); }
+  var DW_KINDS = { SIMPLE_POOL: 1, STABLE_SWAP: 1, RATED_SWAP: 1, DEGEN_SWAP: 1 };
+  function canDw() { var p = window.__lxnPool; return !!(p && DW_KINDS[p.kind] && p.tokens && p.tokens.length === 2); }
+  function stableKind() { var p = window.__lxnPool; return !!(p && p.kind !== 'SIMPLE_POOL'); }
   // The pool as Rhea holds it, in raw units and in its own token order.
   function poolRaw() {
     var p = window.__lxnPool;
@@ -1312,7 +1341,7 @@
     dwSay(msg, 'good');
   }
 
-  var DW_OFF = { deposit: 'Adding liquidity to this pool type is not supported here', withdraw: 'Removing liquidity from this pool type is not supported here' };
+  var DW_OFF = { deposit: 'Pools of more than two tokens take deposits on Rhea', withdraw: 'Pools of more than two tokens are withdrawn on Rhea' };
   function dwMode() {
     var t = $('.dw-tabs button.active');
     return (t && t.getAttribute('data-dw')) === 'withdraw' ? 'withdraw' : 'deposit';
@@ -1394,6 +1423,17 @@
     var ka = R.ids.indexOf(p.a.i), xa = toRaw(inVal(i.a), R.decs[p.a.i]);
     var ra = bigI(R.amounts[ka]), sup = bigI(R.supply), mine = bigI(p.myShares || '0');
     if (!xa || xa === '0' || !(ra > BigInt(0)) || !(sup > BigInt(0))) { setSummary('pool share', '—'); return; }
+    if (stableKind()) {
+      var xb = toRaw(inVal(i.b), R.decs[p.b.i]);
+      if (!xb || xb === '0') { setSummary('pool share', '—'); return; }
+      var amts = R.ids.map(function (t) { return t === p.a.i ? xa : xb; });
+      nview(REF, 'predict_add_stable_liquidity', { pool_id: +p.id, amounts: amts }).then(function (got) {
+        var m2 = bigI(got);
+        var af = Number((mine + m2) * BigInt(1000000) / (sup + m2)) / 1e4;
+        setSummary('pool share', (af < 0.0001 ? '<0.0001' : af.toFixed(4)) + '%');
+      }, function () { setSummary('pool share', '—'); });
+      return;
+    }
     var minted = sup * bigI(xa) / ra;
     var after = Number((mine + minted) * BigInt(1000000) / (sup + minted)) / 1e4;
     setSummary('pool share', (after < 0.0001 ? '<0.0001' : after.toFixed(4)) + '%');
@@ -1456,10 +1496,13 @@
       amt[p.a.i] = toRaw(inVal(i.a), R.decs[p.a.i]);
       amt[p.b.i] = toRaw(inVal(i.b), R.decs[p.b.i]);
       if (!amt[p.a.i] || amt[p.a.i] === '0' || !amt[p.b.i] || amt[p.b.i] === '0') throw new Error('Enter an amount to deposit.');
+      var amounts0 = R.ids.map(function (t) { return amt[t]; });
       return Promise.all([refState(me, R.ids), Promise.all(R.ids.map(function (t) {
         return t === WNEAR ? Promise.resolve(null) : nview(t, 'ft_balance_of', { account_id: me });
-      })), storageOf(WNEAR, me)]).then(function (r) {
-        var st = r[0], bals = r[1], wrapReg = !!r[2];
+      })), storageOf(WNEAR, me),
+      stableKind() ? nview(REF, 'predict_add_stable_liquidity', { pool_id: +p.id, amounts: amounts0 }) : Promise.resolve(null)]).then(function (r) {
+        var st = r[0], bals = r[1], wrapReg = !!r[2], predicted = r[3];
+        if (stableKind() && !(bigI(predicted) > BigInt(0))) throw new Error('Rhea could not price this deposit. Nothing was sent.');
         var txs = [], needNear = BigInt(0), refActs = [];
         if (bigI(st.need) > BigInt(0)) { refActs.push(fcall('storage_deposit', { account_id: me, registration_only: false }, 30, st.need)); needNear += bigI(st.need); }
         if (st.fresh.length) refActs.push(fcall('register_tokens', { token_ids: st.fresh }, 30, '1'));
@@ -1482,8 +1525,12 @@
             txs.push({ receiverId: t, actions: [fcall('ft_transfer_call', { receiver_id: REF, amount: send.toString(), msg: '' }, 100, '1')] });
           }
         });
-        var amounts = R.ids.map(function (t) { return amt[t]; });
-        txs.push({ receiverId: REF, actions: [fcall('add_liquidity', { pool_id: +p.id, amounts: amounts, min_amounts: amounts.map(function (a) { return less(a, 50); }) }, 60, LIQ_DEPOSIT)] });
+        var amounts = amounts0;
+        if (stableKind()) {
+          txs.push({ receiverId: REF, actions: [fcall('add_stable_liquidity', { pool_id: +p.id, amounts: amounts, min_shares: less(predicted, 50) }, 100, LIQ_DEPOSIT)] });
+        } else {
+          txs.push({ receiverId: REF, actions: [fcall('add_liquidity', { pool_id: +p.id, amounts: amounts, min_amounts: amounts.map(function (a) { return less(a, 50); }) }, 60, LIQ_DEPOSIT)] });
+        }
         needNear += bigI(LIQ_DEPOSIT);
         if (nearHave < needNear + GAS_KEEP) {
           throw new Error('Not enough NEAR: this deposit needs ' + fromRaw(needNear.toString(), 24, 4) + ' NEAR plus 0.2 NEAR kept for gas. You have ' + fromRaw(nearHave.toString(), 24, 4) + ' NEAR.');
