@@ -11,9 +11,11 @@
 //   /lxapi/neartrades   the strip's network-wide Trades (DexScreener over Rhea's most-traded pools)
 //   /lxapi/nearmarket   the Trade box: listed tokens (Markets), main-pair volume and liquidity, NEAR/USD
 //   /lxapi/nearpools    the Pools box: curated Rhea pools, liquidity, 24h volume (figures in NEAR, x usd)
-// WHAT HAS NO NEAR SOURCE says so with the design's em dash: the Cross-chain and Launchpad boxes (no NEAR
-// bridge layer or launchpad in this build yet) and Platform Activity, which shows the design's own "No
-// platform activity yet." row -- LumosCore has no NEAR activity marker to read until NEAR writes exist.
+//   /lxapi/nearoneclick?op=tokens   the Cross-chain box (since 2026-10-30): destinations NEAR Intents
+//                       serves, and the NEAR tokens it takes plus those only Omni/Wormhole carry
+// WHAT HAS NO NEAR SOURCE says so with the design's em dash: the Launchpad box (no NEAR launchpad
+// deployed yet) and Platform Activity, which shows the design's own "No platform activity yet." row --
+// LumosCore has no NEAR activity marker to read until NEAR writes exist.
 (function () {
   if (window.__lxnDash) return;
   window.__lxnDash = 1;
@@ -126,6 +128,27 @@
     });
   }
 
+  // THE CROSS-CHAIN BOX, counted from what the bridge page offers (XRPL's rule: the card must not disagree
+  // with the page it links to). Networks: the chains NEAR Intents serves -- Omni's and Wormhole's are all
+  // among them. Assets: the NEAR tokens that can be SENT (XRPL's box names XRP, its one source), NEAR
+  // Intents' origins plus the Omni/Wormhole-only tokens from the same baked table the bridge uses.
+  var BR_IDS = __LX_BR_IDS__;
+  function crossChain() {
+    box('cvia', 'NEAR Intents · Omni · Wormhole');
+    j('/lxapi/nearoneclick?op=tokens').then(function (d) {
+      if (!d || !d.ok || !Array.isArray(d.tokens)) throw new Error('no list');
+      var chains = {}, src = {};
+      d.tokens.forEach(function (t) { if (t && t.blockchain && t.blockchain !== 'near') chains[t.blockchain] = 1; });
+      (d.origins || []).forEach(function (o) { if (o && o.contract) src[o.contract] = 1; });
+      if (src['wrap.near']) src.near = 1;                       // native NEAR rides on wNEAR's listing
+      BR_IDS.forEach(function (id) { src[id] = 1; });
+      var n = Object.keys(chains).length, a = Object.keys(src).length;
+      if (!(n > 0)) throw new Error('no chains');
+      box('cnet', count(n));
+      box('casset', count(a));
+    }).catch(function () { box('cnet', '—'); box('casset', '—'); });
+  }
+
   // ---- Platform Activity ---------------------------------------------------------------------------------
   // The design's thirty invented rows stay behind their gate (#activityList:not([data-lxact])) until this
   // replaces them with the design's own empty row, then lifts the gate in the same breath.
@@ -142,7 +165,8 @@
   function load() {
     activityEmpty();
     paintStats();
-    ['cnet', 'casset', 'cvia', 'ltok', 'lnew', 'lmint'].forEach(function (k) { box(k, '—'); });
+    ['ltok', 'lnew', 'lmint'].forEach(function (k) { box(k, '—'); });
+    crossChain();
 
     market().then(function (d) {
       if (!d) {

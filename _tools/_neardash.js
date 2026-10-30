@@ -35,7 +35,13 @@ const B = String.fromCharCode(92);
 const ID = 'lx-neardash';
 const CSS_ID = 'lx-neardash-css';
 const top = fs.readFileSync(__dirname + '/browser/dashtop.js', 'utf8');
-const dash = fs.readFileSync(__dirname + '/browser/dashboard.js', 'utf8');
+// The Cross-chain box counts the NEAR tokens the bridge can send: NEAR Intents' list (live) plus what only
+// Omni or Wormhole carry -- that half is the same baked table the bridge page uses, stamped in as ids so
+// the box and the page cannot disagree about it.
+const BR_ROUTES = JSON.parse(fs.readFileSync(__dirname + '/nearbridgeroutes.generated.json', 'utf8'));
+let dash = fs.readFileSync(__dirname + '/browser/dashboard.js', 'utf8');
+if (dash.split('__LX_BR_IDS__').length !== 2) { console.error('  __LX_BR_IDS__ must appear once in browser/dashboard.js — aborting'); process.exit(1); }
+dash = dash.split('__LX_BR_IDS__').join(JSON.stringify(Object.keys(BR_ROUTES.meta)));
 // THE DIALOG'S TWO ENGINES, because the dashboard key carries NEITHER (measured on the built page:
 // window.lxnCore and window.lxn are defined there, window.lxnSwap and window.lxnDcl are not — they
 // ship with the wallet, Trade-Asset and bridge pages). nearcore.js is NOT re-injected: it is already
@@ -79,6 +85,14 @@ const TEXT = [
   ['<span class="lbl">Network</span><span class="val">Stellar</span>', '<span class="lbl">Network</span><span class="val">NEAR</span>'],
   ['href="/trade/stellar"', 'href="/trade/near"'],
   ['href="/pools/stellar"', 'href="/pools/near"'],
+  // THE PRODUCT BOXES ARE LINKS THE DESIGN'S ROUTER MUST LEAVE ALONE (RAZA 2026-10-30: "on dashboard, when i
+  // click cross chain or pools, it takes me to trade main page"). nxnav-js takes every click at capture,
+  // and its rowTarget() read these cards as market rows and sent them to /trade/near. It skips anything
+  // inside [data-lxnonav] -- the marker Stellar's own product cards already carry. Then the two boxes
+  // that still pointed at the bare hub: Cross-chain and Launchpad go to their NEAR pages.
+  ['<a class="lx-dbx-card" href="', '<a class="lx-dbx-card" data-lxnonav="1" href="'],
+  ['data-lxnonav="1" href="/bridge"', 'data-lxnonav="1" href="/bridge/near"'],
+  ['data-lxnonav="1" href="/launchpad"', 'data-lxnonav="1" href="/launchpad/near"'],
   ['Platform Activity — Stellar', 'Platform Activity — NEAR'],
   // RAZA 2026-10-28: match Stellar's shape, "on the <chain> DEX." — it read "directly on NEAR.",
   // which was the only Quick-actions line that dropped the DEX. NEAR stays capitalised, as everywhere

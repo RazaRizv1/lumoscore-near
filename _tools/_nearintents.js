@@ -45,6 +45,7 @@ const B = String.fromCharCode(92);
 
 const ID = 'lx-nearnibridge';
 const STRIP = ['lx-cctp-js', 'lx-lz-js', 'lx-nearintents', 'lx-bridge3js', 'lx-bridgefee', 'lx-feerate'];
+const STRIP_STYLES = ['lx-nipick-css'];
 
 const swap = require(__dirname + '/near-router.js').stamp(fs.readFileSync(__dirname + '/browser/nearswap.js', 'utf8'));
 let page = fs.readFileSync(__dirname + '/browser/nibridge.js', 'utf8');
@@ -184,6 +185,17 @@ for (const dev of ['desktop', 'mobile']) {
       const gone = stripById(h, id);
       h = gone.html;
       if (id !== ID && gone.removed) { stripped += gone.removed; perId[id] = (perId[id] || 0) + gone.removed; }
+    }
+    // STELLAR'S NEAR INTENTS PICKER LEFT ITS STYLESHEET (stripped-scripts-leave-their-stylesheets). Every rule
+    // in it is "html:not(.lx-ni-on) .brd-opt...{display:none !important}" -- hide the NEAR Intents chains
+    // until Stellar's toggle switches them on. There is no toggle here, so it hid 25 of NEAR's 35
+    // destinations (every .lx-niopt, plus BNB Chain, Solana, Sui, Scroll, Starknet) the moment the design's
+    // open handler cleared the inline display nibridge sets (RAZA 2026-10-30: "why does near only have 10
+    // destination networks"). stripById takes <script id> only, so the sheet goes here.
+    for (const sid of STRIP_STYLES) {
+      const re = new RegExp('<style id="' + sid + '">[^<]*</' + 'style>', 'g');
+      const n = (h.match(re) || []).length;
+      if (n) { h = h.replace(re, ''); stripped += n; perId[sid] = (perId[sid] || 0) + n; }
     }
     const p = patchStep2(h); h = p.html; s2[p.state]++;
     for (const [from, to] of MARKUP) {
