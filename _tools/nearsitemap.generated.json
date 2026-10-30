@@ -288,191 +288,175 @@
   "priority": "0.7"
  },
  {
-  "path": "/pools/near/id/3514",
+  "path": "/pools/near/stnear-wnear/3514",
   "priority": "0.6"
  },
  {
-  "path": "/pools/near/id/3515",
+  "path": "/pools/near/linear-wnear/3515",
   "priority": "0.6"
  },
  {
-  "path": "/pools/near/id/4512",
+  "path": "/pools/near/usdte-usdce-dai/1910",
   "priority": "0.6"
  },
  {
-  "path": "/pools/near/id/1910",
+  "path": "/pools/near/usdc-wnear/4512",
   "priority": "0.6"
  },
  {
-  "path": "/pools/near/id/6458",
+  "path": "/pools/near/rhea-wnear/6458",
   "priority": "0.6"
  },
  {
-  "path": "/pools/near/id/6774",
+  "path": "/pools/near/near20-wnear/6774",
   "priority": "0.6"
  },
  {
-  "path": "/pools/near/id/6494",
+  "path": "/pools/near/rnear-wnear/6494",
   "priority": "0.6"
  },
  {
-  "path": "/pools/near/id/6416",
+  "path": "/pools/near/usdt-usdc/6416",
   "priority": "0.6"
  },
  {
-  "path": "/pools/near/id/5462",
+  "path": "/pools/near/npro-wnear/6724",
   "priority": "0.6"
  },
  {
-  "path": "/pools/near/id/5563",
+  "path": "/pools/near/chill-wnear/5462",
   "priority": "0.6"
  },
  {
-  "path": "/pools/near/id/6724",
+  "path": "/pools/near/trunear-wnear/5563",
   "priority": "0.6"
  },
  {
-  "path": "/pools/near/id/6063",
+  "path": "/pools/near/wnear-usdt/6063",
   "priority": "0.6"
  },
  {
-  "path": "/pools/near/id/5469",
+  "path": "/pools/near/wnear-zec/6065",
   "priority": "0.6"
  },
  {
-  "path": "/pools/near/id/6065",
+  "path": "/pools/near/wnear-aurora/5469",
   "priority": "0.6"
  },
  {
-  "path": "/pools/near/id/4525",
+  "path": "/pools/near/ref-wnear/79",
   "priority": "0.6"
  },
  {
-  "path": "/pools/near/id/79",
+  "path": "/pools/near/frax-wnear/4525",
   "priority": "0.6"
  },
  {
-  "path": "/pools/near/id/4771",
+  "path": "/pools/near/touched-wnear/4771",
   "priority": "0.6"
  },
  {
-  "path": "/pools/near/id/4",
+  "path": "/pools/near/usdte-wnear/4",
   "priority": "0.6"
  },
  {
-  "path": "/pools/near/id/6679",
+  "path": "/pools/near/wnear-itlx/6679",
   "priority": "0.6"
  },
  {
-  "path": "/pools/near/id/5650",
+  "path": "/pools/near/purge-wnear/5650",
   "priority": "0.6"
  },
  {
-  "path": "/pools/near/id/2",
+  "path": "/pools/near/dai-wnear/2",
   "priority": "0.6"
  },
  {
-  "path": "/pools/near/id/3688",
+  "path": "/pools/near/nearx-wnear/3688",
   "priority": "0.6"
  },
  {
-  "path": "/pools/near/id/852",
+  "path": "/pools/near/usdt-usdc-usdte-usdce/4179",
   "priority": "0.6"
  },
  {
-  "path": "/pools/near/id/2734",
+  "path": "/pools/near/wbtc-eth/2734",
   "priority": "0.6"
  },
  {
-  "path": "/pools/near/id/4179",
+  "path": "/pools/near/wnear-pulse/852",
   "priority": "0.6"
  },
  {
-  "path": "/pools/near/id/3",
+  "path": "/pools/near/usdce-wnear/3",
   "priority": "0.6"
  },
  {
-  "path": "/pools/near/id/6503",
+  "path": "/pools/near/stnear-meta/1923",
   "priority": "0.6"
  },
  {
-  "path": "/pools/near/id/1923",
+  "path": "/pools/near/jambo-wnear/6518",
   "priority": "0.6"
  },
  {
-  "path": "/pools/near/id/4369",
+  "path": "/pools/near/wnear-public/6503",
   "priority": "0.6"
  },
  {
-  "path": "/pools/near/id/6518",
+  "path": "/pools/near/shitzu-wnear/4369",
   "priority": "0.6"
  },
  {
-  "path": "/pools/near/id/3411",
+  "path": "/pools/near/sol-wnear/3019",
   "priority": "0.6"
  },
  {
-  "path": "/pools/near/id/4276",
+  "path": "/pools/near/eth-wnear/1207",
   "priority": "0.6"
  },
  {
-  "path": "/pools/near/id/3019",
+  "path": "/pools/near/apys-wnear/3599",
   "priority": "0.6"
  },
  {
-  "path": "/pools/near/id/1207",
+  "path": "/pools/near/wnear-blackdragon/4276",
   "priority": "0.6"
  },
  {
-  "path": "/pools/near/id/3599",
+  "path": "/pools/near/abg-wnear/5720",
   "priority": "0.6"
  },
  {
-  "path": "/pools/near/id/5720",
+  "path": "/pools/near/neardog-wnear/5466",
   "priority": "0.6"
  },
  {
-  "path": "/pools/near/id/5466",
+  "path": "/pools/near/wnear-wbtc/974",
   "priority": "0.6"
  },
  {
-  "path": "/pools/near/id/974",
+  "path": "/pools/near/usn-usdte/3020",
   "priority": "0.6"
  },
  {
-  "path": "/pools/near/id/3020",
+  "path": "/pools/near/gear-wnear/3411",
   "priority": "0.6"
  },
  {
-  "path": "/pools/near/id/5649",
+  "path": "/pools/near/4illia-wnear/5494",
   "priority": "0.6"
  },
  {
-  "path": "/pools/near/id/5494",
+  "path": "/pools/near/skyward-wnear/0",
   "priority": "0.6"
  },
  {
-  "path": "/pools/near/id/0",
+  "path": "/pools/near/uwon-wnear/4528",
   "priority": "0.6"
  },
  {
-  "path": "/pools/near/id/4528",
-  "priority": "0.6"
- },
- {
-  "path": "/pools/near/id/4314",
-  "priority": "0.6"
- },
- {
-  "path": "/pools/near/id/6584",
-  "priority": "0.6"
- },
- {
-  "path": "/pools/near/id/4243",
-  "priority": "0.6"
- },
- {
-  "path": "/pools/near/id/5391",
+  "path": "/pools/near/lonk-wnear/4314",
   "priority": "0.6"
  }
 ]

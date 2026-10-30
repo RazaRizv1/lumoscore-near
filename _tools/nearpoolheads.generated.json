@@ -1,0 +1,174 @@
+{
+ "0": [
+  "/pools/near/skyward-wnear/0",
+  "SKYWARD / wNEAR"
+ ],
+ "2": [
+  "/pools/near/dai-wnear/2",
+  "DAI / wNEAR"
+ ],
+ "3": [
+  "/pools/near/usdce-wnear/3",
+  "USDC.e / wNEAR"
+ ],
+ "4": [
+  "/pools/near/usdte-wnear/4",
+  "USDT.e / wNEAR"
+ ],
+ "79": [
+  "/pools/near/ref-wnear/79",
+  "REF / wNEAR"
+ ],
+ "852": [
+  "/pools/near/wnear-pulse/852",
+  "wNEAR / PULSE"
+ ],
+ "974": [
+  "/pools/near/wnear-wbtc/974",
+  "wNEAR / WBTC"
+ ],
+ "1207": [
+  "/pools/near/eth-wnear/1207",
+  "ETH / wNEAR"
+ ],
+ "1910": [
+  "/pools/near/usdte-usdce-dai/1910",
+  "USDT.e / USDC.e / DAI"
+ ],
+ "1923": [
+  "/pools/near/stnear-meta/1923",
+  "STNEAR / $META"
+ ],
+ "2734": [
+  "/pools/near/wbtc-eth/2734",
+  "WBTC / ETH"
+ ],
+ "3019": [
+  "/pools/near/sol-wnear/3019",
+  "SOL / wNEAR"
+ ],
+ "3020": [
+  "/pools/near/usn-usdte/3020",
+  "USN / USDT.e"
+ ],
+ "3411": [
+  "/pools/near/gear-wnear/3411",
+  "GEAR / wNEAR"
+ ],
+ "3514": [
+  "/pools/near/stnear-wnear/3514",
+  "STNEAR / wNEAR"
+ ],
+ "3515": [
+  "/pools/near/linear-wnear/3515",
+  "LINEAR / wNEAR"
+ ],
+ "3599": [
+  "/pools/near/apys-wnear/3599",
+  "APYS / wNEAR"
+ ],
+ "3688": [
+  "/pools/near/nearx-wnear/3688",
+  "NearX / wNEAR"
+ ],
+ "4179": [
+  "/pools/near/usdt-usdc-usdte-usdce/4179",
+  "USDt / USDC / USDT.e / USDC.e"
+ ],
+ "4276": [
+  "/pools/near/wnear-blackdragon/4276",
+  "wNEAR / BLACKDRAGON"
+ ],
+ "4314": [
+  "/pools/near/lonk-wnear/4314",
+  "LONK / wNEAR"
+ ],
+ "4369": [
+  "/pools/near/shitzu-wnear/4369",
+  "SHITZU / wNEAR"
+ ],
+ "4512": [
+  "/pools/near/usdc-wnear/4512",
+  "USDC / wNEAR"
+ ],
+ "4525": [
+  "/pools/near/frax-wnear/4525",
+  "FRAX / wNEAR"
+ ],
+ "4528": [
+  "/pools/near/uwon-wnear/4528",
+  "UWON / wNEAR"
+ ],
+ "4771": [
+  "/pools/near/touched-wnear/4771",
+  "TOUCHED / wNEAR"
+ ],
+ "5462": [
+  "/pools/near/chill-wnear/5462",
+  "CHILL / wNEAR"
+ ],
+ "5466": [
+  "/pools/near/neardog-wnear/5466",
+  "NearDOG / wNEAR"
+ ],
+ "5469": [
+  "/pools/near/wnear-aurora/5469",
+  "wNEAR / AURORA"
+ ],
+ "5494": [
+  "/pools/near/4illia-wnear/5494",
+  "4illia / wNEAR"
+ ],
+ "5563": [
+  "/pools/near/trunear-wnear/5563",
+  "TruNEAR / wNEAR"
+ ],
+ "5650": [
+  "/pools/near/purge-wnear/5650",
+  "PURGE / wNEAR"
+ ],
+ "5720": [
+  "/pools/near/abg-wnear/5720",
+  "ABG / wNEAR"
+ ],
+ "6063": [
+  "/pools/near/wnear-usdt/6063",
+  "wNEAR / USDt"
+ ],
+ "6065": [
+  "/pools/near/wnear-zec/6065",
+  "wNEAR / ZEC"
+ ],
+ "6416": [
+  "/pools/near/usdt-usdc/6416",
+  "USDt / USDC"
+ ],
+ "6458": [
+  "/pools/near/rhea-wnear/6458",
+  "RHEA / wNEAR"
+ ],
+ "6494": [
+  "/pools/near/rnear-wnear/6494",
+  "rNEAR / wNEAR"
+ ],
+ "6503": [
+  "/pools/near/wnear-public/6503",
+  "wNEAR / PUBLIC"
+ ],
+ "6518": [
+  "/pools/near/jambo-wnear/6518",
+  "JAMBO / wNEAR"
+ ],
+ "6679": [
+  "/pools/near/wnear-itlx/6679",
+  "wNEAR / ITLX"
+ ],
+ "6724": [
+  "/pools/near/npro-wnear/6724",
+  "NPRO / wNEAR"
+ ],
+ "6774": [
+  "/pools/near/near20-wnear/6774",
+  "NEAR20 / wNEAR"
+ ]
+}

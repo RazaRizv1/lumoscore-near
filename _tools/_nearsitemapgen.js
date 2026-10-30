@@ -9,7 +9,7 @@
 // trade. Here:
 //   * /trade/near/<contract>    every curated token (_tools/nearcurated.generated.json), wNEAR excepted
 //                               (it is NEAR itself: the Trade hub's unit, not a row)
-//   * /pools/near/id/<pool id>  Rhea classic pools holding at least one curated token with >= $25,000 of
+//   * /pools/near/<pair>/<id>   Rhea pools holding at least one curated token with >= $25,000 of
 //                               liquidity (reserves x Rhea prices, the computation /lxapi/nearpools uses) —
 //                               the same bar the curation uses
 //
@@ -21,6 +21,17 @@ const fs = require('fs');
 const path = require('path');
 
 const OUT = path.join(__dirname, 'nearsitemap.generated.json');
+// THE POOL PAGES' SERVER-SIDE HEAD (RAZA 2026-10-30, after pool urls took the pair name): { id: [pair url, pair] }
+// for every pool listed here. The combine bakes it into the middleware so a crawler or a link preview reads
+// "STNEAR / wNEAR liquidity pool on NEAR" and the pair url as canonical -- the page's own script only renames
+// the tab once it runs, which a crawler never sees.
+const HEADS = path.join(__dirname, 'nearpoolheads.generated.json');
+// The pair url -- the same rule as poolHref() in browser/pools.js, search.js and pooldetail.js. Keep them equal.
+function poolPath(id, syms) {
+  const slug = (syms || []).map((x) => String(x || '').toLowerCase().replace(/[^a-z0-9]/g, ''))
+    .filter(Boolean).join('-').slice(0, 60).replace(/-+$/, '');
+  return '/pools/near/' + (slug || 'pool') + '/' + encodeURIComponent(id);
+}
 const CURATED = path.join(__dirname, 'nearcurated.generated.json');
 const LIQ_MIN = 25000;
 
@@ -54,7 +65,14 @@ async function getJson(u) {
   const kept = pools.filter((p) => p && /^[0-9]+$/.test(String(p.id))
       && p.token_account_ids.some((t) => curated.has(t)) && liq(p) >= LIQ_MIN)
     .sort((a, b) => liq(b) - liq(a));
-  for (const p of kept) urls.push({ path: '/pools/near/id/' + p.id, priority: '0.6' });
+  const heads = {};
+  for (const p of kept) {
+    const syms = p.token_symbols || p.token_account_ids;
+    const at = poolPath(p.id, syms);
+    urls.push({ path: at, priority: '0.6' });
+    heads[p.id] = [at, syms.map(String).join(' / ')];
+  }
+  fs.writeFileSync(HEADS, JSON.stringify(heads, null, 1) + '\n');
 
   fs.writeFileSync(OUT, JSON.stringify(urls, null, 1) + '\n');
   console.log('near sitemap: ' + (urls.length - kept.length) + ' token page(s) + ' + kept.length
