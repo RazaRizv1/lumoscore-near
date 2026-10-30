@@ -31,10 +31,12 @@ const DEAD_HERE = ['lx-swapcalc', 'lx-qorders'];
 // sample. A <style> in <head> is parsed before first paint.
 const CSS_ID = 'lx-nearlumospage-css';
 // The USD figure beside it did the same, "$0" for 0.7s before the real price (second run): gated on
-// html.lxn-ltu, set once it is non-zero. Scoped with :has() to the price block that holds .lx-pricemeta,
-// because .price alone is too generic a class to hide.
+// html.lxn-ltu, set once it is non-zero (or the settled "—"). Scoped to the hero's own price block, because
+// .price alone is too generic a class to hide -- and NOT to the block holding .lx-pricemeta, which lx-ltdata
+// builds only once it also has the 24h change, so a busy first load showed "$0" before the gate could match.
 const STYLE = '<style id="' + CSS_ID + '">html:not(.lxn-ltp) .price-native{visibility:hidden}'
-  + 'html:not(.lxn-ltu) div:has(> .lx-pricemeta) > .price{visibility:hidden}</style>';
+  + 'html:not(.lxn-ltu) .hero-price-block > .price,html:not(.lxn-ltu) .hero-price > .price,'
+  + 'html:not(.lxn-ltu) .hero-price > .price-row > .price{visibility:hidden}</style>';   // the last: the phone
 function stripStyle(h) {
   const open = '<style id="' + CSS_ID + '">';
   for (;;) { const i = h.indexOf(open); if (i < 0) return h; h = h.slice(0, i) + h.slice(h.indexOf('</style>', i) + 8); }

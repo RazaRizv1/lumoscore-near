@@ -56,10 +56,12 @@
       if (/\d/.test(pt) && !/^≈\s*0\.00043\s/.test(pt)) document.documentElement.classList.add('lxn-ltp');
     }
     // The USD price beside it: revealed once it is a non-zero figure ("$0" is lx-ltdata's interim value).
-    var meta = document.querySelector('.lx-pricemeta');
-    var usd = meta && meta.parentElement && meta.parentElement.querySelector(':scope > .price');
+    // Found by the hero block, not by .lx-pricemeta: lx-ltdata builds that wrapper only once it also has the 24h
+    // change, so on a busy first load "$0" was written before it existed and slipped past a gate keyed on it
+    // (monitor bot 2026-10-30, "$0" -> "$0.00005940"). "—" is lx-ltdata's settled "price unusable" and shows too.
+    var usd = document.querySelector('.hero-price-block > .price, .hero-price > .price, .hero-price > .price-row > .price');
     if (usd && !document.documentElement.classList.contains('lxn-ltu')) {
-      if (/[1-9]/.test(usd.textContent || '')) document.documentElement.classList.add('lxn-ltu');
+      if (/[1-9]|—/.test(usd.textContent || '')) document.documentElement.classList.add('lxn-ltu');
     }
     document.querySelectorAll('.rmid, .pair-name').forEach(function (e) {
       if (e.children.length) return;

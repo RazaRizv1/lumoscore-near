@@ -54,7 +54,10 @@ const COST_A = money(usdMatch[1]) + ' to create the token and ' + money(usdMatch
   + 'for the token contract and the pool. You pay in NEAR at the live rate, and the exact total is shown '
   + 'before you sign.';
 
-const CSS_ALL = 'html:not(.lxn-costready) .cost-row .v,html:not(.lxn-costready) .cost-total .v{visibility:hidden}';
+// #costTotal too: the phone's sticky summary bar carries the total as div.val#costTotal, outside both rules, so its
+// mock ("≈ $25") showed until the real figure replaced it (monitor bot, Launchpad mobile, since 2026-10-28).
+const CSS_ALL = 'html:not(.lxn-costready) .cost-row .v,html:not(.lxn-costready) .cost-total .v,'
+  + 'html:not(.lxn-costready) #costTotal{visibility:hidden}';
 const CSS_REVIEW = [
   CSS_ALL,
   'html:not(.lxn-lprev) .hero-card .hero-icon,html:not(.lxn-lprev) .hero-name,html:not(.lxn-lprev) .hero-ticker,'

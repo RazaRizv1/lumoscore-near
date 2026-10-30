@@ -290,7 +290,9 @@
     setCost('pool', p.network, panel.rate);
     setCost('total', p.total, panel.rate);
     L.lastPlan = p;
-    liftCosts();
+    // SHOWN ONLY ONCE THE FACTORY HAS ANSWERED (or refused): lifting on the price alone shows the estimate and
+    // then repaints it with the factory's own fee a moment later. costTimeout() still lifts at 8 s regardless.
+    if (panel.cfgDone) liftCosts();
   }
   function watchCosts() {
     var first = costCell('create');
@@ -305,7 +307,9 @@
   function costTimeout() {
     setTimeout(function () {
       if (document.documentElement.classList.contains('lxn-costready')) return;
-      ['create', 'liq', 'pool', 'total'].forEach(function (k) { var c = costCell(k); if (c) c.textContent = '—'; });
+      // A price that arrived means real figures are written (only the factory is late): show those. No price:
+      // nothing real was written, so blank the mock.
+      if (!(panel.rate > 0)) ['create', 'liq', 'pool', 'total'].forEach(function (k) { var c = costCell(k); if (c) c.textContent = '—'; });
       liftCosts();
     }, 8000);
   }
@@ -315,7 +319,8 @@
     var use = function (v) { panel.rate = v; paintCosts(); watchCosts(); };
     rateLive().then(use, function () { var c = rateCached(); if (c > 0) use(c); });
     // The factory's own figures (min_fee, the real wasm size) replace the estimate when it answers.
-    config().then(function (c) { panel.ex.cfg = c; paintCosts(); }, function () {});
+    config().then(function (c) { panel.ex.cfg = c; panel.cfgDone = true; paintCosts(); },
+      function () { panel.cfgDone = true; paintCosts(); });
     // The connected account's Rhea and wrap.near registrations, so a returning Rhea user is not quoted
     // the 0.01 NEAR account deposit they already paid.
     var me = account();
