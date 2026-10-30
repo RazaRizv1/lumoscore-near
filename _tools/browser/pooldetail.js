@@ -636,9 +636,29 @@
   var CH_DAYS = { '1D': 2, '1W': 8, '1M': 31, '3M': 91, '1Y': 366, 'ALL': 100000 };
   var RHEA_DS = 'https://api.data-service.ref.finance/api/pool/';
   var DAILY = {};                      // pool id -> Promise of [[ms, tvlUsd, 0, 0, 0, volUsd], ...] oldest first
+  // RHEA'S HISTORY HAS BAD DAYS, AND ONE IS NOT A TREND (RAZA 2026-10-30, on pool 4179: "is this real?"). That
+  // pool holds ~$118K; Rhea's series reads $71.59M for 1-8 April 2026 and $118K either side -- 600x for eight
+  // days, then straight back. A run that leaps more than 20x above the day before it AND falls back more than
+  // 20x after it is a glitch in the record, and is left out rather than drawn as the pool's history. A one-way
+  // jump (a pool's first real deposit, seen on 4512 and 3514) never comes back down, so it stays; so does a run
+  // still going on the last day, and anything longer than a month.
+  function dropGlitches(v) {
+    var out = [], k = 0;
+    while (k < v.length) {
+      var prev = out.length ? out[out.length - 1][1] : 0;
+      if (prev > 0 && v[k][1] > 20 * prev) {
+        var j = k;
+        while (j < v.length && j - k < 31 && v[j][1] > 20 * prev) j++;
+        if (j < v.length && j - k < 31 && v[j][1] * 20 < v[k][1]) { k = j; continue; }
+      }
+      out.push(v[k]);
+      k++;
+    }
+    return out;
+  }
   function rheaDaily(id) {
     if (DAILY[id]) return DAILY[id];
-    var key = 'lumos.nearPoolDaily.v1.' + id;
+    var key = 'lumos.nearPoolDaily.v2.' + id;
     try {
       var c = JSON.parse(sessionStorage.getItem(key) || 'null');
       if (c && c.t && Date.now() - c.t < 3600000 && Array.isArray(c.v) && c.v.length > 1) return (DAILY[id] = Promise.resolve(c.v));
@@ -655,6 +675,7 @@
         if (x && +x.time > 0 && byDay[+x.time] && isFinite(+x.volume_dollar)) byDay[+x.time][5] = +x.volume_dollar;
       });
       var v = Object.keys(byDay).map(function (k) { return byDay[k]; }).sort(function (a, b) { return a[0] - b[0]; });
+      v = dropGlitches(v);
       if (v.length < 2) throw new Error('no history');
       try { sessionStorage.setItem(key, JSON.stringify({ t: Date.now(), v: v })); } catch (e) {}
       return v;

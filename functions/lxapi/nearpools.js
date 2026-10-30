@@ -16,16 +16,21 @@
 // STNEAR/wNEAR read 4x Rhea's. The reserves are what the pool holds; anyone can check the product.
 //   * DexScreener, latest/dex/pairs/near/refv1-<id> (30 a call) — 24h volume and trades. A pool it
 //     does not carry keeps volume null, never zero.
+//   * Rhea's data service, /api/poollist/<id|id|…>/rolling24hvolume/sum — the 24h volume of every pool
+//     DexScreener does not carry (RAZA 2026-10-30: "why aren't volume, fees, and APR calculated for such
+//     pools" -- DexScreener lists PAIRS, so every 3- and 4-token stable pool read "—"). Checked against
+//     DexScreener the same day on pools both carry: 4512 1.05x, 6494 0.99x, 3514 0.97x, 5470 1.02x.
 // Fees earned = volume x the pool's fee; APR = fees x 365 / liquidity. Both null without volume.
 //
 // Cached like nearmarket: versioned key, 2 minutes fresh, last good kept a day, failures never cached.
 import { CURATED } from './_nearcurated.js';
 
-const TTL = 120, KEEP = 86400, VER = 'v1';
+const TTL = 120, KEEP = 86400, VER = 'v2';
 const WNEAR = 'wrap.near';
 const POOLS = 'https://indexer.ref.finance/list-top-pools';
 const PRICES = 'https://indexer.ref.finance/list-token-price';
 const PAIRS = 'https://api.dexscreener.com/latest/dex/pairs/near/';
+const RHEA_VOL = 'https://api.data-service.ref.finance/api/poollist/';
 const META = {};
 for (const c of CURATED) META[c.i] = c;
 
@@ -67,6 +72,15 @@ async function build() {
   const got = await Promise.all(batches.map((b) => getJson(PAIRS + b.join(','), 6000).catch(() => null)));
   const ds = {};
   for (const g of got) for (const p of ((g && g.pairs) || [])) ds[p.pairAddress] = p;
+  // Rhea's own 24h volume for the pools DexScreener has no figure for, 80 ids a call (the path is capped at
+  // 512 characters). The answer is an array in the order asked. A failed call leaves those pools at null.
+  const missing = ok.filter((p) => { const d = ds['refv1-' + p.id]; return !d || num((d.volume || {}).h24) == null; }).map((p) => String(p.id));
+  const rheaVol = {};
+  const chunks = [];
+  for (let k = 0; k < missing.length; k += 80) chunks.push(missing.slice(k, k + 80));
+  await Promise.all(chunks.map((c) => getJson(RHEA_VOL + c.join('|') + '/rolling24hvolume/sum', 6000).then((arr) => {
+    if (Array.isArray(arr) && arr.length === c.length) c.forEach((id, k) => { const v = num(arr[k]); if (v != null && v >= 0) rheaVol[id] = v; });
+  }).catch(() => null)));
 
   let rows = ok.map((p) => {
     const d = ds['refv1-' + p.id];
@@ -77,7 +91,8 @@ async function build() {
       if (liqUsd == null || px == null || raw == null || m.d == null) { liqUsd = null; return; }
       liqUsd += Number(raw) / Math.pow(10, m.d) * px;
     });
-    const volUsd = d ? num((d.volume || {}).h24) : null;
+    const dsVol = d ? num((d.volume || {}).h24) : null;
+    const volUsd = dsVol != null ? dsVol : (rheaVol[String(p.id)] != null ? rheaVol[String(p.id)] : null);
     const tx = d ? ((d.txns || {}).h24 || {}) : null;
     const feesUsd = (volUsd != null && fee != null) ? volUsd * fee / 100 : null;
     return {
@@ -99,7 +114,7 @@ async function build() {
 
   rows = rows.sort((a, b) => (b.liq || 0) - (a.liq || 0)).slice(0, 200);
   const sum = (k) => rows.reduce((a, r) => a + (r[k] || 0), 0);
-  return { ok: true, src: 'Rhea Finance indexer, DexScreener', usd: nearUsd, at: Date.now(),
+  return { ok: true, src: 'Rhea Finance indexer, DexScreener, Rhea data service (volume DexScreener lacks)', usd: nearUsd, at: Date.now(),
     // Over the pools in this list, which is what the page shows; not a network-wide total.
     summary: { liquidity: sum('liq'), vol24: sum('vol'), fees24: sum('fees'), pools: rows.length },
     rows };
