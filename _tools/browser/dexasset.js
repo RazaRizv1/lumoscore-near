@@ -1300,17 +1300,25 @@
   // In NEAR, the same pool's DOLLAR candles ride along so the readout's dollar line and volume are each
   // candle's own, not today's NEAR rate applied to last week (which put USDC at $1.027). Matched by candle
   // time; if the dollar call fails the NEAR chart still draws and the readout simply omits the dollar line.
+  // ONE GeckoTerminal CALL PER RANGE, NOT TWO (RAZA 2026-10-30: "For some assets, its taking forever to load
+  // the recent trades"). The readout's dollar figures used to come from a second, dollar-denominated request
+  // on the same pool, which doubled what each page spent of GeckoTerminal's per-visitor allowance -- browsing a
+  // few tokens ran it out, and the trades list waited behind it. They now come from NEAR's own dollar history
+  // (CoinGecko), which is the same for every token, so one cached copy serves the whole visit. A candle with no
+  // NEAR price near it simply has no dollar line.
   function gtSeries(d, R, vs, label) {
     if (vs === 'USD') return gtOne(d, R, 'USD');
     if (label === 'PERF') return gtOne(d, R, 'NEAR');               // the change cells read closes only
-    return Promise.all([gtOne(d, R, 'NEAR'), gtOne(d, R, 'USD').catch(function () { return null; })]).then(function (r) {
-      var pts = r[0], usd = r[1];
-      if (usd && usd.length) {
-        var by = {};
-        usd.forEach(function (u) { by[u[0]] = u; });
-        pts = pts.map(function (p) { var u = by[p[0]]; return u ? [p[0], p[1], p[2], p[3], p[4], p[5], u[1], u[5]] : p; });
-      }
-      return pts;
+    return Promise.all([gtOne(d, R, 'NEAR'), cgSeries('near', R.days, R.ttl).catch(function () { return null; })]).then(function (r) {
+      var pts = r[0], near = r[1];
+      if (!near || !near.length) return pts;
+      var j = 0, tol = Math.max(3600000, R.days * 86400000 / 100);
+      return pts.map(function (p) {
+        while (j < near.length - 1 && Math.abs(near[j + 1][0] - p[0]) <= Math.abs(near[j][0] - p[0])) j++;
+        var u = near[j];
+        if (!u || !(u[1] > 0) || Math.abs(u[0] - p[0]) > tol) return p;
+        return [p[0], p[1], p[2], p[3], p[4], p[5], p[1] * u[1], (p[5] > 0 ? p[5] * u[1] : 0)];
+      });
     });
   }
   function gtOne(d, R, vs) {
@@ -1620,12 +1628,14 @@
       + ';display:block;flex:none" xmlns="http://www.w3.org/2000/svg">' + rects + '</svg>';
   }
   function shortAcct(a) { a = String(a || ''); return a.length > 20 ? (a.slice(0, 6) + '…' + a.slice(-4)) : a; }
+  // Stellar's short form, which RAZA asked the XRPL page to match (2026-10-17): "now", "3m", "2h" -- the
+  // heading already says these are recent, and "ago" on every row is what wrapped the phone's amount column.
   function ago(ms) {
     var s = Math.max(0, Math.round((Date.now() - ms) / 1000));
-    if (s < 60) return s + 's ago';
-    if (s < 3600) return Math.floor(s / 60) + 'm ago';
-    if (s < 86400) return Math.floor(s / 3600) + 'h ago';
-    return Math.floor(s / 86400) + 'd ago';
+    if (s < 45) return 'now';
+    if (s < 3600) return Math.round(s / 60) + 'm';
+    if (s < 86400) return Math.round(s / 3600) + 'h';
+    return Math.round(s / 86400) + 'd';
   }
   function wallet(a, size) {
     return '<a class="lx-acct wallet-cell" href="/account/near/' + encodeURIComponent(a) + '">' + identSvg(a, size)
@@ -1686,8 +1696,10 @@
       TR.err = false; TR.at = Date.now();
       syncPanel();
     }, function () {
-      if (at < CH_RETRY.length) { setTimeout(function () { loadTrades(at + 1); }, CH_RETRY[at]); return; }
-      TR.err = true; syncPanel();
+      // A refusal is GeckoTerminal's per-minute allowance, so keep asking -- every minute once the quick
+      // retries are spent -- and say so in the table only after those, rather than giving up for good.
+      if (at >= CH_RETRY.length) { TR.err = true; syncPanel(); }
+      if (at < 12) setTimeout(function () { loadTrades(at + 1); }, at < CH_RETRY.length ? CH_RETRY[at] : 60000);
     });
   }
   function paintTrades(panel, phone) {
@@ -1696,23 +1708,38 @@
     var foot = phone ? null : panel.querySelector('.panel-foot');
     var empty = panel.querySelector('.' + (phone ? 'mdxa' : 'dxa') + '-empty-state[data-lxn]');
     var holder = phone ? tb : (tb && tb.closest('table'));
-    var msg = null;
-    if (TR.none) msg = ['No trades to show', 'This token has no pool against NEAR on Rhea Finance.'];
-    else if (TR.err) msg = ['Recent trades unavailable', 'The trade feed did not answer. Reload the page to try again.'];
-    else if (!TR.rows) msg = ['Loading recent trades…', ''];
-    if (msg || !tb) {
-      if (holder) hideEl(holder);
-      hideEl(filt); hideEl(foot);
-      if (empty && empty.getAttribute('data-lxmsg') !== msg[0]) { empty.parentNode.removeChild(empty); empty = null; }
-      if (!empty && msg) {
-        empty = emptyState((phone ? 'mdxa' : 'dxa') + '-empty-state', msg[0], msg[1]);
-        empty.setAttribute('data-lxmsg', msg[0]);
-        panel.appendChild(empty);
-      }
+    // While the trades load, the panel looks as Stellar's and XRPL's do: the table and its headings, with the
+    // design's sample rows held invisible by the shared :not(.lxda) gate -- no "Loading" banner. A token with
+    // no NEAR pool, or a feed that keeps refusing, says so in one quiet row of that same table.
+    if (!tb) return;
+    if (empty) empty.parentNode.removeChild(empty);
+    var show = function (n) { if (n && n.style.display === 'none') n.style.display = ''; };
+    show(holder);
+    var pgv = foot && foot.querySelector('.pgn');
+    var msg = TR.none ? 'This token has no pool against NEAR on Rhea Finance, so there are no trades to show.'
+      : (TR.err && !TR.rows) ? 'Recent trades could not be loaded right now. Trying again…' : null;
+    if (!TR.rows && !msg) {
+      show(filt); show(foot);
+      tb.classList.remove('lxda');
+      tb.__lxnSig = null;
+      var inf0 = document.getElementById('dxaPanelInfo');
+      if (inf0 && inf0.textContent !== '') inf0.textContent = '';    // not the design's "Showing 15 of 2,142"
+      if (pgv && pgv.style.visibility !== 'hidden') pgv.style.visibility = 'hidden';
       return;
     }
-    if (empty) empty.parentNode.removeChild(empty);
-    [holder, filt, foot].forEach(function (n) { if (n && n.style.display === 'none') n.style.display = ''; });
+    if (msg) {
+      hideEl(filt); hideEl(foot);
+      var ms = 'msg|' + msg;
+      if (tb.__lxnSig === ms && tb.querySelector('[data-lxda]')) return;
+      tb.__lxnSig = ms;
+      tb.innerHTML = phone
+        ? '<div class="lxda-ex-empty" data-lxda="1" style="text-align:center;padding:26px 12px;color:var(--text-soft,#8a8fa3);font-size:13.5px">' + msg + '</div>'
+        : '<tr class="lxda-ex-empty" data-lxda="1"><td colspan="6" style="text-align:center;padding:26px 12px;color:var(--text-soft,#8a8fa3);font-size:13.5px">' + msg + '</td></tr>';
+      tb.classList.add('lxda');
+      return;
+    }
+    show(filt); show(foot);
+    if (pgv && pgv.style.visibility) pgv.style.visibility = '';
     var me = TR.mine ? myAcct() : '';
     var all = TR.rows.filter(function (r) { return r.near >= TR.min && (!TR.mine || (me && r.addr === me)); });
     var pages = Math.max(1, Math.ceil(all.length / TR_PER));
@@ -1722,7 +1749,8 @@
     var sig = TR.at + '|' + TR.min + '|' + TR.page + '|' + rows.length + '|' + (phone ? 1 : 0) + '|' + (TR.mine ? 'm' + me : '');
     if (tb.__lxnSig === sig && tb.querySelector('[data-lxda]')) return;
     tb.__lxnSig = sig;
-    var span = TR.rows.length ? ago(TR.rows[TR.rows.length - 1].t).replace(' ago', '') : '';
+    var span = TR.rows.length ? ago(TR.rows[TR.rows.length - 1].t) : '';
+    if (span === 'now') span = '';
     if (!rows.length) {
       var pool = TR.pool ? TR.pool.pair + ' on Rhea' : 'this pool';
       var none = TR.mine
