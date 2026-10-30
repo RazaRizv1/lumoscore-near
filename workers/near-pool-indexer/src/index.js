@@ -7,12 +7,17 @@
 // pool in its arguments ("pool_id":1910) and logs the amounts ("Swapped 1727246 zec.omft.near for 5000377…
 // wrap.near"); deposits and withdrawals log theirs too.
 //
-// HOW. A cron, every minute, reads the chunk of the shard v2.ref-finance.near lives on (FastNEAR's free
-// neardata archive, /v0/block/<h>/shard/<id>: ~8 KB a block against ~156 KB for the whole block), for
-//   * FORWARD  the blocks since the last run (up to FWD a run), and
-//   * BACKFILL BACK blocks further into the past each run, until BACKFILL_DAYS before the first run.
-// Each successful receipt to Rhea becomes rows in D1 (table txs). The shard is found once from a full block
-// and found again if the shard stops showing Rhea for a whole run (NEAR resharding moves accounts).
+// HOW. A cron, every minute, reads the file of the shard v2.ref-finance.near lives on, block by block, from
+// NEAR LAKE -- NEAR's official block archive in S3 (near-lake-data-mainnet, eu-central-1, requester pays: the
+// AWS account in the Worker's secrets pays the small transfer). Each block is a folder <height>/ holding
+// block.json and shard_<n>.json, the same IndexerShard shape neardata serves. FIRST TRIED neardata.xyz itself
+// (free): it rate-limits by IP, Workers share outbound IPs, and runs got ~28 reads a minute against ~100 NEAR
+// blocks a minute. S3 has no such limit.
+//   * FORWARD  the blocks after the last one read (listed from S3, so skipped heights cost nothing), and
+//   * BACKFILL further into the past each run, once FORWARD is caught up, until BACKFILL_DAYS before the
+//     first run.
+// Each successful receipt to Rhea becomes rows in D1 (table txs). The shard is found once by reading a block's
+// shard files, and found again if Rhea stops appearing in it for a whole run (NEAR resharding moves accounts).
 //
 // READ. GET /pool?id=<pool id>[&limit=N][&kind=swap|add|remove] -> the pool's latest rows, newest first, and
 // the time span the index covers, so the page can say what it does and does not know. CORS open.
@@ -20,33 +25,12 @@
 // Block times: a shard chunk carries none, so each run reads the header of its range's low end and the
 // chain head and interpolates (NEAR makes ~1 block a second, steadily; the error is seconds).
 
-const ND = 'https://mainnet.neardata.xyz/v0';
-const REF = 'v2.ref-finance.near';
-// NEARDATA RATE-LIMITS BY IP, and a Worker's outbound address is shared with every other Cloudflare tenant
-// (measured on the first runs: 429 on 88 of 120 reads at 8 in parallel). So: few in parallel, a 429 waits and
-// asks again, and the backfill only runs once the chain head is caught up.
-const FWD = 200, BACK = 200, BACKFILL_DAYS = 3, KEEP_DAYS = 30, CONC = 2;
-const UA = { 'user-agent': 'LumosCore NEAR pool indexer (+https://lumoscore.com)' };
-const pause = (ms) => new Promise((go) => setTimeout(go, ms));
+import { lakeJson, lakeHeights, pad } from './s3.js';
 
-async function getJson(u, tries) {
-  tries = tries || 0;
-  const ctl = new AbortController();
-  const t = setTimeout(() => ctl.abort(), 15000);
-  let r;
-  try {
-    r = await fetch(u, { headers: UA, redirect: 'follow', signal: ctl.signal });
-    if (r.status === 429 && tries < 4) {
-      clearTimeout(t);
-      const ra = parseFloat(r.headers.get('retry-after') || '') || 0;
-      await pause(Math.min(8000, ra > 0 ? ra * 1000 : 800 * Math.pow(2, tries)));
-      return getJson(u, tries + 1);
-    }
-    if (!r.ok) throw new Error(u.split('/v0/')[1] + ' ' + r.status);
-    const s = await r.text();
-    return s === 'null' ? null : JSON.parse(s);
-  } finally { clearTimeout(t); }
-}
+const REF = 'v2.ref-finance.near';
+const FWD = 400, BACK = 400, BACKFILL_DAYS = 3, KEEP_DAYS = 30, CONC = 12;
+// A cron every minute must be done before the next run starts.
+const RUN_MS = 45000;
 
 // ---- parsing one receipt into rows -------------------------------------------------------------------
 const b64 = (s) => { try { return JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(s), (c) => c.charCodeAt(0)))); } catch (e) { return null; } };
@@ -105,27 +89,21 @@ export function rowsOf(ro, block, ts) {
   return rows.filter((r) => Number.isInteger(r.pool) && r.pool >= 0);
 }
 
-// ---- the chain ---------------------------------------------------------------------------------------
-async function headTs(h) {
-  for (let k = 0; k < 5; k++) {
-    const b = await getJson(ND + '/block/' + (h + k) + '/headers').catch(() => null);
-    if (b && b.header) return { h: h + k, ts: Math.floor(Number(b.header.timestamp_nanosec || b.header.timestamp) / 1e6) };
+// ---- the chain (NEAR Lake) ----------------------------------------------------------------------------
+async function blockTs(env, h) {
+  const b = await lakeJson(env, pad(h) + '/block.json');
+  return b && b.header ? Math.floor(Number(b.header.timestamp_nanosec || b.header.timestamp) / 1e6) : null;
+}
+// Which shard holds Rhea: read the shard files of one recent block until a Rhea receipt turns up.
+async function findShard(env, h) {
+  const b = await lakeJson(env, pad(h) + '/block.json');
+  const n = (b && b.chunks && b.chunks.length) || 10;
+  for (let s = 0; s < n; s++) {
+    const c = await lakeJson(env, pad(h) + '/shard_' + s + '.json').catch(() => null);
+    for (const ro of (c && c.receipt_execution_outcomes) || []) if (ro.receipt && ro.receipt.receiver_id === REF) return (c.shard_id != null ? c.shard_id : s);
   }
   return null;
 }
-async function findShard(h) {
-  for (let k = 0; k < 10; k++) {
-    const b = await getJson(ND + '/block/' + (h - k)).catch(() => null);
-    if (!b) continue;
-    for (const sh of b.shards || []) for (const ro of sh.receipt_execution_outcomes || []) {
-      if (ro.receipt && ro.receipt.receiver_id === REF) return sh.shard_id;
-    }
-  }
-  return null;
-}
-// A CRON THAT RUNS EVERY MINUTE GETS ABOUT 30 SECONDS. A run that overstays is cut off before it saves, so
-// every read is done against a deadline: blocks are read in the given order, nothing new starts after it, and
-// the caller moves its cursor only across the unbroken run of blocks that were read, from the start of the list.
 async function pmap(list, fn, deadline) {
   const out = new Array(list.length); let i = 0;
   await Promise.all(Array.from({ length: Math.min(CONC, list.length) }, async () => {
@@ -133,15 +111,15 @@ async function pmap(list, fn, deadline) {
   }));
   return out;
 }
-// Reads the given heights of the shard, in order. Returns rows from the leading unbroken run only, and how
-// many heights that run covers (done).
-async function scan(hs, shard, t0, t1, deadline) {
+// Reads the given heights (in the order given) of the shard. Rows come only from the leading unbroken run of
+// successful reads, and done says how many heights that run covers: the caller's cursor moves no further.
+async function scan(env, hs, shard, t0, t1, deadline) {
   const at = (h) => (t1.h === t0.h ? t1.ts : Math.round(t0.ts + (t1.ts - t0.ts) * (h - t0.h) / (t1.h - t0.h)));
   let sawRef = false; const why = {};
   const per = await pmap(hs, async (h) => {
     let c;
-    try { c = await getJson(ND + '/block/' + h + '/shard/' + shard); } catch (e) {
-      const k = String((e && e.message) || e).replace(/^block\/\d+\/shard\/\d+ /, '');
+    try { c = await lakeJson(env, pad(h) + '/shard_' + shard + '.json'); } catch (e) {
+      const k = String((e && e.message) || e).slice(0, 80);
       why[k] = (why[k] || 0) + 1;
       return null;
     }
@@ -154,7 +132,7 @@ async function scan(hs, shard, t0, t1, deadline) {
   }, deadline);
   let done = 0;
   while (done < per.length && per[done] != null) done++;
-  return { rows: per.slice(0, done).flat(), done, sawRef, why, failed: per.filter((x, k) => k < per.length && x === null).length };
+  return { rows: per.slice(0, done).flat(), done, sawRef, why, failed: per.filter((x) => x === null).length };
 }
 
 // ---- storage -----------------------------------------------------------------------------------------
@@ -171,52 +149,59 @@ async function save(db, rows) {
 }
 
 async function run(env) {
+  if (!env.AWS_ACCESS_KEY_ID || !env.AWS_SECRET_ACCESS_KEY) throw new Error('AWS keys are not set (wrangler secret put AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY)');
   const db = env.DB;
-  // Under a minute, so one run is done before the next begins (deployed crons get far more than the
-  // local preview's 30 s; measured at 20 s a run could not keep up with the chain).
-  const deadline = Date.now() + 50000;
-  const last = await getJson(ND + '/last_block/final');
-  const head = last.block.header.height;
-  const headT = { h: head, ts: Math.floor(Number(last.block.header.timestamp_nanosec || last.block.header.timestamp) / 1e6) };
+  const deadline = Date.now() + RUN_MS;
   const m = await meta(db);
-  let shard = m.shard != null ? +m.shard : await findShard(head);
-  if (shard == null) throw new Error('could not find the shard of ' + REF);
-  const stmts = [setMeta(db, 'shard', shard)];
-  let fwd = m.fwd != null ? +m.fwd : head - 1;
-  let back = m.back != null ? +m.back : head;
-  const start = m.start != null ? +m.start : head;
-  const startTs = m.startTs != null ? +m.startTs : headT.ts;
-  if (m.start == null) stmts.push(setMeta(db, 'start', start), setMeta(db, 'startTs', startTs));
-  const report = { head, shard, fwd: 0, back: 0, rows: 0, failed: 0 };
+  let fwd = m.fwd != null ? +m.fwd : null;
+  // FIRST RUN (or after the neardata attempt): start at the newest block in the lake.
+  if (fwd == null || m.source !== 'lake') {
+    // The newest folder: list forward from a height a little behind the last known one until the list ends.
+    let probe = fwd != null ? fwd : 222280000;
+    for (let k = 0; k < 40; k++) {
+      const hs = await lakeHeights(env, probe, 1000);
+      if (hs.length < 1000) { probe = hs.length ? hs[hs.length - 1] : probe; break; }
+      probe = hs[hs.length - 1];
+    }
+    const ts = await blockTs(env, probe);
+    const stmts = [setMeta(db, 'source', 'lake'), setMeta(db, 'fwd', probe), setMeta(db, 'back', probe + 1),
+      setMeta(db, 'start', probe), setMeta(db, 'startTs', ts || Date.now()), setMeta(db, 'backDone', '0')];
+    await db.batch(stmts);
+    return { init: probe };
+  }
+  let shard = m.shard != null ? +m.shard : null;
+  const report = { fwd: 0, back: 0, rows: 0, failed: 0 };
+  const stmts = [];
 
   // FORWARD
-  if (head > fwd) {
-    const lo = fwd + 1, hi = Math.min(head, fwd + FWD);
-    const t0 = (await headTs(lo)) || headT;
-    const hs = []; for (let h = lo; h <= hi; h++) hs.push(h);
-    const r = await scan(hs, shard, t0, headT, deadline);
+  const hs = await lakeHeights(env, fwd, FWD);
+  report.lag = hs.length;
+  if (hs.length) {
+    if (shard == null) { shard = await findShard(env, hs[hs.length - 1]); if (shard == null) throw new Error('no shard holds ' + REF); stmts.push(setMeta(db, 'shard', shard)); }
+    const t0 = { h: hs[0], ts: await blockTs(env, hs[0]) }, t1 = { h: hs[hs.length - 1], ts: await blockTs(env, hs[hs.length - 1]) };
+    const r = await scan(env, hs, shard, t0, t1, deadline);
     if (!r.sawRef && r.done > 50) {                        // the shard may have moved
-      const s2 = await findShard(head);
-      if (s2 != null && s2 !== shard) { stmts.push(setMeta(db, 'shard', s2)); await db.batch(stmts); return Object.assign(report, { reshard: s2 }); }
+      const s2 = await findShard(env, hs[hs.length - 1]);
+      if (s2 != null && s2 !== shard) { await db.batch([setMeta(db, 'shard', s2)]); return Object.assign(report, { reshard: s2 }); }
     }
     await save(db, r.rows);
-    // Only across what was read without a gap; the rest is read again next run (rows are keyed, so a re-read
-    // is harmless).
-    if (r.done) { fwd = lo + r.done - 1; stmts.push(setMeta(db, 'fwd', fwd)); }
+    if (r.done) { fwd = hs[r.done - 1]; stmts.push(setMeta(db, 'fwd', fwd)); }
     report.fwd = r.done; report.rows += r.rows.length; report.failed += r.failed; report.why = r.why;
   }
-  // BACKFILL, down to BACKFILL_DAYS before the first run
+
+  // BACKFILL, newest first, once FORWARD has caught up
+  const startTs = +m.startTs || Date.now();
   const floorTs = startTs - BACKFILL_DAYS * 86400000;
-  const doneBack = m.backDone === '1';
-  if (!doneBack && fwd >= head - 10 && Date.now() < deadline - 3000) {   // the present first; history when caught up
-    const hi = back - 1, lo = Math.max(0, back - BACK);
-    const t0 = await headTs(lo), t1 = await headTs(hi);
-    if (t0 && t1) {
-      const hs = []; for (let h = hi; h >= lo; h--) hs.push(h);             // newest first, so the cursor walks down
-      const r = await scan(hs, shard, t0, t1, deadline);
+  let back = +m.back;
+  if (m.backDone !== '1' && hs.length < FWD && shard != null && Date.now() < deadline - 8000) {
+    const older = await lakeHeights(env, Math.max(0, back - BACK * 2), BACK * 2);
+    const want = older.filter((h) => h < back).slice(-BACK).reverse();
+    if (want.length) {
+      const t1 = { h: want[0], ts: await blockTs(env, want[0]) }, t0 = { h: want[want.length - 1], ts: await blockTs(env, want[want.length - 1]) };
+      const r = await scan(env, want, shard, t0, t1, deadline);
       await save(db, r.rows);
       if (r.done) {
-        back = hi - r.done + 1;
+        back = want[r.done - 1];
         const bt = Math.round(t0.ts + (t1.ts - t0.ts) * (back - t0.h) / Math.max(1, t1.h - t0.h));
         stmts.push(setMeta(db, 'back', back), setMeta(db, 'backTs', bt));
         if (bt <= floorTs) stmts.push(setMeta(db, 'backDone', '1'));
@@ -224,9 +209,8 @@ async function run(env) {
       report.back = r.done; report.rows += r.rows.length; report.failed += r.failed; report.bwhy = r.why;
     }
   }
-  // Pruning, about once an hour
   if (fwd % 3000 < FWD) stmts.push(db.prepare('DELETE FROM txs WHERE ts < ?1').bind(Date.now() - KEEP_DAYS * 86400000));
-  await db.batch(stmts);
+  if (stmts.length) await db.batch(stmts);
   return report;
 }
 
