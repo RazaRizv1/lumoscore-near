@@ -899,8 +899,8 @@
       if (TXI.rows == null && !TXI.failed) return 'Reading this pool’s ' + (TX.filter === 'deposit' ? 'deposits' : 'withdrawals') + '…';
       return 'No ' + (TX.filter === 'deposit' ? 'deposits' : 'withdrawals') + ' in this pool' + (since ? ' since ' + since : '') + '.';
     }
-    if (TX.err === 'untracked' && TXI.rows == null && !TXI.failed) return 'Reading this pool’s recent swaps…';
     if (TX.err === 'untracked' && TXI.off) return 'This pool’s swaps are not published by any feed LumosCore reads yet (GeckoTerminal does not track it), so they cannot be listed here.';
+    if (TX.err === 'untracked' && TXI.rows == null && !TXI.failed) return 'Reading this pool’s recent swaps…';
     if (TX.err === 'untracked') return 'No swaps in this pool' + (since ? ' since ' + since : ' recently') + '.';
     if (TX.err) return 'Recent swaps could not be loaded right now. Reload to try again.';
     if (!TX.rows) return 'Reading this pool’s recent swaps…';
