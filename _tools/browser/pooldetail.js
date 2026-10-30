@@ -560,7 +560,7 @@
     var p = window.__lxnPool, s = chartSides();
     if (!p || !s || !$('.chart-svg-wrap')) return;
     if (range) CH.range = range;
-    $('.tf-mini button').forEach(function (b) { b.classList.toggle('active', (b.textContent || '').trim().toUpperCase() === CH.range); });
+    $$('.tf-mini button').forEach(function (b) { b.classList.toggle('active', (b.textContent || '').trim().toUpperCase() === CH.range); });
     var R = CH_R[CH.range] || CH_R['1M'], gen = ++CH.gen, at = 0;
     var go = function () {
       gtGet(gtId(p.id) + '/ohlcv/' + R.tf + '?aggregate=' + R.agg + '&limit=' + R.limit + '&currency=token&token=' + encodeURIComponent(s.base.i),
@@ -587,7 +587,7 @@
   function wireChartControls() {
     if (window.__lxnPoolChartWired) return;
     window.__lxnPoolChartWired = 1;
-    $('.chart-mode-menu button[data-metric]').forEach(function (b) {
+    $$('.chart-mode-menu button[data-metric]').forEach(function (b) {
       if (b.getAttribute('data-metric') !== 'vol') { b.textContent = 'Price'; b.setAttribute('data-logoed', '1'); }
     });
     var sel = $('.chart-mode-select');
@@ -724,7 +724,7 @@
     // The phone: the design's own .tx-item shape, the latest 20.
     var box = ($('.tx-filter-m') || {}).parentNode;
     if (box) {
-      $('.tx-item, .lxn-txnote', box).forEach(function (n) { n.parentNode.removeChild(n); });
+      $$('.tx-item, .lxn-txnote', box).forEach(function (n) { n.parentNode.removeChild(n); });
       var mlist = list.slice(0, 20);
       if (!mlist.length) {
         var d0 = el('div', 'lxn-txnote', txNote());
@@ -791,13 +791,13 @@
       var fees = bothPos('fee-val');
       if (fees[0]) fees[0].textContent = '—';                         // Rhea keeps no per-LP fee record
       if (fees[1]) fees[1].textContent = share > 0 ? num(scaled(mine, 24), 6) : '0';
-      $('.position-share-pill, .my-position-m .mpm-share').forEach(function (pill) {
+      $$('.position-share-pill, .my-position-m .mpm-share').forEach(function (pill) {
         pill.textContent = share > 0 ? ((share * 100) < 0.0001 ? '<0.0001%' : (share * 100).toFixed(4) + '%') : '0%';
       });
       var value = null;
       if (share > 0 && USD && window.__lxnPoolRow && window.__lxnPoolRow.liq != null) value = window.__lxnPoolRow.liq * USD * share;
       bothPos('amount').forEach(function (amt) { amt.textContent = share > 0 ? (value != null ? usdShort(value) : num(scaled(mine, 24), 4) + ' LP') : 'No position'; });
-      $('#dwWithdraw .balance').forEach(function (b) { b.textContent = 'Your LP: ' + (share > 0 ? num(scaled(mine, 24), 6) : '0'); });
+      $$('#dwWithdraw .balance').forEach(function (b) { b.textContent = 'Your LP: ' + (share > 0 ? num(scaled(mine, 24), 6) : '0'); });
     }, function () {});
     // Balances: the wNEAR side shows NEAR, which a deposit wraps.
     p.tokens.slice(0, 2).forEach(function (t, k) {
@@ -806,7 +806,7 @@
         : Promise.all([nview(t.i, 'ft_balance_of', { account_id: me }), decOf(t.i)]).then(function (x) { return scaled(x[0], x[1]); });
       q.then(function (v) {
         p['bal' + k] = v;
-        var b = $('#dwDeposit .balance')[k];
+        var b = $$('#dwDeposit .balance')[k];
         if (b) b.textContent = 'Balance: ' + num(v, 6) + (t.i === 'wrap.near' ? ' NEAR' : '');
       }, function () {});
     });
