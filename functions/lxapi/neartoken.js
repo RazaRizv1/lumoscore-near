@@ -34,7 +34,7 @@ const KEEP = 86400;
 const WNEAR = 'wrap.near';
 const RPC = 'https://free.rpc.fastnear.com';
 const PAIRS = 'https://api.dexscreener.com/token-pairs/v1/near/';
-const VER = 'v3';   // v2: web, x, desc; v3: curated logo first (2026-10-29)
+const VER = 'v4';   // v2: web, x, desc; v3: curated logo first (2026-10-29)
 
 // NEAR account-id rules (nomicon): 2-64 chars, lowercase alphanumerics separated by single - _ or .,
 // no leading/trailing separator. Implicit accounts (64 hex) and eth-implicit (0x + 40 hex) satisfy
@@ -235,7 +235,13 @@ async function build(id, context) {
   const body = {
     ok: true, i: id, symbol, name, decimals, logo, supply,
     price, usd, nearUsd, near24, d24, v24, liquidity: liq, trades24: trades,
-    pools, poolCount: own.length, logos,
+    // THE POOL COUNT IS RHEA'S, NOT DEXSCREENER'S (RAZA 2026-10-30: "there seems to be very few even for
+    // assets like USDC"). DexScreener lists at most 30 pairs per token, so USDC read 30 while Rhea holds 394
+    // live pools of it (556 counting empty ones). Curated tokens carry Rhea's counts, baked from both pool
+    // contracts by _tools/_nearpoolcounts.js; any other token keeps DexScreener's figure, which the page marks
+    // "30+" when it is the cap.
+    pools, poolCount: (cur && cur.pcl > 0) ? cur.pcl : own.length, poolTotal: (cur && cur.pc > 0) ? cur.pc : null,
+    poolCapped: !(cur && cur.pcl > 0) && own.length >= 30, logos,
     curated: !!cur, cg: (cur && cur.cg) || '', web, x, desc: DESC[id] || '',
     lock: { keys, locked: keys == null ? null : (keys > 0 ? false : null) },
     src, at: Date.now(),

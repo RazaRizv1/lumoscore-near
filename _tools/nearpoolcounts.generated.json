@@ -1,0 +1,299 @@
+{
+ "generated": "2026-10-30T09:13:20.911Z",
+ "classic": 8992,
+ "dcl": 6320,
+ "counts": {
+  "wrap.near": {
+   "n": 10500,
+   "live": 5292
+  },
+  "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1": {
+   "n": 556,
+   "live": 394
+  },
+  "usdt.tether-token.near": {
+   "n": 469,
+   "live": 325
+  },
+  "qtc.omft.near": {
+   "n": 122,
+   "live": 64
+  },
+  "zec.omft.near": {
+   "n": 238,
+   "live": 65
+  },
+  "token.rhealab.near": {
+   "n": 179,
+   "live": 110
+  },
+  "batman-4.nearlytrade.near": {
+   "n": 20,
+   "live": 15
+  },
+  "dac17f958d2ee523a2206206994597c13d831ec7.factory.bridge.near": {
+   "n": 455,
+   "live": 83
+  },
+  "ikp.v2-launchpad.justhoot.near": {
+   "n": 1,
+   "live": 1
+  },
+  "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.factory.bridge.near": {
+   "n": 313,
+   "live": 78
+  },
+  "nearly-993927.nearlytrade.near": {
+   "n": 169,
+   "live": 115
+  },
+  "6b175474e89094c44da98b954eedeac495271d0f.factory.bridge.near": {
+   "n": 184,
+   "live": 28
+  },
+  "853d955acef822db058eb8505911ed77f175b99e.factory.bridge.near": {
+   "n": 21,
+   "live": 12
+  },
+  "hoot-8ecf65.launchpad.justhoot.near": {
+   "n": 31,
+   "live": 23
+  },
+  "aaaaaa20d9e0e2461697782ef11675f668207961.factory.bridge.near": {
+   "n": 326,
+   "live": 22
+  },
+  "wth-0b2227.launchpad.justhoot.near": {
+   "n": 2,
+   "live": 2
+  },
+  "three-de86d6.launchpad.justhoot.near": {
+   "n": 1,
+   "live": 1
+  },
+  "token.sweat": {
+   "n": 71,
+   "live": 46
+  },
+  "token.publicailab.near": {
+   "n": 14,
+   "live": 3
+  },
+  "dragon-3.nearlytrade.near": {
+   "n": 2,
+   "live": 2
+  },
+  "nomo.nearlytrade.near": {
+   "n": 2,
+   "live": 2
+  },
+  "lst.rhealab.near": {
+   "n": 13,
+   "live": 7
+  },
+  "token.0xshitzu.near": {
+   "n": 67,
+   "live": 55
+  },
+  "qcat-3.nearlytrade.near": {
+   "n": 2,
+   "live": 2
+  },
+  "diarhea.nearlytrade.near": {
+   "n": 74,
+   "live": 54
+  },
+  "blackdragon.tkn.near": {
+   "n": 94,
+   "live": 69
+  },
+  "linear-protocol.near": {
+   "n": 31,
+   "live": 17
+  },
+  "hoodl-95275b.launchpad.justhoot.near": {
+   "n": 2,
+   "live": 1
+  },
+  "shore-4lzt.launch.shoremarkets.near": {
+   "n": 5,
+   "live": 3
+  },
+  "kat.token0.near": {
+   "n": 19,
+   "live": 12
+  },
+  "meta-pool.near": {
+   "n": 365,
+   "live": 61
+  },
+  "ninu-4.nearlytrade.near": {
+   "n": 41,
+   "live": 22
+  },
+  "ai-8.nearlytrade.near": {
+   "n": 3,
+   "live": 3
+  },
+  "v2-nearx.stader-labs.near": {
+   "n": 7,
+   "live": 3
+  },
+  "nearagents.nearlytrade.near": {
+   "n": 1,
+   "live": 1
+  },
+  "npro.nearmobile.near": {
+   "n": 2,
+   "live": 2
+  },
+  "2260fac5e5542a773aa44fbcfedf7c193bc2c599.factory.bridge.near": {
+   "n": 92,
+   "live": 27
+  },
+  "gear.enleap.near": {
+   "n": 21,
+   "live": 14
+  },
+  "yuvi-6c041e37.qlyphs.near": {
+   "n": 9,
+   "live": 3
+  },
+  "singularty.nearlytrade.near": {
+   "n": 7,
+   "live": 3
+  },
+  "ftv2.nekotoken.near": {
+   "n": 63,
+   "live": 46
+  },
+  "staker1.msig1.trufin.near": {
+   "n": 1,
+   "live": 1
+  },
+  "spud-3.nearlytrade.near": {
+   "n": 1,
+   "live": 1
+  },
+  "trade-2.nearlytrade.near": {
+   "n": 4,
+   "live": 3
+  },
+  "22.contract.portalbridge.near": {
+   "n": 7,
+   "live": 4
+  },
+  "sol-0xd31e793eff8104551603bfac6e1222af303d4c5b.omdep.near": {
+   "n": 1,
+   "live": 1
+  },
+  "52a047ee205701895ee06a375492490ec9c597ce.factory.bridge.near": {
+   "n": 49,
+   "live": 7
+  },
+  "cfi.consumer-fi.near": {
+   "n": 1,
+   "live": 1
+  },
+  "eth.bridge.near": {
+   "n": 8,
+   "live": 3
+  },
+  "nbtc.bridge.near": {
+   "n": 31,
+   "live": 15
+  },
+  "jambo-1679.meme-cooking.near": {
+   "n": 44,
+   "live": 27
+  },
+  "apys.token.a11bd.near": {
+   "n": 5,
+   "live": 3
+  },
+  "ribbit-426.meme-cooking.near": {
+   "n": 1,
+   "live": 1
+  },
+  "xtoken.rhealab.near": {
+   "n": 11,
+   "live": 5
+  },
+  "token.v2.ref-finance.near": {
+   "n": 952,
+   "live": 146
+  },
+  "mpoo.nearlytrade.near": {
+   "n": 3,
+   "live": 2
+  },
+  "usmeme.tg": {
+   "n": 33,
+   "live": 26
+  },
+  "438e48ed4ce6beecf503d43b9dbd3c30d516e7fd.factory.bridge.near": {
+   "n": 90,
+   "live": 73
+  },
+  "nearai.aidols.near": {
+   "n": 2,
+   "live": 1
+  },
+  "nearsight.v2-launchpad.justhoot.near": {
+   "n": 1,
+   "live": 1
+  },
+  "mpdao-token.near": {
+   "n": 15,
+   "live": 10
+  },
+  "gnear-229.meme-cooking.near": {
+   "n": 7,
+   "live": 5
+  },
+  "d9c2d319cd7e6177336b0a9c93c21cb48d84fb54.factory.bridge.near": {
+   "n": 20,
+   "live": 6
+  },
+  "zolanear-1726.meme-cooking.near": {
+   "n": 23,
+   "live": 15
+  },
+  "xtoken.ref-finance.near": {
+   "n": 46,
+   "live": 29
+  },
+  "c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2.factory.bridge.near": {
+   "n": 22,
+   "live": 5
+  },
+  "vote-1737.meme-cooking.near": {
+   "n": 11,
+   "live": 9
+  },
+  "poppy-0.meme-cooking-test.near": {
+   "n": 8,
+   "live": 7
+  },
+  "509a38b7a1cc0dcd83aa9d06214663d9ec7c7f4a.factory.bridge.near": {
+   "n": 1,
+   "live": 1
+  },
+  "meta-token.near": {
+   "n": 191,
+   "live": 34
+  },
+  "l000000.factory.shardsmarket.near": {
+   "n": 4,
+   "live": 2
+  },
+  "itlx.intellex_xyz.near": {
+   "n": 2,
+   "live": 1
+  },
+  "claw-2.nearlytrade.near": {
+   "n": 2,
+   "live": 2
+  }
+ }
+}

@@ -2097,6 +2097,7 @@
     var pools = d.pools || [];
     var n = d.poolCount != null ? +d.poolCount : pools.length;
     var more = n > pools.length ? '+' : '';
+    if (d.poolCapped) n = n + '+';                      // DexScreener's 30-pair cap, not the token's total
     var tvl = 0, vol = 0;
     pools.forEach(function (p) { tvl += +p.liqUsd || 0; vol += +p.volUsd || 0; });
     setTabCount(/pools/i, String(n));
@@ -2156,6 +2157,19 @@
         tr.setAttribute('data-lxpool', p.id);
         body.appendChild(tr);
       });
+      // The table lists the largest pools DexScreener returns (it alone carries a pool's TVL and volume, and at
+      // most 30 per token); the count above is Rhea's. Said under the table, so the two cannot be read as one.
+      if (pools.length && (d.poolCount > pools.length || d.poolCapped)) {
+        var fn = extra.querySelector('.lxn-plnote');
+        if (!fn) {
+          fn = el('div', 'lxn-plnote');
+          fn.setAttribute('data-logoed', '1');
+          fn.style.cssText = 'padding:14px 20px;font-size:13px;color:var(--text-soft,#8a8fa3);border-top:1px solid var(--border)';
+          extra.appendChild(fn);
+        }
+        fn.textContent = 'Showing the ' + pools.length + ' largest of ' + (d.poolCapped ? 'more than ' + pools.length : d.poolCount.toLocaleString('en-US'))
+          + ' pools with liquidity on Rhea Finance' + (d.poolTotal > d.poolCount ? ' (' + d.poolTotal.toLocaleString('en-US') + ' counting empty ones)' : '') + '.';
+      }
       if (!pools.length) {
         var none = emptyState(/mdxa/.test(extra.className) ? 'mdxa-empty-state' : 'dxa-empty-state',
           'No pools found', 'No pool lists this token on NEAR right now.');
