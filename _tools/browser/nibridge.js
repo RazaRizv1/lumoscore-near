@@ -383,6 +383,9 @@
   // Native NEAR first (when 1Click takes wNEAR), then every curated origin.
   function sourceAssets() {
     var out = [];
+    // NOTHING UNTIL NEAR INTENTS' LIST IS IN. Before it only the Omni/Wormhole extras would be here, so the
+    // first paint chose wNEAR and kept it once native NEAR arrived (measured on staging d29184f6).
+    if (!TOKENS) return out;
     var w = ORIGINS.filter(function (o) { return o.contract === WNEAR; })[0];
     if (w) {
       out.push({ id: 'near', native: true, symbol: 'NEAR', name: 'NEAR', decimals: 24, contract: WNEAR,
