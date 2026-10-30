@@ -268,6 +268,14 @@
   }
   function loadParticipants(id) {
     PART = { rows: [], page: 1, per: 20, at: 0 };
+    // ALIGNMENT (RAZA 2026-10-30: "still not alligned with participants on its right"). The inherited CSS makes the
+    // Participants card flex:1 so it fills the right column down to the Transactions card's bottom -- but a column
+    // flex box still offers the grid its list's FULL content height, so 20 rows made the right column the taller one
+    // and the Transactions card ended ~170px short. contain:size takes the list out of that measurement: the left
+    // column sets the row height, the list fills what is left and scrolls (as Stellar's does), floored so it is
+    // never a sliver beside a short history.
+    var plist = $('#partList');
+    if (plist) { plist.style.contain = 'size'; plist.style.minHeight = '320px'; }
     participants('Reading the liquidity providers…');
     fetch('/lxapi/nearlps?pool=' + encodeURIComponent(id)).then(function (r) { return r.json(); }).then(function (d) {
       if (!d || !d.ok) { emptyParticipants('Could not read the liquidity providers — try again shortly.'); return; }
