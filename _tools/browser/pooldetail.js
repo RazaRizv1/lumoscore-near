@@ -1150,6 +1150,20 @@
         history.replaceState(history.state, '', want + location.search + location.hash);
     } catch (e) {}
     $$('.crumb a[data-lxback]').forEach(function (bk) { bk.setAttribute('href', '/pools/near'); });
+    // A POOL OUTSIDE THE CURATED LIST (reached from a search of all Rhea pools, or a shared link): it opens, as
+    // any Stellar pool does, but says plainly that LumosCore does not vouch for its tokens. A new Rhea pool can
+    // be a honeypot -- a token that cannot be sold back.
+    $$('.lx-uncurnote').forEach(function (n) { n.remove(); });
+    if (row.listed === false) {
+      $$('.pool-header').forEach(function (hd) {
+        var n = el('div', 'lx-uncurnote', 'Not curated by LumosCore. Check each token contract before trading or adding liquidity: '
+          + 'a token can be built so that it cannot be sold back.');
+        n.setAttribute('data-logoed', '1');
+        n.style.cssText = 'margin-top:14px;padding:10px 14px;border-radius:10px;font-size:13px;font-weight:600;line-height:1.45;'
+          + 'color:var(--warning,#f59e0b);background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25)';
+        hd.appendChild(n);
+      });
+    }
 
     // The pool's identity line: its Rhea id (what the copy button copies), its kind and its fee.
     var idSpan = $('.ph-id span');
@@ -2054,7 +2068,7 @@
         if (!d || !d.ok) { fail('Could not read the pool. Reload in a moment.', 'Could not load this pool'); return; }
         var row = (d.rows || [])[0];
         if (!row || String(row.id) !== String(id)) {
-          fail('LumosCore lists Rhea pools whose tokens are all curated; this one is not among them.', 'Pool not listed');
+          fail('Rhea has no pool with this id.', 'Pool not found');
           return;
         }
         USD = (+d.usd > 0) ? +d.usd : null;

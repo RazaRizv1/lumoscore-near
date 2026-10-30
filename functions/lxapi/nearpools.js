@@ -120,6 +120,91 @@ async function build() {
     rows };
 }
 
+// ---- every Rhea pool, for search and off-list pool pages ------------------------------------------------
+// list-top-pools is ~2,500 pools; it is read at most every ten minutes and kept reduced.
+const ALL_TTL = 600;
+async function allPools(context) {
+  const key = new Request('https://lumoscore.internal/lxapi/nearpools/' + VER + '/all');
+  const hit = await caches.default.match(key);
+  if (hit) return hit.json();
+  const [pools, prices] = await Promise.all([getJson(POOLS, 12000), getJson(PRICES, 6000)]);
+  if (!Array.isArray(pools) || !pools.length) throw new Error('rhea: no pools');
+  const px = {};
+  for (const t in prices) { const p = num((prices[t] || {}).price), d = num((prices[t] || {}).decimal); if (p != null) px[t] = [p, d]; }
+  const all = { px, pools: pools.filter((p) => p && /^\d+$/.test(String(p.id)) && Array.isArray(p.token_account_ids)).map((p) => ({
+    id: String(p.id), kind: String(p.pool_kind || ''), ids: p.token_account_ids, syms: (p.token_symbols || []).map((s) => String(s || '').slice(0, 32)),
+    am: p.amounts || [], fee: num(p.total_fee) })) };
+  context.waitUntil(caches.default.put(key, new Response(JSON.stringify(all), {
+    headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=' + ALL_TTL } })));
+  return all;
+}
+// Decimals, symbol and logo for a token outside the curated table: the token contract itself.
+const RPCS = ['https://near.drpc.org', 'https://rpc.mainnet.fastnear.com'];
+async function ftMeta(t) {
+  for (const u of RPCS) {
+    try {
+      const ctl = new AbortController(); const tm = setTimeout(() => ctl.abort(), 5000);
+      const r = await fetch(u, { method: 'POST', signal: ctl.signal, headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'query', params: { request_type: 'call_function', finality: 'final',
+          account_id: t, method_name: 'ft_metadata', args_base64: 'e30=' } }) });
+      clearTimeout(tm);
+      const j = await r.json();
+      if (!j || !j.result || !j.result.result) continue;
+      const m = JSON.parse(new TextDecoder().decode(new Uint8Array(j.result.result)));
+      const icon = typeof m.icon === 'string' && m.icon.length <= 12000 && /^data:image\/(png|jpe?g|webp|gif|svg\+xml)[;,]/.test(m.icon) ? m.icon : '';
+      return { s: String(m.symbol || '').slice(0, 32), d: num(m.decimals), logo: icon };
+    } catch (e) {}
+  }
+  return null;
+}
+function offRow(p, all, meta) {
+  let liqUsd = 0;
+  const tokens = p.ids.map((t, k) => {
+    const c = META[t], m = (meta && meta[t]) || null, pr = all.px[t];
+    const d = c && c.d != null ? c.d : (pr && pr[1] != null ? pr[1] : (m ? m.d : null));
+    const v = d != null && p.am[k] != null ? Number(p.am[k]) / Math.pow(10, d) : null;
+    if (liqUsd != null) liqUsd = (v != null && pr) ? liqUsd + v * pr[0] : null;
+    return { i: t, s: (c && c.s) || (m && m.s) || p.syms[k] || t, logo: (c && c.logo) || (m && m.logo) || '', v };
+  });
+  const nearUsd = (all.px[WNEAR] || [])[0];
+  return { id: p.id, kind: p.kind, tokens, fee: p.fee == null ? null : p.fee / 100,
+    liq: liqUsd != null && nearUsd > 0 ? liqUsd / nearUsd : null, vol: null, fees: null, apr: null, trades: null, listed: false };
+}
+async function offList(context, body, id) {
+  const all = await allPools(context);
+  const p = all.pools.find((x) => x.id === id);
+  if (!p) return null;
+  const meta = {};
+  await Promise.all(p.ids.map(async (t) => { if (!META[t]) meta[t] = await ftMeta(t); }));
+  const row = offRow(p, all, meta);
+  // Rhea's own 24h volume, as the list uses for the pools DexScreener lacks.
+  try {
+    const arr = await getJson(RHEA_VOL + id + '/rolling24hvolume/sum', 5000);
+    const v = Array.isArray(arr) ? num(arr[0]) : null, nearUsd = (all.px[WNEAR] || [])[0];
+    if (v != null && v >= 0 && nearUsd > 0) {
+      row.vol = v / nearUsd;
+      if (row.fee != null) { row.fees = row.vol * row.fee / 100; if (row.liq > 0) row.apr = row.fees * 365 / row.liq * 100; }
+    }
+  } catch (e) {}
+  return row;
+}
+// Every term must BE one of the pool's token symbols or contract ids -- an exact match, as Stellar's search
+// requires an exact asset code: a substring would offer pools of a different token that merely contains the
+// letters. Listed pools come back as their list rows, first; the rest as off-list rows, best liquidity first.
+async function searchAll(context, body, q) {
+  const terms = q.split(/[\s\/,]+/).filter(Boolean).slice(0, 4).map((x) => x === 'near' ? 'wnear' : x);
+  const all = await allPools(context);
+  const listed = {};
+  for (const r of body.rows) listed[r.id] = r;
+  const hits = all.pools.filter((p) => {
+    const keys = p.ids.map((t, k) => [String(p.syms[k] || '').toLowerCase(), String(t).toLowerCase(), String((META[t] || {}).s || '').toLowerCase()]);
+    return terms.every((term) => keys.some((ks) => ks.indexOf(term) >= 0));
+  });
+  const rows = hits.map((p) => listed[p.id] || offRow(p, all, null));
+  rows.sort((a, b) => ((b.listed === false ? 0 : 1) - (a.listed === false ? 0 : 1)) || ((b.liq || 0) - (a.liq || 0)));
+  return { ok: true, usd: body.usd, at: Date.now(), q, rows: rows.slice(0, 30), count: Math.min(rows.length, 30), total: rows.length, summary: null };
+}
+
 export async function onRequestGet(context) {
   const url = new URL(context.request.url);
   const n = Math.max(1, Math.min(200, parseInt(url.searchParams.get('n') || '100', 10) || 100));
@@ -142,6 +227,24 @@ export async function onRequestGet(context) {
       const old = await cache.match(kept);
       if (!old) return json({ ok: false, error: 'pool data unavailable', why: String((e && e.message) || e).slice(0, 200), rows: [] }, 0);
       body = await old.json(); stale = true;
+    }
+  }
+
+  // OFF THE LIST. A search the curated rows cannot answer, and the page of a pool outside them, read Rhea's
+  // whole pool list -- as Stellar's search and pool page reach any pool on its network (RAZA 2026-10-30, a search
+  // for "batman" finding nothing although Rhea has a BATMAN/wNEAR pool). Such rows carry listed:false and the
+  // pages say so.
+  const q = String(url.searchParams.get('q') || '').trim().toLowerCase().slice(0, 60);
+  if (q) {
+    try { return json(await searchAll(context, body, q), 60); }
+    catch (e) { return json({ ok: false, error: 'pool search unavailable', why: String((e && e.message) || e).slice(0, 200), rows: [] }, 0); }
+  }
+  if (want && /^\d{1,9}$/.test(want) && !body.rows.some((r) => r.id === String(want))) {
+    try {
+      const row = await offList(context, body, String(want));
+      return json(Object.assign({}, body, { rows: row ? [row] : [], count: row ? 1 : 0, filteredBy: { id: want }, summary: null }), 60);
+    } catch (e) {
+      return json({ ok: false, error: 'pool data unavailable', why: String((e && e.message) || e).slice(0, 200), rows: [] }, 0);
     }
   }
 

@@ -376,6 +376,7 @@
     wrap.appendChild(icons);
     var nm = el('div');
     nm.appendChild(el('div', 'pair-name', pairName(p)));
+    if (p.listed === false) nm.appendChild(uncurated());
     wrap.appendChild(nm);
     // NO FEE BADGE. This layer used to append the pool's trading fee ("0.205%") beside the pair.
     // lumoscore.com does not, and it was an addition of mine rather than anything the design asked
@@ -450,6 +451,7 @@
 
     var info = el('div', 'pc-info');
     info.appendChild(el('div', 'pc-name', pairName(p)));
+    if (p.listed === false) info.appendChild(uncurated());
     // THE FEE BADGE WAS REMOVED FROM THE TABLE AND LEFT ON THE CARD, so the phone kept showing
     // "0.205% fee tier" after RAZA asked for it to go — "we dont have it on stellar so why did you
     // add it on XRPL". Checked against lumoscore.com's own phone build: its pool cards carry no fee
@@ -488,6 +490,13 @@
     return null;
   }
 
+  // A pool found by searching ALL of Rhea (see localPools): its tokens are not ones LumosCore vouches for.
+  function uncurated() {
+    var t = el('div', 'lx-uncur', 'Not curated · check the token contracts');
+    t.setAttribute('data-logoed', '1');
+    t.style.cssText = 'font-size:11.5px;font-weight:600;color:var(--warning,#f59e0b);margin-top:2px;white-space:nowrap';
+    return t;
+  }
   function noteHost(h, text) {
     if (h.kind === 'table') { note(h.node, text); return; }
     h.node.innerHTML = '';
@@ -1024,8 +1033,18 @@
     });
     var pg = $('#paginationAll');
     if (!rows.length) {
-      noteHost(h, 'No pools match that search.');
       if (pg) pg.style.display = 'none';
+      // NOTHING IN THE LIST: ASK ALL OF RHEA (RAZA 2026-10-30, "its not searching for the pools" -- "batman"
+      // has a Rhea pool that is not curated). Stellar's search does the same with its whole network. An exact
+      // symbol or contract match only; listed pools first, the rest marked as not curated.
+      if (ql.length < 2) { noteHost(h, 'No pools match that search.'); return; }
+      noteHost(h, 'Searching all Rhea pools for “' + ql + '”…');
+      fetch('/lxapi/nearpools?q=' + encodeURIComponent(ql)).then(function (r) { return r.json(); }).then(function (d) {
+        if (my !== poolQ) return;
+        if (!d || !d.ok) { noteHost(h, 'Could not search Rhea’s pools just now — try again shortly.'); return; }
+        if (!(d.rows || []).length) { noteHost(h, 'No pools match that search.'); return; }
+        renderPage(h, { ok: true, rows: d.rows, summary: null }, 1);
+      }, function () { if (my === poolQ) noteHost(h, 'Could not search Rhea’s pools just now — try again shortly.'); });
       return;
     }
     renderPage(h, { ok: true, rows: rows, summary: null }, 1);
