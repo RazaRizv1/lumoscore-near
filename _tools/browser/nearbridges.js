@@ -240,10 +240,12 @@
   // Wormholescan, by the NEAR transaction: nothing yet (the guardians have not signed), a signed message
   // (ready to claim), or the destination's redeem (delivered). CORS open.
   function whStatus(hash) {
+    // A 4xx is Wormholescan not knowing the hash (yet): the same answer as an empty list, not a fault.
     return fetch(WHSCAN + encodeURIComponent(hash)).then(function (r) {
-      if (!r.ok) throw new Error('wormholescan ' + r.status);
+      if (r.status >= 400 && r.status < 500) return {};
+      if (!r.ok) throw new Error('Wormholescan is not answering right now — try again shortly.');
       return r.json();
-    }).then(function (j) {
+    }, function () { throw new Error('Wormholescan is not answering right now — try again shortly.'); }).then(function (j) {
       var op = j && j.operations && j.operations[0];
       if (!op) return { status: 'PENDING' };
       var tc = op.targetChain;

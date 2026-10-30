@@ -1298,15 +1298,19 @@
   // without (Stellar's niFeeBps), read from whether the Function reports itself keyed.
   function niFeeBps() { return KEYED ? 20 : 25; }
   var NI_ETA = '~30 seconds';
-  // Wormhole's mark through the CoinGecko logo proxy (its W token); Omni has no token and no mark we
-  // ship, so a plain monogram rather than borrowing someone else's artwork.
-  var OMNI_MARK = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'
-    + '<circle cx="16" cy="16" r="16" fill="#1d1d22"/><text x="16" y="21.5" text-anchor="middle" '
-    + 'font-family="Georgia,serif" font-size="17" font-weight="700" fill="#fff">Ω</text></svg>');
+  // Wormhole's mark ships in this repo's assets/networks (its W token's art; the CoinGecko proxy is
+  // refused from Cloudflare, measured on staging 7097d750). Omni has no token and no mark we ship, so a
+  // plain monogram rather than borrowing someone else's artwork -- and the same for Wormhole should the
+  // file ever be missing from a build.
+  function monogram(ch) {
+    return 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'
+      + '<circle cx="16" cy="16" r="16" fill="#1d1d22"/><text x="16" y="21.5" text-anchor="middle" '
+      + 'font-family="Georgia,serif" font-size="17" font-weight="700" fill="#fff">' + ch + '</text></svg>');
+  }
   var ROUTE_META = {
     ni: { name: 'NEAR Intents', img: '/assets/tokens/ni/NEAR.png' },
-    om: { name: 'Omni Bridge', img: OMNI_MARK },
-    wh: { name: 'Wormhole', img: API + '?op=logo&id=wormhole' }
+    om: { name: 'Omni Bridge', img: monogram('Ω') },
+    wh: { name: 'Wormhole', img: NET_HAVE.wormhole ? ('/assets/networks/wormhole.png?v=' + ICONV) : monogram('W') }
   };
   // A range, not a number: neither publishes one. Wormhole's guardians sign NEAR transfers in ~15 min.
   var ROUTE_ETA = { om: 'a few minutes', wh: '~15 min, then claim' };
