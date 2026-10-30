@@ -197,6 +197,12 @@ for (const dev of ['desktop', 'mobile']) {
       const n = (h.match(re) || []).length;
       if (n) { h = h.replace(re, ''); stripped += n; perId[sid] = (perId[sid] || 0) + n; }
     }
+    // ...AND THE LAYERZERO PICKER LEFT THE SAME KIND OF RULE inside lx-lzpick-css, which also carries the
+    // route panel's layout, so only the hide rules go: Berachain, Hyperliquid, Monad, Plasma and X Layer
+    // (.lx-lzopt) vanished from the opened menu, measured on staging 67d42b9d after the sheet above went.
+    const lzHide = /html:not\(\.lx-lz-on\) \.brd-opt[^{]*\{display:none !important\}/g;
+    const lzN = (h.match(lzHide) || []).length;
+    if (lzN) { h = h.replace(lzHide, ''); stripped += lzN; perId['lx-lzpick-css rules'] = (perId['lx-lzpick-css rules'] || 0) + lzN; }
     const p = patchStep2(h); h = p.html; s2[p.state]++;
     for (const [from, to] of MARKUP) {
       const n = h.split(from).length - 1;
