@@ -14,8 +14,8 @@
 // (the Custom Swap popup has carried the banner since 10-31). Both now link to /lumos/near, which exists. The
 // fee itself stays a flat 0.2% until the switch below is set. Still hidden:
 //   .lx-feetier                         the card with the balance bar -- Stellar hides it on Trade too
-//   the banner in the LIMIT pane        NEAR limit orders are free (RAZA 2026-08-19); "50% off" nothing is
-//                                       wrong there, before or after the mint
+// (The Limit pane's banner was hidden too while NEAR limit orders were free; since RAZA 2026-11-01 they carry
+// the 0.2% fee, so it shows there as on Stellar.)
 //
 // A stylesheet in <head>, so the pieces never paint — no flash. Idempotent: the block is replaced by id.
 const fs = require('fs');
@@ -23,10 +23,9 @@ const { read, getContents } = require(__dirname + '/lib.js');
 const B = String.fromCharCode(92);
 
 const ID = 'lx-near-lumosdeferred';
-// Once LUMOS is on NEAR (the one switch, _tools/near-lumos.js), the fee-tier card shows too; the limit pane's
-// banner never does. The style is replaced by id, so flipping the switch back and forth is clean either way.
+// Once LUMOS is on NEAR (the one switch, _tools/near-lumos.js), the fee-tier card shows too. The style is replaced by id, so flipping the switch back and forth is clean either way.
 const { NEAR_LUMOS } = require(__dirname + '/near-lumos.js');
-const HIDE = ['.dxa-pane-limit .lx-feebanner-wrap', '.mdxa-pane-limit .lx-feebanner-wrap'].concat(NEAR_LUMOS ? [] : ['.lx-feetier']);
+const HIDE = NEAR_LUMOS ? [] : ['.lx-feetier'];
 const STYLE = '<style id="' + ID + '">' + HIDE.join(',') + '{display:none!important}</style>';
 // The review row's "LUMOS" link is Stellar's (/lumos/stellar); on NEAR it is NEAR's LUMOS page.
 const RV_STELLAR = 'class="lx-rv-buy" href="/lumos/stellar"', RV_NEAR = 'class="lx-rv-buy" href="/lumos/near"';
@@ -42,7 +41,7 @@ for (const dev of ['desktop', 'mobile']) {
     if (h.indexOf('lx-feebanner-wrap') < 0 && h.indexOf('lx-feetier') < 0 && h.indexOf('lx-rv-lumos') < 0) continue;
     const a = h.indexOf('<style id="' + ID + '">');
     if (a >= 0) h = h.slice(0, a) + h.slice(h.indexOf('</style>', a) + 8);
-    h = h.replace('</head>', STYLE + '</head>');
+    if (HIDE.length) h = h.replace('</head>', STYLE + '</head>');
     h = h.split(RV_STELLAR).join(RV_NEAR);
     json[k] = h;
     pages++;

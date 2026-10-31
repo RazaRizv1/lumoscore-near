@@ -110,8 +110,8 @@
       v.setAttribute('data-logoed', '1');
       row.appendChild(v);
     }
-    var t = 'Free';
-    if (pool && me() && acct.reg === false) t = phone(p) ? 'Free · 0.5 NEAR storage' : 'Free · 0.5 NEAR one-time storage';
+    // Stellar's row: "Trading fee  0.2%" (RAZA 2026-11-01). NEAR limit orders now carry the fee (neardcl.js).
+    var t = window.__lxFeeRate === 0.001 ? '0.1%' : '0.2%';
     if (v.textContent !== t) v.textContent = t;
   }
 
@@ -302,11 +302,16 @@
     // plainIn's 12 significant digits drop the 6th decimal of any balance from a million up --
     // 1,234,567.999999 filled as 1,234,568. So sell truncates the exact raw string, and buy, which
     // has to divide by a price anyway, floors to 6 places and is printed without re-rounding.
-    if (side(p) === 'sell') { if (acct.bal[a.id] != null && dec != null) out = trunc6(D().fromUnits(acct.bal[a.id], dec)); }
+    // The fee comes on top of the order, so MAX leaves room for it: amount x (1 + fee) fits the balance.
+    var bps = window.__lxFeeRate === 0.001 ? 10 : 20;
+    if (side(p) === 'sell') {
+      if (acct.bal[a.id] != null && dec != null) out = trunc6(D().fromUnits((D().big(acct.bal[a.id]) * BigInt(10000) / BigInt(10000 + bps)).toString(), dec));
+    }
     else if (price > 0 && acct.bal.near != null && SW()) {
       // Leave room for the DCL storage a first order adds.
       var room = D().big(SW().swapRoom('near', acct.bal.near));
       if (acct.reg === false) room -= D().big('500000000000000000000000');
+      room = room * BigInt(10000) / BigInt(10000 + bps);
       var amt = room > BigInt(0) ? D().toNum(room.toString(), 24) / price : 0;
       if (amt > 0) out = trunc6((Math.floor(amt * 1e6) / 1e6).toFixed(6));
     }
@@ -369,9 +374,10 @@
     Promise.all([D().prereqs(who, o), SW().balance(who, 'near'), o.sell === D().WNEAR ? null : SW().balance(who, o.sell)]).then(function (r) {
       var pre = r[0], nearBal = D().big(r[1]);
       var keep = D().big(SW().SWAP_KEEP);                            // 0.2 NEAR for gas, as a swap keeps
-      var needNear = D().big(pre.storage) + (o.sell === D().WNEAR ? D().big(o.sellRaw) : BigInt(0));
-      if (o.sell !== D().WNEAR && D().big(o.sellRaw) > D().big(r[2])) {
-        throw new Error('You only have ' + fmtDown(r[2], dec) + ' ' + code() + '.');
+      // What leaves the wallet is the order plus its fee (neardcl plan().spendRaw).
+      var needNear = D().big(pre.storage) + (o.sell === D().WNEAR ? D().big(o.spendRaw) : BigInt(0));
+      if (o.sell !== D().WNEAR && D().big(o.spendRaw) > D().big(r[2])) {
+        throw new Error('You only have ' + fmtDown(r[2], dec) + ' ' + code() + ' — the order and its ' + (o.feeBps / 100) + '% fee need ' + fmtDown(o.spendRaw, dec) + '.');
       }
       if (needNear + keep > nearBal) {
         throw new Error(o.sell === D().WNEAR
@@ -385,7 +391,7 @@
     }).then(function (res) {
       var v = D().verdict(res);
       if (v.ok === false) {
-        stop(v.why === 'refunded' ? 'Rhea did not accept the order, so your tokens came back.' : 'The order failed on chain. Check your wallet activity.');
+        stop(v.why === 'refunded' ? 'Rhea did not accept the order, so your tokens came back (the fee had already been paid).' : 'The order failed on chain. Check your wallet activity.');
         return;
       }
       stop('');

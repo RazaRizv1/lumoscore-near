@@ -928,7 +928,10 @@
         }
         // "You sell" is ALWAYS the asset being sold, so MAX is simply what can be sold of it.
         var i = lEl('.lxq-amt');
-        if (i) i.value = down(room, lim.s.dec, Math.min(lim.s.dec, 7));   // 7 places, as Stellar fills it; truncated, never rounded up
+        // Less the fee that comes on top of the order, so MAX is an order that can actually be placed.
+        var bps = window.__lxFeeRate === 0.001 ? 10 : 20;
+        var net = (S().big(room) * BigInt(10000) / BigInt(10000 + bps)).toString();
+        if (i) i.value = down(net, lim.s.dec, Math.min(lim.s.dec, 7));   // 7 places, as Stellar fills it; truncated, never rounded up
         limitSync();
         return;
       }
@@ -1069,8 +1072,8 @@
     if (lim.pool === undefined) { limNote('Checking Rhea for a ' + pr.token.code + ' / NEAR pool…'); limSay(''); limGo(false, 'Place limit order'); return; }
     if (lim.pool === null) { limNote(''); limSay(NOPOOL + ': there is no ' + pr.token.code + ' / NEAR pool.'); limGo(false, 'Place limit order'); return; }
 
-    // Limit orders are still free; the "No LumosCore fee on limit orders." line is gone because Stellar's pane
-    // does not carry it (RAZA 2026-10-31). What stays is the tick the order really rests at.
+    // The tick the order really rests at, and -- since NEAR limit orders carry the LumosCore fee (RAZA
+    // 2026-11-01; neardcl.js) -- what that fee is, because it comes on top of the amount typed.
     var bits = [];
     var ord = null;
     if (tokAmt && Number(tokAmt) > 0) {
@@ -1078,6 +1081,7 @@
       if (ord && ord.rests > 0) {
         bits.push('Filled when 1 ' + pr.token.code + ' reaches ' + fmtNum(ord.rests, ord.rests < 1 ? 10 : 6) + ' NEAR (the pool’s nearest tick).');
       }
+      if (ord) bits.push('Trading fee ' + (ord.feeBps / 100) + '%: ' + show(ord.feeRaw, lim.s.dec, 7) + ' ' + lim.s.code + ', on top of the amount.');
     }
     limNote(bits.join(' '));
 
@@ -1088,7 +1092,7 @@
 
     var room = roomRaw(lim.s);
     if (room == null) { limSay(balWhy(lim.s) + '.'); limGo(false, 'Place limit order'); return; }
-    if (S().big(ord.sellRaw) > S().big(room)) {
+    if (S().big(ord.spendRaw) > S().big(room)) {                    // the order plus its fee
       limSay(shortOf(lim.s, rawBal(lim.s), 'order'));
       limGo(false, 'Place limit order');
       return;
@@ -1116,7 +1120,7 @@
     D().prereqs(who, ord).then(function (pre) {
       return S().balance(who, 'near').then(function (haveRaw) {
         var have = S().big(haveRaw), need = S().big(pre.storage);
-        if (ord.sell === D().WNEAR) need += S().big(ord.sellRaw);
+        if (ord.sell === D().WNEAR) need += S().big(ord.spendRaw);
         if (need > have) throw new Error('Not enough NEAR for this order and the storage it needs (' + show(pre.storage, 24, 4) + ' NEAR).');
         var txs = D().buildPlace(who, ord, pre);
         limGo(false, txs.length > 1 ? ('Approve ' + txs.length + ' in your wallet…') : 'Confirm in wallet…');

@@ -37,6 +37,14 @@ const PAIRS = [
   // Screen-reader headings (visually hidden, read aloud and indexed).
   ['<h1 class="lx-srh1">Your Stellar wallet', '<h1 class="lx-srh1">Your NEAR wallet'],
   ['<h1 class="lx-srh1">Stellar liquidity pool', '<h1 class="lx-srh1">NEAR liquidity pool'],
+  // LIMIT ORDERS PAY THE FEE ON NEAR (RAZA 2026-11-01: "If its feasible on Near, then we should charge 0.2%
+  // fees"; browser/neardcl.js takes it when the order is placed). Stellar's are free, and its copy says so;
+  // on NEAR pages these three sentences would promise a free order that is not.
+  ['Limit orders are free, because an order that may never fill should not cost you anything.',
+   'On NEAR, a limit order pays the same fee, taken when the order is placed.'],
+  ['shown on every quote. Limit orders are free.</span>',
+   'shown on every quote. On NEAR it applies to limit orders too, taken when the order is placed.</span>'],
+  [', and limit orders are free.', ', and on NEAR a limit order pays it when the order is placed.'],
 ];
 
 const hits = PAIRS.map(() => 0), done = PAIRS.map(() => 0);
