@@ -9,7 +9,7 @@
 //   balances   view_account (liquid amount; storage is amount the account keeps), FastNEAR's token index,
 //              decimals/logos/prices from /lxapi/nearmarket, ft_metadata for the rest under the 4s cap.
 //   value      balance x price-in-NEAR x NEAR/USD, the wallet's sum, so the two pages cannot disagree.
-//   activity   NearBlocks txns-only + ft-txns: one pair of calls per view, cached 60s, 429 backs off.
+//   activity   FastNEAR's transaction index (lxnCore.activityData), cached 60s, 429 backs off.
 //   pools      Rhea LP shares (plus farm-staked), found via the account's Rhea deposits -- see paintPools.
 //   tick       the curated list (the Trade roster) plus wNEAR, as on the Wallet page.
 // Any id that is not a NEAR account id gets the design's empty states with a NEAR sentence; an id that
@@ -506,7 +506,7 @@
 
   // ---- activity --------------------------------------------------------------------------------------
   // The row the Stellar page draws (.activity-row, the classes #accActs is styled for), filled from the
-  // Wallet page's own NearBlocks reading (lxnCore.entriesOf). The counterparty links to ITS account page.
+  // Wallet page's own reading (lxnCore.activityData + entriesOf). The counterparty links to ITS account page.
   var MID = String.fromCharCode(183);
   function who(acct) {
     var a = el('a', 'acc-who', C.short(acct));

@@ -1,5 +1,6 @@
 // NEAR reads shared by the Wallet page, the Account page and the header search: FastNEAR RPC (view_account,
-// ft_metadata), FastNEAR's token-balance index, /lxapi/nearmarket, and NearBlocks activity.
+// ft_metadata), FastNEAR's token-balance index, /lxapi/nearmarket, and activity (FastNEAR's transaction
+// index; NearBlocks only as a fallback -- see fnActivity).
 //
 // MOVED OUT OF browser/wallet.js (2026-10-21), verbatim, so a second page could read any account without a
 // second implementation of balances. wallet.js reaches these through window.lxnCore and makes the same calls
@@ -233,13 +234,159 @@
     var hold = 0;
     try { hold = +sessionStorage.getItem('lxn.act.hold') || 0; } catch (e) {}
     if (hold > Date.now()) { var eh = new Error('busy'); eh.code = 429; return Promise.reject(eh); }
-    return Promise.all([nbGet(me, '/txns-only?per_page=25'), nbGet(me, '/ft-txns?per_page=25')]).then(function (r) {
-      var d = { t: Date.now(), txns: ((r[0] && r[0].txns) || []).map(normTx), fts: ((r[1] && r[1].txns) || []).map(normFt) };
+    // FastNEAR first; NearBlocks only if FastNEAR cannot answer (its plain transaction list is current, so
+    // the page still lists something, but its token history is the stale one described below).
+    return fnActivity(me).catch(function (e) {
+      if (e && e.code === 429) throw e;
+      return Promise.all([nbGet(me, '/txns-only?per_page=25'), nbGet(me, '/ft-txns?per_page=25')]).then(function (r) {
+        return { t: Date.now(), txns: ((r[0] && r[0].txns) || []).map(normTx), fts: ((r[1] && r[1].txns) || []).map(normFt) };
+      });
+    }).then(function (d) {
       try { sessionStorage.setItem(key, JSON.stringify(d)); } catch (e) {}
       return d;
     }, function (e) {
       if (e && e.code === 429) { try { sessionStorage.setItem('lxn.act.hold', String(Date.now() + 60000)); } catch (x) {} }
       throw e;
+    });
+  }
+
+  // ACTIVITY FROM FASTNEAR'S TRANSACTION INDEX (RAZA 2026-11-01: "on Stellar public wallet page, it shows so
+  // many things but on Near its the same thing"). NearBlocks' free token history (/ft-txns) STOPPED AT
+  // 2026-09-30 -- checked on v2.ref-finance.near, whose newest token row was a month old while its plain
+  // transaction list was minutes old -- so every account's last 25 rows were plain transactions and no
+  // transfer or swap since October could appear. FastNEAR's index is current, needs no key and allows our
+  // origin: /v0/account lists the account's transactions newest first (including ones it only appears in
+  // through an event log), /v0/transactions returns them whole, 20 at a time, receipts and logs included.
+  //
+  // What moved, per transaction, from the chain's own records:
+  //   tokens  NEP-141 event logs (ft_transfer / ft_mint / ft_burn) written by the token contract, for this
+  //           account, from receipts that succeeded;
+  //   NEAR    Transfer actions this account sent, a near_deposit it paid wrap.near (NEAR going in to be
+  //           wrapped), and Transfers it received -- in someone else's transaction, or from wrap.near
+  //           (an unwrap). Gas refunds (from "system") never count, nor the change a contract hands back
+  //           in the account's own transaction (a storage refund is not income).
+  // Netted per token, so a wrap-then-swap reads NEAR -> USDC, not three rows. The result has the shape the
+  // NearBlocks reader produced ({ txns, fts }), so entriesOf and both pages read it unchanged.
+  var FTX = 'https://tx.main.fastnear.com/v0/';
+  var ACT_NAME = { Transfer: 'TRANSFER', FunctionCall: 'FUNCTION_CALL', AddKey: 'ADD_KEY', DeleteKey: 'DELETE_KEY',
+    CreateAccount: 'CREATE_ACCOUNT', DeployContract: 'DEPLOY_CONTRACT', Stake: 'STAKE', DeleteAccount: 'DELETE_ACCOUNT' };
+  function fnPost(path, body) {
+    return fetch(FTX + path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+      .then(function (r) {
+        if (r.status === 429) { var e = new Error('busy'); e.code = 429; throw e; }
+        if (!r.ok) throw new Error('fastnear ' + r.status);
+        return r.json();
+      });
+  }
+  function actPair(a) {
+    if (typeof a === 'string') return [a, {}];
+    var k = Object.keys(a || {})[0] || '';
+    return [k, a[k] || {}];
+  }
+  function okOutcome(o) { var s = o && o.status; return !!s && (s.SuccessValue !== undefined || s.SuccessReceiptId !== undefined); }
+  function big(v) { try { return BigInt(String(v)); } catch (e) { return BigInt(0); } }
+
+  function fnActivity(me) {
+    return fnPost('account', { account_id: me }).then(function (j) {
+      var list = ((j && j.account_txs) || []).slice(0, 25), okBy = {};
+      list.forEach(function (x) { okBy[x.transaction_hash] = x.is_success !== false; });
+      var hs = list.map(function (x) { return x.transaction_hash; });
+      // Five at a time, in parallel: the endpoint takes up to 20, but one call of 20 for omni.bridge.near took
+      // 32s on the page and five calls of five took under 6s (2026-11-01). A batch that fails costs its own
+      // rows only; all of them failing is a failure.
+      var calls = [];
+      for (var i = 0; i < hs.length; i += 5) calls.push(fnPost('transactions', { tx_hashes: hs.slice(i, i + 5) }).catch(function (e) { return { err: e }; }));
+      return Promise.all(calls).then(function (rs) {
+        var got = [], fails = rs.filter(function (r) { return r && r.err; });
+        if (rs.length && fails.length === rs.length) throw fails[0].err;
+        rs.forEach(function (r) { got = got.concat((r && r.transactions) || []); });
+        var legs = [], txns = [];
+        got.forEach(function (T) { decodeTx(me, T, okBy, txns, legs); });
+        return withMeta(legs).then(function (fts) { return { t: Date.now(), txns: txns, fts: fts }; });
+      });
+    });
+  }
+
+  function decodeTx(me, T, okBy, txns, legs) {
+    var tx = T.transaction || {}, h = tx.hash || '';
+    var ts = nsMs((T.execution_outcome && T.execution_outcome.block_timestamp) || '');
+    var ok = okBy[h] !== false;
+    // A meta-transaction (relayed): the account that signed the inner actions is the one that acted.
+    var sg = tx.signer_id || '', rc = tx.receiver_id || '', acts = tx.actions || [];
+    if (acts.length === 1 && actPair(acts[0])[0] === 'Delegate') {
+      var da = (actPair(acts[0])[1].delegate_action) || {};
+      sg = da.sender_id || sg; rc = da.receiver_id || rc; acts = da.actions || [];
+    }
+    txns.push({ ts: ts, h: h, sg: sg, rc: rc, ok: ok, acts: acts.map(function (a) {
+      var p = actPair(a), b = p[1];
+      return { a: ACT_NAME[p[0]] || String(p[0]).toUpperCase(), m: b.method_name || '', dep: +b.deposit || 0 };
+    }) });
+
+    var net = {}, who = {};
+    function add(c, amt, other) { net[c] = (net[c] || BigInt(0)) + amt; if (other) who[c] = other; }
+    (T.receipts || []).forEach(function (r) {
+      var rr = r.receipt || {}, out = (r.execution_outcome && r.execution_outcome.outcome) || {};
+      if (!okOutcome(out)) return;
+      var pre = rr.predecessor_id || '', to = rr.receiver_id || '';
+      var ra = (rr.receipt && rr.receipt.Action && rr.receipt.Action.actions) || [];
+      if (pre !== 'system') ra.forEach(function (a) {
+        var p = actPair(a), b = p[1];
+        if (pre === me && to !== me) {
+          if (p[0] === 'Transfer') add('near', -big(b.deposit), to);
+          else if (p[0] === 'FunctionCall' && to === WNEAR && b.method_name === 'near_deposit') add('near', -big(b.deposit));
+        } else if (to === me && pre !== me && p[0] === 'Transfer' && (sg !== me || pre === WNEAR)) {
+          add('near', big(b.deposit), pre);
+        }
+      });
+      var token = out.executor_id || to;
+      (out.logs || []).forEach(function (l) {
+        if (l.indexOf('EVENT_JSON:') !== 0) return;
+        var ev; try { ev = JSON.parse(l.slice(11)); } catch (e) { return; }
+        if (!ev || ev.standard !== 'nep141' || !ev.data) return;
+        [].concat(ev.data).forEach(function (d) {
+          if (!d) return;
+          if (ev.event === 'ft_transfer') {
+            if (d.new_owner_id === me && d.old_owner_id !== me) add(token, big(d.amount), d.old_owner_id);
+            else if (d.old_owner_id === me && d.new_owner_id !== me) add(token, -big(d.amount), d.new_owner_id);
+          } else if (ev.event === 'ft_mint' && d.owner_id === me) add(token, big(d.amount));
+          else if (ev.event === 'ft_burn' && d.owner_id === me) add(token, -big(d.amount));
+        });
+      });
+    });
+    Object.keys(net).forEach(function (c) {
+      var v = net[c];
+      if (v === BigInt(0)) return;
+      var neg = v < BigInt(0);
+      // Under a millionth of a NEAR is dust (the registrar's 1-yoctoNEAR on account creation), not a payment.
+      if (c === 'near' && (neg ? -v : v) < BigInt('1000000000000000000')) return;
+      legs.push({ ts: ts, h: h, neg: neg, raw: String(neg ? -v : v), c: c, inv: who[c] || '', ok: ok });
+    });
+  }
+
+  // Symbols, decimals and logos: NEAR and wNEAR known, the curated list next, ft_metadata for the rest under
+  // the same 4s cap the holdings use (a token still unanswered shows its contract and no amount).
+  function withMeta(legs) {
+    var deadline = new Promise(function (res) { setTimeout(function () { res(null); }, 4000); });
+    return market().then(function (mk) {
+      var byId = {};
+      ((mk && mk.rows) || []).forEach(function (row) { if (row && row.i) byId[row.i] = row; });
+      var ids = {};
+      legs.forEach(function (g) { ids[g.c] = 1; });
+      var meta = {};
+      return Promise.all(Object.keys(ids).map(function (c) {
+        var row = byId[c];
+        if (c === 'near') { meta[c] = { s: 'NEAR', d: 24, ic: NEAR_LOGO }; return null; }
+        if (c === WNEAR) { meta[c] = { s: 'wNEAR', d: 24, ic: NEAR_LOGO }; return null; }
+        if (row && row.dc != null) { meta[c] = { s: cleanSym(row.n) || short(c), d: +row.dc, ic: row.logo || '' }; return null; }
+        return Promise.race([tokenMeta(c).then(function (m) { return m && !m.x ? { s: m.s, d: m.d, ic: '' } : null; }, function () { return null; }), deadline])
+          .then(function (m) { meta[c] = m || { s: short(c), d: null, ic: '' }; });
+      })).then(function () {
+        return legs.map(function (g) {
+          var m = meta[g.c];
+          return { ts: g.ts, h: g.h, neg: g.neg, v: m.d == null ? null : units(g.raw, m.d), c: g.c, s: m.s,
+            ic: m.ic, inv: g.inv, cause: '', ok: g.ok };
+        });
+      });
     });
   }
 
