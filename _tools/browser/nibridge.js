@@ -766,7 +766,14 @@
     + '.lx-br-amenu .aic img{width:100%;height:100%;object-fit:cover;display:block}'
     + '.lx-br-amenu .atx{display:flex;flex-direction:column;line-height:1.25;min-width:0}'
     + '.lx-br-amenu .anm{font-size:14px;font-weight:600}'
-    + '.lx-br-amenu .aiss{font-size:11px;color:var(--text-soft,#8a90a2);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px}';
+    + '.lx-br-amenu .aiss{font-size:11px;color:var(--text-soft,#8a90a2);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px}'
+    // THE CURATED TICK, Stellar's bridge mark exactly (_cctp.js lxBrTicks): a green disc with a white check,
+    // 13px beside the 14px ticker, on the ticker's baseline (RAZA 2026-10-31: "The verified green tick isn't
+    // showing on the curated token's drop down list").
+    + '.lx-br-amenu .anm{display:inline-flex;align-items:center;gap:4px}'
+    + '.lx-br-amenu .avt{display:inline-flex;align-items:center;justify-content:center;width:13px;height:13px;'
+    + 'flex:0 0 auto;border-radius:50%;background:#35c07f;color:#fff;padding:2.5px;box-sizing:border-box}'
+    + '.lx-br-amenu .avt svg{width:100%;height:100%;display:block}';
   function amenuCss() {
     if (document.getElementById('lx-br-amenu-css')) return;
     var st = document.createElement('style');
@@ -793,7 +800,7 @@
   }
   // One row builder for both pickers. Ticker and subtitle go in as TEXT: both come from 1Click's list or
   // from on-chain metadata, and either can carry markup.
-  function menuRow(icon, iconName, title, sub, q, onPick) {
+  function menuRow(icon, iconName, title, sub, q, onPick, ticked) {
     var b = document.createElement('button');
     b.type = 'button';
     b.setAttribute('data-q', String(q || '').toLowerCase());
@@ -807,6 +814,13 @@
     nm.className = 'anm';
     nm.setAttribute('data-logo', ''); nm.setAttribute('data-logoed', '1');
     nm.textContent = title;
+    if (ticked) {
+      var vt = document.createElement('span');
+      vt.className = 'avt';
+      vt.title = 'Curated on LumosCore';
+      vt.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+      nm.appendChild(vt);
+    }
     tx.appendChild(nm);
     if (sub) {
       var s = document.createElement('span');
@@ -919,7 +933,9 @@
           try { checkFee(); } catch (_) {}
           refreshDestinations();
           paintSteps(); requote();
-        }));
+        // Every source here is curated or native NEAR (sourceAssets builds it from the curated list only),
+        // so every row is ticked -- the Wallet page's rule.
+        }, true));
     });
     var em = document.createElement('div');
     em.className = 'lx-amempty';

@@ -507,6 +507,73 @@
     return out;
   }
 
+  // WHAT CAN BE SENT, AS AN EXACT STRING -- the ONE figure the Balance line, Max, the live check and the
+  // refusal all read (see max-rounds-a-balance-up: toFixed rounds a balance UP past itself, and two call
+  // sites computing "room" separately contradicted each other on screen). NEAR is floored to 6 places by
+  // cutting the decimal string; a token is its raw units, exact.
+  function roomStr(a) {
+    if (!a) return '0';
+    if (!a.native) return fromUnits(a.raw, a.dec);
+    var t = Math.max(0, a.spendable).toFixed(12), p = t.split('.');
+    var f = (p[1] || '').slice(0, 6).replace(/0+$/, '');
+    return f ? p[0] + '.' + f : p[0];
+  }
+  function commas(str) {
+    var p = String(str).split('.');
+    p[0] = p[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    return p.join('.');
+  }
+  // THE LIVE CHECK, AS lumoscore.com HAS IT (RAZA 2026-10-31: "As long as I don't select amount more than 0, on stellar, it
+  // notifies me ... but I don't see the same on Near", and the same for an amount above the balance). Stellar's
+  // validateSend lives in a layer this fork strips, but its .lx-send-err / .lx-btn-off rules ship in the inherited
+  // sheet, so this writes the same element in the same place: under the amount field, Review & Send off until both
+  // the amount and the recipient's FORMAT are right. Whether the account exists is still asked on click.
+  function sendErrBox(m, amtIn) {
+    var err = $('.lx-send-err', m);
+    if (!err) {
+      err = document.createElement('div');
+      err.className = 'lx-send-err';
+      err.style.display = 'none';
+      var af = amtIn.closest('.field') || amtIn.parentNode;
+      if (af && af.parentNode) af.parentNode.insertBefore(err, af.nextSibling);
+    }
+    return err;
+  }
+  function checkSend() {
+    var m = sendModal();
+    if (!m) return;
+    var amtIn = $('.field-amt input', m);
+    var toIn = $('.field-input.mono', m) || $('input.mono', m);
+    var go = $('.modal-foot .btn-primary', m);
+    if (!amtIn) return;
+    var err = sendErrBox(m, amtIn);
+    var a = sendPick || held()[0];
+    var raw = String(amtIn.value || '').trim().replace(/,/g, '');
+    var msg = '', okAmt = false;
+    if (raw !== '') {
+      if (/[^0-9.]/.test(raw)) msg = 'Enter a number — letters aren’t allowed in the amount.';
+      else if (a) {
+        var units = toUnits(raw, a.dec);
+        if (units == null) msg = /\./.test(raw) ? ('That is more decimal places than ' + a.code + ' has (' + a.dec + ').') : 'Enter an amount greater than 0.';
+        else if (cmpUnits(units, '0') <= 0) msg = 'Enter an amount greater than 0.';
+        else if (cmpUnits(units, toUnits(roomStr(a), a.dec)) > 0) {
+          msg = 'Amount exceeds your available ' + a.code + ' balance (' + commas(roomStr(a)) + ' ' + a.code
+            + (a.native ? ' after the ' + GAS_KEEP + ' NEAR kept for gas and storage' : '') + ').';
+        } else okAmt = true;
+      }
+    }
+    var dest = toIn ? String(toIn.value || '').trim().toLowerCase() : '';
+    var okDest = !!dest && validAcct(dest);
+    if (!msg && dest && !okDest) msg = 'That doesn’t look like a valid NEAR account (a name like alice.near, or a 64-character ID).';
+    err.textContent = msg;
+    err.style.display = msg ? '' : 'none';
+    if (go && go.getAttribute('data-busy') !== '1') {
+      var ok = okAmt && okDest;
+      go.disabled = !ok;
+      go.classList.toggle('lx-btn-off', !ok);
+    }
+  }
+
   // ---- Send ----------------------------------------------------------------------------------------
   var sendPick = null;                                          // the asset currently selected
 
@@ -580,11 +647,12 @@
     // "Balance" here means what can actually be sent. For XRP that is the balance MINUS the reserve,
     // which is not a detail: the design shipped this row reading 25,420.18 APT, and a Max button that
     // offers the full balance of an XRP account builds a transaction the ledger always rejects.
-    if (bal) bal.textContent = fmt(a.spendable, 6) + ' ' + a.code;
+    if (bal) bal.textContent = commas(roomStr(a)) + ' ' + a.code;
 
     var fee = $('.modal-body strong[style*="JetBrains"]', m);
     if (fee) fee.textContent = a.native ? '~0.0001 NEAR' : '~0.001 NEAR';
     say('');
+    checkSend();
   }
 
   // The asset menu. Built from the design's own field styling and anchored under the picker button,
@@ -763,13 +831,12 @@
 
     var typed = String(amtIn.value || '').trim().replace(/,/g, '');
     var units = toUnits(typed, a.dec);
-    if (units == null) { say(/\./.test(typed) ? ('That is more decimal places than ' + a.code + ' has (' + a.dec + ').') : 'Enter an amount greater than zero.', 'bad'); return; }
-    if (cmpUnits(units, '0') <= 0) { say('Enter an amount greater than zero.', 'bad'); return; }
+    if (units == null) { say(/\./.test(typed) ? ('That is more decimal places than ' + a.code + ' has (' + a.dec + ').') : 'Enter an amount greater than 0.', 'bad'); return; }
+    if (cmpUnits(units, '0') <= 0) { say('Enter an amount greater than 0.', 'bad'); return; }
     // Tokens are checked exactly against the raw balance; NEAR against what is available less the gas keep.
-    var over = a.native ? (parseFloat(typed) > a.spendable + 1e-12) : (cmpUnits(units, a.raw) > 0);
-    if (over) {
-      say('That is more than you can send. ' + fmt(a.spendable, 6) + ' ' + a.code + ' is available'
-        + (a.native ? ' (0.05 NEAR stays for gas and storage).' : '.'), 'bad');
+    if (cmpUnits(units, toUnits(roomStr(a), a.dec)) > 0) {
+      say('Amount exceeds your available ' + a.code + ' balance (' + commas(roomStr(a)) + ' ' + a.code
+        + (a.native ? ' after the ' + GAS_KEEP + ' NEAR kept for gas and storage' : '') + ').', 'bad');
       return;
     }
     var dest = parseDest(toIn.value);
@@ -817,6 +884,7 @@
     }).then(function () {
       go.disabled = false;
       go.removeAttribute('data-busy');
+      checkSend();
       go.textContent = label;
     });
   }
@@ -842,6 +910,7 @@
     pendingTo = null;
     if (tg) tg.value = '';
     say('');
+    checkSend();
   }
 
   function wireSend() {
@@ -881,7 +950,7 @@
 
     // The recipient placeholder shipped as Stellar's: "G... or domain.com*username". On this ledger
     // that is an address format that cannot exist, telling the user to type something invalid.
-    if (toIn) toIn.setAttribute('placeholder', 'alice.near or a 64-character account');
+    if (toIn) toIn.setAttribute('placeholder', 'name.near or 64-char hex ID');
     var lbl = $('.field-label .meta', m);
     if (lbl) lbl.textContent = 'NEAR account';
 
@@ -901,11 +970,15 @@
         // transaction cannot pay for itself and fails for an amount the button just offered.
         // NEAR: available less the gas keep (held() already took it off), floored to 6 places. A token:
         // its exact balance from the raw units, so Max never rounds above what is held.
-        amtIn.value = a.native ? String(Math.floor(a.spendable * 1e6) / 1e6) : fromUnits(a.raw, a.dec);
+        amtIn.value = roomStr(a);
         say('');
+        checkSend();
       });
     }
     go.addEventListener('click', function (e) { e.preventDefault(); doSend(); });
+    amtIn.addEventListener('input', checkSend);
+    if (toIn) toIn.addEventListener('input', checkSend);
+    checkSend();
   }
 
   // SEPARATE FROM wireSend ON PURPOSE. Wiring happens once and then marks itself done — but the

@@ -941,13 +941,24 @@
       if (mx) {
         e.preventDefault(); e.stopImmediatePropagation();
         var j = fieldIndex(mx), pa = H.pick[j];
-        if (!pa) { say('Choose an asset first.', 'bad'); return; }
         var w = holdWhy();
         if (w) { say(w + '.', 'bad'); return; }
+        // MAX on an empty side opens that side's list: there is nothing to fill until an asset is chosen.
+        if (!pa) { say('Choose an asset first.', 'bad'); openList(j); return; }
         // roomRaw keeps the gas margin AND the deposits back on the NEAR side -- a MAX that spends the gas
         // is a MAX that cannot be signed. Same function the gate and its refusal use.
         var room = roomRaw(pa);
         var ob = H.pick[1 - j];
+        // A ZERO ROOM SAYS SO. It wrote "0" into the field and nothing else, which RAZA read as "MAX is not
+        // working" (2026-10-31, 0.08 NEAR against a 0.1 NEAR gas margin plus the deposits).
+        var noRoom = function (p) {
+          return isNear(p)
+            ? 'Nothing to add: you hold ' + show(p.bal, 24, 6) + ' NEAR and ' + show(keepRaw().toString(), 24, 4)
+              + ' NEAR has to stay free for gas and the pool deposits.'
+            : 'You hold no ' + p.code + ' to add.';
+        };
+        if (!(room > BigInt(0))) { say(noRoom(pa), 'bad'); return; }
+        if (ob && !(roomRaw(ob) > BigInt(0))) { say(noRoom(ob), 'bad'); return; }
         // MAX IS WHAT THE OTHER SIDE CAN MATCH: a pool takes both deposits at one ratio, so offering more
         // of this asset than the other side can pair with offers an amount that cannot be deposited
         // (RAZA 2026-09-16 on the XRPL fork: "I only got 1 XRP worth of … ATOM … so when i select MAX for

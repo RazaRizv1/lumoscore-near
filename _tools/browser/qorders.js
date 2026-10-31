@@ -78,6 +78,8 @@
     if (i < 0 || dp == null) return s;
     return dp <= 0 ? s.slice(0, i) : s.slice(0, i + 1 + dp).replace(/\.$/, '');
   }
+  // A quotient as plain decimal text: String(1/8e6) is "1.25e-7", which trunc() would cut inside the exponent.
+  function plainNum(n) { var t = String(n); return /e/i.test(t) ? Number(n).toFixed(20) : t; }
   function commas(s) { var p = String(s).split('.'); p[0] = p[0].replace(/\B(?=(\d{3})+(?!\d))/g, ','); return p.join('.'); }
   function down(raw, dec, dp) { return trunc(S().fromUnits(raw, dec), dp == null ? 6 : dp); }
   function show(raw, dec, dp) {
@@ -151,8 +153,21 @@
     // missing, which is the worse of the two.
     if (H.who && H.who !== who) { H.bal = {}; H.balFail = {}; sw.feeOk = {}; gone = {}; }
     var held = heldFromPage();
+    // THE DASHBOARD HAS NO __lxnData — only the wallet page publishes it — so here "You sell" listed NEAR alone
+    // for an account holding 21 tokens (RAZA 2026-10-31: the Asset 1 list "differs on both Stellar and Near").
+    // The same reader the wallet page uses (lxnCore.readHoldings) fills it in. A failed read leaves NEAR alone
+    // listed, which is still true; it never invents a zero.
+    var fromCore = held.length || !window.lxnCore ? Promise.resolve() : window.lxnCore.readHoldings(who).then(function (d) {
+      ((d && d.held) || []).forEach(function (t) {
+        if (t.dec == null || !t.id || t.id === S().WNEAR) return;
+        try { S().remember(t.id, t.display, t.dec, t.logo); } catch (e) {}
+        var x = asset(t.id, t.display || t.id, t.dec, t.logo);
+        x.raw = String(t.raw || '0');
+        held.push(x);
+      });
+    }, function () {});
     // NEAR itself is always spendable and is not in __lxnData.held, so its balance is read directly.
-    var p = S().balance(who, 'near').then(function (raw) {
+    var p = fromCore.then(function () { return S().balance(who, 'near'); }).then(function (raw) {
       H.bal['near'] = String(raw); H.balFail['near'] = 0; H.failed = false;
     }, function () {
       H.bal['near'] = null; H.balFail['near'] = 1; H.failed = true;
@@ -162,7 +177,7 @@
         // one formatter serves every row. A ZERO IS RECORDED AS A ZERO: skipping it would leave the
         // entry undefined, which this file reads as "never asked" and shows as an em dash — turning a
         // balance we know into one we appear not to have.
-        try { H.bal[a.id] = S().toUnits(trunc(String(a.human || 0), a.dec), a.dec) || '0'; }
+        try { H.bal[a.id] = a.raw != null ? a.raw : (S().toUnits(trunc(String(a.human || 0), a.dec), a.dec) || '0'); }
         catch (e) { H.bal[a.id] = null; H.balFail[a.id] = 1; }
       });
       H.held = [NEAR].concat(held);
@@ -236,13 +251,44 @@
     }
     return p.then(function (d) {
       var out = [NEAR];
+      if (d && +d.usd > 0) USD.near = +d.usd;
       ((d && d.rows) || []).forEach(function (r) {
         if (!r || !r.i || r.dc == null || r.i === S().WNEAR) return;
         try { S().remember(r.i, r.n, r.dc, r.logo); } catch (e) {}
         out.push(asset(r.i, r.n || r.i, r.dc, r.logo));
+        if (r.vf) VSET[r.i] = 1;
+        if (+r.p > 0 && USD.near > 0) USD[r.i] = +r.p * USD.near;
       });
+      applyTicks();
       return out;
     });
+  }
+  // THE VERIFIED TICK AND THE DOLLAR FIGURES COME FROM THE SAME ROSTER AS THE LIST (RAZA 2026-10-31: "Verified
+  // ticks are missing for the other assets in the drop down list"; "I need the amount in terms of dollar of
+  // both asset 1 & 2 like it's appearing on Stellar's pop up"). Every listed NEAR token is curated, so it is
+  // ticked — the rule the Trade table, the search rows and the wallet already apply (nearmarket's vf) — and
+  // NEAR itself is ticked as Stellar ticks XLM in this same menu. A row drawn before the roster lands is
+  // re-ticked when it does, through the data-lxqv marker.
+  var VSET = {}, USD = {};
+  function verified(a) { return !!a && (a.id === 'near' || a.id === (S() ? S().WNEAR : 'wrap.near') || !!VSET[a.id]); }
+  function vtick() {
+    var s = document.createElement('span');
+    s.className = 'lx-vtick';
+    s.title = 'Curated on LumosCore';
+    s.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+    return s;
+  }
+  function applyTicks() {
+    $$('#swapModal [data-lxqv]').forEach(function (h) {
+      if (verified({ id: h.getAttribute('data-lxqv') }) && !h.querySelector('.lx-vtick')) h.appendChild(vtick());
+    });
+  }
+  // "≈ $1.23" for an amount of an asset, or '' when no price is known — never a guessed $0.
+  function usdText(amount, a) {
+    var px = a ? (isNear(a) ? USD.near : USD[a.id]) : 0;
+    if (!(amount > 0) || !(px > 0)) return '';
+    var v = amount * px;
+    return '≈ $' + (v >= 1 ? v.toFixed(2) : v >= 0.01 ? v.toFixed(4) : v.toPrecision(2));
   }
   var CUR = [];
   function curated() { return CUR; }
@@ -273,8 +319,11 @@
     var ic = document.createElement('span'); ic.className = 'lxq-ic'; paintIco(ic, a);
     var tx = document.createElement('span'); tx.className = 'tx';
     var cd = document.createElement('span'); cd.className = 'cd'; cd.setAttribute('data-logoed', '1'); cd.textContent = a.code;
+    cd.setAttribute('data-lxqv', a.id);
+    if (verified(a)) cd.appendChild(vtick());
     var sb = document.createElement('span'); sb.className = 's';
-    sb.textContent = a.id === 'near' ? 'NEAR Protocol' : shortId(a.id);
+    // "native asset", the words Stellar's menu puts under XLM.
+    sb.textContent = a.id === 'near' ? 'native asset' : shortId(a.id);
     tx.appendChild(cd); tx.appendChild(sb);
     b.appendChild(ic); b.appendChild(tx);
     if (right) { var rt = document.createElement('span'); rt.className = 'rt'; rt.textContent = right; b.appendChild(rt); }
@@ -339,6 +388,15 @@
     draw();
     setTimeout(function () { try { inp.focus(); } catch (e) {} }, 0);
   }
+  // Stellar's "You sell" menu is the holdings themselves: no heading, no search box, one row per asset with
+  // its balance (RAZA 2026-10-31: "the drop down list of Asset 1 differs on both Stellar and Near").
+  function listInto(m, list, rightOf, onPick) {
+    list.forEach(function (a) { m.appendChild(menuRow(a, rightOf ? rightOf(a) : '', onPick)); });
+  }
+  // THE PICKER'S WORDS FOR EVERYTHING THE PLATFORM LISTS. Stellar reads "Search any asset" over "Code or issuer
+  // address"; a NEAR token has no issuer — its identity is the contract account — so the second half says
+  // contract, which is what this box actually matches on.
+  var ANY_HEAD = 'Search any asset', ANY_PH = 'Code or contract address';
   function balRight(a) {
     var r = rawBal(a);
     return r == null ? '—' : show(r, a.dec, 6);
@@ -382,7 +440,10 @@
     var st = document.createElement('style');
     st.id = 'lxq-chipart-css';
     st.textContent = '.lx-dchip[data-lxart]>span:first-child{'
-      + 'background-image:var(--lxa)!important;background-size:contain!important;'
+      // 18px INSIDE THE 24px BOX: Stellar's token art is a 24px image whose disc is 18px across (r=9), while a
+      // NEAR logo from token metadata fills its square edge to edge -- so 'contain' drew USDC visibly bigger
+      // than lumoscore.com does (RAZA 2026-10-31; measured: both boxes 24x24, the difference is the art).
+      + 'background-image:var(--lxa)!important;background-size:18px 18px!important;'
       + 'background-position:center!important;background-repeat:no-repeat!important}';
     (document.head || document.documentElement).appendChild(st);
   }
@@ -491,8 +552,13 @@
       var det = $('#swapModal .lx-swapd'); if (det) det.style.display = '';
       var got = Number(S().fromUnits(q.out, t.dec)), paid = Number(S().fromUnits(q.amount, f.dec));
       detail('rate', paid > 0 ? ('1 ' + f.code + ' ≈ ' + fmtNum(got / paid, (got / paid) < 1 ? 7 : 4) + ' ' + t.code) : '—');
+      // With the breakdown open, the rate lives in its "Rate" row only — Stellar blanks the line above it
+      // (RAZA 2026-10-31: remove "1 NEAR ≈ 4.2700 USDC" between You receive and the breakdown).
+      showRate(' ');
       detail('slip', (q.slipBps / 100) + '%');
-      detail('fee', show(q.fee, f.dec, 7) + ' ' + f.code + ' (' + (S().FEE_BPS / 100) + '%)');
+      // The percentage belongs to the LABEL, "Swap fee (0.2%)", as on Stellar — not after the amount.
+      detail('feelbl', 'Swap fee (' + (S().FEE_BPS / 100) + '%)');
+      detail('fee', show(q.fee, f.dec, 7) + ' ' + f.code);
       // NET_FEE_EST is a finished string — '0.003 NEAR', unit included — and browser/swapmodal.js
       // prints it verbatim. Wrapping it read "≈ ~0.003 NEAR NEAR".
       detail('net', S().NET_FEE_EST);
@@ -509,7 +575,7 @@
         return;
       }
       if (S().big(raw) > S().big(room)) {
-        swapSay('More than your spendable ' + f.code + ' (' + show(room, f.dec, 6) + ').');
+        swapSay(shortOf(f, rawBal(f), 'swap'));
         setGo(false, 'Swap');
         return;
       }
@@ -524,6 +590,7 @@
       sw.quote = null;
       var out = $('#swapAmtOut'); if (out) plain(out, '');
       var det = $('#swapModal .lx-swapd'); if (det) det.style.display = 'none';
+      showRate(spotTxt());
       swapSay((e && e.noroute) ? ('No route between ' + f.code + ' and ' + t.code + ' on Rhea right now.') : ((e && e.message) || 'No quote right now.'));
       setGo(false, 'Swap');
     });
@@ -535,6 +602,25 @@
     if (!a || sw.feeOk[a.id] != null) return Promise.resolve();
     return S().feeReady(a.id).then(function (ok) { sw.feeOk[a.id] = ok; }, function () { sw.feeOk[a.id] = null; });
   }
+
+  // THE REFUSAL, IN STELLAR'S WORDS (RAZA 2026-10-31: "edit ... from 'More than your spendable NEAR (0)' to
+  // 'Insufficient NEAR balance — you have 0.0781800 NEAR' like it shows in Stellar's pop up"). The old line
+  // named the SPENDABLE figure, which for NEAR is the balance less the 0.2 NEAR a swap keeps back for gas —
+  // so a wallet holding 0.078 NEAR read "your spendable NEAR (0)", true and baffling. Now the sentence names
+  // the balance the user can see, and when it is the gas keep (not the balance) that refuses, it says so:
+  // Rhea's own app refuses the same swap with "Must have 0.2N or more left in wallet for gas fee".
+  function shortOf(a, bal, verb) {
+    var have = bal == null ? '—' : show(bal, a.dec, 7);
+    var s = 'Insufficient ' + a.code + ' balance — you have ' + have + ' ' + a.code;
+    if (isNear(a) && a.id === 'near') {
+      var keep = show(S().SWAP_KEEP, 24, 2);
+      s += ', and a NEAR ' + verb + ' keeps ' + keep + ' NEAR back for network fees';
+    }
+    return s + '.';
+  }
+  // The 50% LUMOS nudge Stellar draws under the breakdown, in its own markup and classes (lx-fee-banner,
+  // styled by the inherited lx-swapcalc-css), pointing at NEAR's LUMOS page.
+  var FEE_NUDGE = '<div class="lx-fee-banner nudge"><span class="lx-fee-ic"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 23c-4 0-7-2.7-7-6.5 0-2.3 1.2-4 2.4-5.4.3.9 1 1.6 1.9 1.6 1.4 0 1.7-1 1.6-3.5-.1-2.4 1-4.6 3.1-6.2-.4 2 .3 3.2 1.6 4.6C19 9.6 19 11.8 19 16.5c0 3.8-3 6.5-7 6.5z"></path></svg></span><span class="txt"><b>50% off trading fees</b> — hold 250,000 <a class="lx-fee-buy" href="/lumos/near" data-logoed="1">LUMOS</a></span></div>';
 
   function swapUi() {
     var pane = swapPane();
@@ -549,7 +635,9 @@
       var block = blockOf(pair[0]);
       if (!block) return;
       var label = block.firstElementChild;
-      if (label && !$('.lx-dbal', label)) {
+      // Only the PAY side carries a balance line: Stellar's "You receive" has none, and on NEAR it read
+      // "Balance: — USDC" for every token the wallet does not hold (RAZA 2026-10-31).
+      if (label && pair[1] && !$('.lx-dbal', label)) {
         label.style.cssText += ';display:flex;justify-content:flex-start;align-items:center;gap:8px';
         var bal = document.createElement('span');
         bal.className = 'lx-dbal';
@@ -583,7 +671,8 @@
         + '<div class="r"><span>Slippage tolerance</span><strong data-k="slip">—</strong></div>'
         + '<div class="r"><span data-k="feelbl">Swap fee</span><strong data-k="fee">—</strong></div>'
         + '<div class="r"><span>Network fee</span><strong data-k="net">—</strong></div>'
-        + '<div class="r rtot"><span>Minimum received</span><strong data-k="min">—</strong></div>';
+        + '<div class="r rtot"><span>Minimum received</span><strong data-k="min">—</strong></div>'
+        + '<div data-k="feenote">' + FEE_NUDGE + '</div>';
       var err = document.createElement('div');
       err.className = 'lx-swap-err';
       err.style.display = 'none';
@@ -618,7 +707,7 @@
             filterInto(m, 'Your assets', 'Symbol or contract', mine, balRight, pick);
           } else {
             if (!list.length) { menuHead(m, 'The token list could not be loaded'); return; }
-            filterInto(m, 'Listed on LumosCore', 'Symbol or contract', list, null, pick);
+            filterInto(m, ANY_HEAD, ANY_PH, list, null, pick);
           }
         });
         return;
@@ -630,11 +719,13 @@
         // SAY WHY, rather than writing a zero that is indistinguishable from a dead button — and quote
         // the refusal with the SAME formatter that fills the field, so the sentence and the number agree.
         // Still-loading and could-not-load are different sentences, because one of them is worth waiting for.
-        if (room == null) { toast(balWhy(sw.from) + '.', true); return; }
+        if (room == null) { swapSay(balWhy(sw.from) + '.', room === undefined); return; }
+        // IN THE DIALOG, NOT A TOAST: the toast's sentence was cut off at the screen's edge ("...network fees
+        // an") and vanished — RAZA 2026-10-31. The error line under the form holds the whole sentence.
         if (!(S().big(room) > BigInt(0))) {
-          toast(sw.from.id === 'near'
-            ? 'Nothing to swap: NEAR has to keep a little back for network fees and storage.'
-            : ('You hold no ' + sw.from.code + ' to swap.'), true);
+          var fz = $('#swapAmtIn'); if (fz) fz.value = '';
+          clearQuote();
+          swapSay(shortOf(sw.from, rawBal(sw.from), 'swap'));
           return;
         }
         var fi = $('#swapAmtIn');
@@ -796,10 +887,10 @@
           if (side === 'sell') {
             var mine = list.filter(function (a) { return a.id === 'near' || rawBal(a) == null || S().big(rawBal(a)) > BigInt(0); });
             if (!mine.length) { menuHead(m, emptyWhy()); return; }
-            filterInto(m, 'Your assets', 'Symbol or contract', mine, balRight, pick);
+            listInto(m, mine, balRight, pick);
           } else {
             if (!list.length) { menuHead(m, 'The token list could not be loaded'); return; }
-            filterInto(m, 'Listed on LumosCore', 'Symbol or contract', list, null, pick);
+            filterInto(m, ANY_HEAD, ANY_PH, list, null, pick);
             var note = document.createElement('div');
             note.className = 'h';
             note.style.textTransform = 'none';
@@ -814,26 +905,17 @@
         e.preventDefault(); e.stopImmediatePropagation();
         if (!lim.s) { toast('Choose an asset to sell first.', true); return; }
         var room = roomRaw(lim.s);
-        if (room == null) { toast(balWhy(lim.s) + '.', true); return; }
+        if (room == null) { limSay(balWhy(lim.s) + '.'); return; }
+        // In the dialog, not a toast that runs off the screen (RAZA 2026-10-31).
         if (!(S().big(room) > BigInt(0))) {
-          toast(lim.s.id === 'near'
-            ? 'Nothing to sell: NEAR has to keep a little back for network fees and the order’s storage.'
-            : ('You hold no ' + lim.s.code + ' to sell.'), true);
+          var iz = lEl('.lxq-amt'); if (iz) iz.value = '';
+          limitSync();
+          limSay(shortOf(lim.s, rawBal(lim.s), 'order'));
           return;
         }
-        // On a BUY the amount field is the TOKEN being bought, not the NEAR being sold, so MAX converts
-        // through the price — and without one there is nothing to convert, which is said rather than
-        // filling the token field with a NEAR figure.
-        var pr = limPair();
+        // "You sell" is ALWAYS the asset being sold, so MAX is simply what can be sold of it.
         var i = lEl('.lxq-amt');
-        if (pr && pr.side === 'buy') {
-          var px = Number(String((lEl('.lxq-price') || {}).value || '').trim());
-          if (!(px > 0)) { toast('Enter a price first — MAX converts your NEAR into ' + pr.token.code + ' at it.', true); return; }
-          var nearHuman = Number(S().fromUnits(room, lim.s.dec));
-          if (i) i.value = trunc(String(nearHuman / px), pr.token.dec);
-        } else if (i) {
-          i.value = down(room, lim.s.dec, lim.s.dec);
-        }
+        if (i) i.value = down(room, lim.s.dec, Math.min(lim.s.dec, 7));   // 7 places, as Stellar fills it; truncated, never rounded up
         limitSync();
         return;
       }
@@ -856,8 +938,7 @@
       var t = e.target;
       if (!t || !t.classList) return;
       if (t.classList.contains('lxq-amt')) {
-        var pr = limPair();
-        clean(t, pr ? pr.token.dec : null);
+        clean(t, lim.s ? lim.s.dec : null);
         limitSync();
       } else if (t.classList.contains('lxq-price')) {
         clean(t, 24);
@@ -892,6 +973,16 @@
     D().poolFor(pr.token.id).then(function (p) {
       if (lim.poolFor !== key) return;
       lim.pool = p || null;
+      // THE PRICE STARTS AT THE MARKET, as Stellar's does: with it empty, "You buy" had nothing to multiply
+      // and stayed "—", and the order could not be placed until MARKET was found and pressed (RAZA
+      // 2026-10-31: "it won't calculate and show me the buying amount of Asset 2"). Only an EMPTY field is
+      // filled — a price the user typed is theirs.
+      var pe = lEl('.lxq-price');
+      if (p && pe && !String(pe.value || '').trim()) {
+        var mkt = 0;
+        try { mkt = D().tokenPriceAt(p, pr.token.dec, p.cur); } catch (e) {}
+        if (mkt > 0) pe.value = trunc(String(mkt), mkt < 1 ? 10 : 6);
+      }
       limitSync();
     }, function () {
       if (lim.poolFor !== key) return;
@@ -920,14 +1011,39 @@
     var amtEl = lEl('.lxq-amt'), pxEl = lEl('.lxq-price'), recv = lEl('.lxq-recv');
     var amt = String((amtEl || {}).value || '').trim(), px = String((pxEl || {}).value || '').trim();
 
-    // "You buy" is a figure, not a field: amount x price, on whichever side is being sold.
+    // "YOU SELL" IS WHAT IS SOLD, ON BOTH SIDES (RAZA 2026-10-31). It used to hold the TOKEN amount whenever
+    // NEAR was being sold — type 0.007 under "You sell NEAR" and the order was for 0.007 ZEC — so "You buy"
+    // could never be read off it. The price is always NEAR per token, so selling a token buys amount x price
+    // NEAR, and selling NEAR buys amount / price of the token. `tokAmt` is that token figure, truncated as a
+    // string to the token's decimals, and it is what the DCL planner is given.
+    var A = Number(amt), P = Number(px), got = 0, tokAmt = '';
+    if (pr && A > 0 && P > 0) {
+      got = pr.side === 'sell' ? A * P : A / P;
+      tokAmt = pr.side === 'sell' ? amt : trunc(plainNum(got), pr.token.dec);
+    }
     if (recv) {
-      var A = Number(amt), P = Number(px);
-      if (pr && A > 0 && P > 0) {
-        recv.textContent = pr.side === 'sell'
-          ? (fmtNum(A * P, 7) + ' NEAR')
-          : (fmtNum(A, Math.min(8, pr.token.dec)) + ' ' + pr.token.code);
-      } else recv.textContent = '—';
+      recv.textContent = got > 0
+        ? (pr.side === 'sell' ? (fmtNum(got, 7) + ' NEAR') : (fmtNum(got, Math.min(8, pr.token.dec)) + ' ' + pr.token.code))
+        : '—';
+    }
+    // The dollar line under each amount, as Stellar draws them.
+    var us = lEl('.lxq-usds'); if (us) us.textContent = usdText(A, lim.s);
+    var ub = lEl('.lxq-usdb'); if (ub) ub.textContent = usdText(got, lim.b);
+
+    // THE BALANCE IS CHECKED AS SOON AS THERE IS AN AMOUNT, not only once a pair, a pool and a price exist —
+    // Stellar says "You only hold …" with nothing chosen to buy yet, and so does this.
+    var held = lim.s ? rawBal(lim.s) : null, typedRaw = null;
+    if (lim.s && A > 0) { try { typedRaw = S().toUnits(trunc(amt, lim.s.dec), lim.s.dec); } catch (e) { typedRaw = null; } }
+    if (addr() && typedRaw && held != null) {
+      var room0 = roomRaw(lim.s);
+      if (S().big(typedRaw) > S().big(held)) {
+        limNote(''); limSay('You only hold ' + show(held, lim.s.dec, 7) + ' ' + lim.s.code + '.');
+        limGo(false, 'Place limit order'); return;
+      }
+      if (room0 != null && S().big(typedRaw) > S().big(room0)) {
+        limNote(''); limSay(shortOf(lim.s, held, 'order'));
+        limGo(false, 'Place limit order'); return;
+      }
     }
 
     if (!lim.s || !lim.b) { limNote(''); limSay(''); limGo(false, 'Place limit order'); return; }
@@ -940,12 +1056,12 @@
     if (lim.pool === undefined) { limNote('Checking Rhea for a ' + pr.token.code + ' / NEAR pool…'); limSay(''); limGo(false, 'Place limit order'); return; }
     if (lim.pool === null) { limNote(''); limSay(NOPOOL + ': there is no ' + pr.token.code + ' / NEAR pool.'); limGo(false, 'Place limit order'); return; }
 
-    // Limit orders are FREE here, and the note says the two things that actually cost: the one-time DCL
-    // storage, and the tick the order really rests at.
-    var bits = ['No LumosCore fee on limit orders.'];
+    // Limit orders are still free; the "No LumosCore fee on limit orders." line is gone because Stellar's pane
+    // does not carry it (RAZA 2026-10-31). What stays is the tick the order really rests at.
+    var bits = [];
     var ord = null;
-    if (Number(amt) > 0 && Number(px) > 0) {
-      try { ord = D().plan(lim.pool, pr.token.dec, pr.side, px, amt); } catch (e) { ord = null; }
+    if (tokAmt && Number(tokAmt) > 0) {
+      try { ord = D().plan(lim.pool, pr.token.dec, pr.side, px, tokAmt); } catch (e) { ord = null; }
       if (ord && ord.rests > 0) {
         bits.push('Filled when 1 ' + pr.token.code + ' reaches ' + fmtNum(ord.rests, ord.rests < 1 ? 10 : 6) + ' NEAR (the pool’s nearest tick).');
       }
@@ -960,7 +1076,7 @@
     var room = roomRaw(lim.s);
     if (room == null) { limSay(balWhy(lim.s) + '.'); limGo(false, 'Place limit order'); return; }
     if (S().big(ord.sellRaw) > S().big(room)) {
-      limSay('More than your spendable ' + lim.s.code + ' (' + show(room, lim.s.dec, 6) + ').');
+      limSay(shortOf(lim.s, rawBal(lim.s), 'order'));
       limGo(false, 'Place limit order');
       return;
     }
@@ -975,7 +1091,10 @@
     var amt = String((lEl('.lxq-amt') || {}).value || '').trim();
     var px = String((lEl('.lxq-price') || {}).value || '').trim();
     var ord = null;
-    try { ord = D().plan(lim.pool, pr.token.dec, pr.side, px, amt); } catch (e) { ord = null; }
+    // The same conversion limitSync makes: "You sell" is the sold asset, the planner wants the token amount.
+    var A = Number(amt), P = Number(px);
+    var tokAmt = (A > 0 && P > 0) ? (pr.side === 'sell' ? amt : trunc(plainNum(A / P), pr.token.dec)) : '';
+    try { ord = D().plan(lim.pool, pr.token.dec, pr.side, px, tokAmt); } catch (e) { ord = null; }
     if (!ord) { limSay('That amount and price are too small to rest an order.'); return; }
     lim.busy = true;
     limSay('');

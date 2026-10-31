@@ -10,7 +10,7 @@
 //              decimals/logos/prices from /lxapi/nearmarket, ft_metadata for the rest under the 4s cap.
 //   value      balance x price-in-NEAR x NEAR/USD, the wallet's sum, so the two pages cannot disagree.
 //   activity   NearBlocks txns-only + ft-txns: one pair of calls per view, cached 60s, 429 backs off.
-//   pools      Rhea per-account shares are not read on NEAR yet: the pane says so, it does not say "none".
+//   pools      Rhea LP shares (plus farm-staked), found via the account's Rhea deposits -- see paintPools.
 //   tick       the curated list (the Trade roster) plus wNEAR, as on the Wallet page.
 // Any id that is not a NEAR account id gets the design's empty states with a NEAR sentence; an id that
 // is valid but unknown to the chain says that. Never a Stellar fallback.
@@ -220,7 +220,19 @@
   // COPY, QR AND "SEND TO THIS WALLET" (RAZA 2026-09-16: "copy icon, barcode, and send to this wallet on right is not working").
   // Stellar's own three: copy with the site's toast, the address as a QR in the design's .acc-qrpop, and the wallet page's
   // Send dialog opened with this address in it.
+  // THE QR OPENED UNDER THE STATS (RAZA 2026-10-31: "The bar code is appearing at the back of pool position box").
+  // The header and the stats row both fade in with [data-lcmu].lcmu-in, whose will-change: transform makes each
+  // its own stacking context at z-index auto -- so the stats row, later in the page, paints over everything in
+  // the header, the QR's z-index:60 included (it only counts inside the header). Lifting the header fixes it.
+  function liftHead() {
+    if (document.getElementById('lxn-acc-qrfix')) return;
+    var st = document.createElement('style');
+    st.id = 'lxn-acc-qrfix';
+    st.textContent = '.acc-head{position:relative;z-index:4}';
+    (document.head || document.documentElement).appendChild(st);
+  }
   function wireAccActions(a) {
+    liftHead();
     var qb = $('#accQr');
     if (qb && !qb.__lxn) {
       qb.__lxn = 1;
@@ -381,14 +393,115 @@
   }
 
   // ---- pools -----------------------------------------------------------------------------------------
-  // Rhea keeps LP shares inside its own contract per pool, with no per-account index this page can ask
-  // in one call, and the Wallet page does not read them either. So the pane says they are not shown --
-  // "No pool positions" would be a claim about this account that nothing checked.
-  function paintPools(tbl) {
-    tableNote(tbl, 'Pool positions on NEAR are not shown here yet.', 5);
-    var pn = $('#accPoolsN');
-    if (pn) pn.textContent = '';
-    setStat('pools', '—', 'not read on NEAR yet');
+  // RAZA 2026-10-31: "Pools are not being recorded of any individual user". Rhea keeps LP shares per pool
+  // (get_pool_shares) with no call that lists an account's pools, so the pools to ask about are FOUND first:
+  //   * get_deposits lists every token the account has registered with Rhea. Adding liquidity pulls both
+  //     sides from those deposits, so a pool the account is in has ALL its tokens there -- that filter takes
+  //     ~2,500 pools down to a handful (iamempty.near: 11 tokens -> 15 pools, 4 positions).
+  //   * the boost farm's list_farmer_seeds names pools whose shares are STAKED (they leave get_pool_shares).
+  // Then one get_pool_shares per candidate, at most POOL_CAP of them, largest TVL first. Value and TVL are
+  // Rhea's own USD figures (list-top-pools). DCL (concentrated) positions are not read here.
+  var REF = 'v2.ref-finance.near', FARM = 'boostfarm.ref-labs.near';
+  var RHEA_POOLS = 'https://indexer.ref.finance/list-top-pools';
+  var POOL_CAP = 60;
+  function poolHref(id, syms) {
+    var slug = (syms || []).map(function (x) { return String(x || '').toLowerCase().replace(/[^a-z0-9]/g, ''); })
+      .filter(Boolean).join('-').slice(0, 60).replace(/-+$/, '');
+    return '/pools/near/' + (slug || 'pool') + '/' + encodeURIComponent(id);
+  }
+  function symOf(s) { s = C.cleanSym ? C.cleanSym(s) : String(s || ''); return String(s || '?').slice(0, 16); }
+  function readPositions(a) {
+    return Promise.all([
+      fetch(RHEA_POOLS).then(function (r) { if (!r.ok) throw new Error('rhea pools ' + r.status); return r.json(); }),
+      C.callView(REF, 'get_deposits', { account_id: a }),
+      C.callView(FARM, 'list_farmer_seeds', { farmer_id: a }).catch(function () { return {}; })
+    ]).then(function (r) {
+      var pools = Array.isArray(r[0]) ? r[0] : [], reg = r[1] || {}, seeds = r[2] || {};
+      var staked = {};
+      Object.keys(seeds).forEach(function (k) {
+        var m = /^v2\.ref-finance\.near@(\d+)$/.exec(k), s = seeds[k] || {};
+        if (m) staked[m[1]] = BigInt(s.free_amount || '0') + BigInt(s.locked_amount || '0');
+      });
+      var byId = {};
+      pools.forEach(function (p) { if (p && /^\d+$/.test(String(p.id))) byId[p.id] = p; });
+      var cand = pools.filter(function (p) {
+        return p && byId[p.id] === p && Array.isArray(p.token_account_ids) && BigInt(p.shares_total_supply || '0') > 0n
+          && p.token_account_ids.every(function (t) { return Object.prototype.hasOwnProperty.call(reg, t); });
+      }).sort(function (x, y) { return (+y.tvl || 0) - (+x.tvl || 0); });
+      var capped = cand.length > POOL_CAP;
+      cand = cand.slice(0, POOL_CAP);
+      Object.keys(staked).forEach(function (id) { if (byId[id] && cand.indexOf(byId[id]) < 0) cand.push(byId[id]); });
+      var out = [], i = 0, failed = 0;
+      function next() {
+        if (i >= cand.length) return Promise.resolve();
+        var batch = cand.slice(i, i + 6); i += 6;
+        return Promise.all(batch.map(function (p) {
+          return C.callView(REF, 'get_pool_shares', { pool_id: +p.id, account_id: a }).then(function (sh) {
+            var s = BigInt(sh || '0') + (staked[p.id] || 0n), total = BigInt(p.shares_total_supply);
+            if (s <= 0n) return;
+            var f = Number(s * 1000000000n / total) / 1e9, tvl = +p.tvl;
+            out.push({ id: String(p.id), syms: (p.token_symbols || []).map(symOf), ids: p.token_account_ids,
+              share: f * 100, tvl: isFinite(tvl) ? tvl : null, usd: isFinite(tvl) ? f * tvl : null, farm: !!staked[p.id] });
+          }, function () { failed++; });
+        })).then(next);
+      }
+      return next().then(function () {
+        // A pool that could not be asked is not a pool the account is out of: with none found and any
+        // unread, the answer is "could not read", never "none".
+        if (failed && !out.length) throw new Error('get_pool_shares failed for ' + failed + ' pool(s)');
+        out.sort(function (x, y) { return (y.usd == null ? -1 : y.usd) - (x.usd == null ? -1 : x.usd); });
+        return { rows: out, capped: capped, failed: failed };
+      });
+    });
+  }
+  function paintPools(tbl, a, mk) {
+    tableNote(tbl, 'Loading pools…', 5);
+    var logos = {};
+    ((mk && mk.rows) || []).forEach(function (row) { if (row && row.i) logos[row.i] = row.logo || ''; });
+    readPositions(a).then(function (res) {
+      var rows = res.rows, pn = $('#accPoolsN');
+      if (pn) pn.textContent = String(rows.length);
+      setStat('pools', String(rows.length), res.failed ? 'some pools could not be read' : rows.length ? 'providing liquidity' : 'none');
+      if (!rows.length) {
+        tableNote(tbl, res.capped ? 'No pool liquidity found in the ' + POOL_CAP + ' largest Rhea pools this account trades.'
+          : 'This account provides no pool liquidity.', 5);
+        return;
+      }
+      var tb = tbl && tbl.querySelector('tbody');
+      if (!tb) return;
+      tb.innerHTML = '';
+      rows.forEach(function (p) {
+        var tr = el('tr', 'acc-row');
+        tr.setAttribute('data-pool', p.id);
+        var c0 = el('td'), pair = el('span', 'acc-pair'), icos = el('span', 'acc-icos');
+        p.ids.slice(0, 2).forEach(function (t, k) {
+          var ico = el('span', 'acc-ico');
+          ico.setAttribute('data-logoed', '1');
+          queueLogo(ico, t === WNEAR ? NEAR_LOGO : cssUrl(logos[t]) || cssUrl((C.ICONS || {})[t]) || '', p.syms[k]);
+          icos.appendChild(ico);
+        });
+        pair.appendChild(icos);
+        var txt = el('span');
+        var cd = el('span', 'acc-code', p.syms.join(' / '));
+        cd.setAttribute('data-logoed', '1');
+        txt.appendChild(cd);
+        txt.appendChild(el('span', 'acc-dom', 'Rhea pool #' + p.id + (p.farm ? ' · farming' : '')));
+        pair.appendChild(txt);
+        c0.appendChild(pair);
+        tr.appendChild(c0);
+        tr.appendChild(el('td', 'num', (p.share >= 0.01 ? p.share.toFixed(2) : '<0.01') + '%'));
+        tr.appendChild(el('td', 'num', p.usd != null ? money(p.usd) : '—'));
+        tr.appendChild(el('td', 'num acc-hide-sm', p.tvl != null ? money(p.tvl) : '—'));
+        var href = poolHref(p.id, p.syms);
+        tr.style.cursor = 'pointer';
+        tr.addEventListener('click', function () { window.location.href = href; });
+        tb.appendChild(tr);
+      });
+      setMore(tbl, 0, 0);
+    }, function () {
+      tableNote(tbl, 'Could not read pool positions — try again in a minute.', 5);
+      setStat('pools', '—', 'could not read');
+    });
   }
 
   // ---- activity --------------------------------------------------------------------------------------
@@ -524,7 +637,7 @@
       ((mk && mk.rows) || []).forEach(function (row) { if (row && row.i) curated[row.i] = 1; });
       window.__lxnAccountData = data;
       paintAssets($('#accAssetsTbl'), data.near, data.held, curated);
-      paintPools($('#accPoolsTbl'));
+      paintPools($('#accPoolsTbl'), a, mk);
       // One count, used twice, including NEAR -- the convention wallet.js uses.
       var n = data.held.length + 1;
       var an = $('#accAssetsN');
