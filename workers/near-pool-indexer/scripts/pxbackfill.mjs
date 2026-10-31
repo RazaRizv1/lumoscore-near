@@ -30,16 +30,23 @@ async function get(u) {
 }
 
 const curated = JSON.parse(fs.readFileSync(path.join(ROOT, '_tools', 'nearcurated.generated.json'), 'utf8')).tokens;
-const ids = ['wrap.near'].concat(curated.filter((t) => !t.cg && t.i !== 'wrap.near').map((t) => t.i));
+// Token ids on the command line backfill just those (a token curated after the first run, 2026-11-01).
+// "token@pool" names the GeckoTerminal pool when its token lookup has none (v2-nearx.stader-labs.near@refv1-3688).
+const ARGS = process.argv.slice(2);
+const ids = ARGS.length ? ARGS : ['wrap.near'].concat(curated.filter((t) => !t.cg && t.i !== 'wrap.near').map((t) => t.i));
 const now = Math.floor(Date.now() / 3600000), from = now - 7 * 24;
 const sql = [];
 let filled = 0;
-for (const id of ids) {
+for (const arg of ids) {
+  const id = arg.split('@')[0], given = arg.split('@')[1];
   try {
-    const tok = await get(GT + '/tokens/' + encodeURIComponent(id));
-    const pool = tok && tok.data && tok.data.relationships && tok.data.relationships.top_pools.data[0];
-    if (!pool) { console.log('  ' + id + ': no pool on GeckoTerminal'); continue; }
-    const addr = pool.id.replace(/^near_/, '');
+    let addr = given;
+    if (!addr) {
+      const tok = await get(GT + '/tokens/' + encodeURIComponent(id));
+      const pool = tok && tok.data && tok.data.relationships && tok.data.relationships.top_pools.data[0];
+      if (!pool) { console.log('  ' + id + ': no pool on GeckoTerminal'); continue; }
+      addr = pool.id.replace(/^near_/, '');
+    }
     const o = await get(GT + '/pools/' + encodeURIComponent(addr) + '/ohlcv/hour?limit=1000&currency=usd&token=' + encodeURIComponent(id));
     const list = ((o && o.data && o.data.attributes.ohlcv_list) || []).map((c) => [Math.floor(c[0] / 3600), +c[4]])
       .filter((c) => c[1] > 0).sort((a, b) => a[0] - b[0]);
