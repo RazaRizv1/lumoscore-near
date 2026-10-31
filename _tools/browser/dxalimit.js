@@ -146,7 +146,9 @@
     b.type = 'button';
     b.className = 'lxlim-max';
     b.textContent = 'MAX';
-    row.appendChild(b);
+    // Stellar's order is "Avail: x NEAR  MAX  ≈ $y USD": MAX comes back (a balance arriving, a side switch)
+    // after the dollar figure already exists, so it goes in front of it rather than at the end.
+    row.insertBefore(b, $('.lx-ltusd', row));
   }
   function paint() {
     var p = pane(), a = asset();

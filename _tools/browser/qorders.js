@@ -271,7 +271,20 @@
   // re-ticked when it does, through the data-lxqv marker.
   var VSET = {}, USD = {};
   function verified(a) { return !!a && (a.id === 'near' || a.id === (S() ? S().WNEAR : 'wrap.near') || !!VSET[a.id]); }
+  // THE TICK'S SIZE. Stellar's .lx-vtick rule (14px green disc, 9px check) lives in the Trade and Account
+  // stylesheets, which the dashboard does not load -- so here the bare svg grew to the width of the menu row
+  // (RAZA 2026-11-01: a check mark the size of the dialog). The same rule, scoped to this dialog, once.
+  function tickCss() {
+    if (document.getElementById('lxq-vtick-css')) return;
+    var st = document.createElement('style');
+    st.id = 'lxq-vtick-css';
+    st.textContent = '#swapModal .lx-vtick{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;'
+      + 'margin-left:5px;border-radius:50%;background:var(--green,#35c07f);color:#fff;vertical-align:-2px;flex:0 0 14px}'
+      + '#swapModal .lx-vtick svg{width:9px;height:9px;display:block}';
+    document.head.appendChild(st);
+  }
   function vtick() {
+    tickCss();
     var s = document.createElement('span');
     s.className = 'lx-vtick';
     s.title = 'Curated on LumosCore';

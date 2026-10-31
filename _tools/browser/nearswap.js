@@ -61,6 +61,9 @@
   }
 
   var REF = 'v2.ref-finance.near';
+  // Rhea's concentrated-liquidity (DCL) contract, a second venue for an instant swap: for some tokens it is
+  // the only real market (BATMAN: $312K in its DCL pool against $940 in its biggest classic pool, 2026-11-01).
+  var DCL = 'dclv2.ref-labs.near', DCL_FEES = [100, 400, 2000, 10000];
   var WNEAR = 'wrap.near';
   var USDC = '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1';
   var RPC = 'https://free.rpc.fastnear.com';
@@ -190,6 +193,22 @@
     p.catch(function () { if (poolsP === p) poolsP = null; });     // a failure is not an answer
     return p;
   }
+  // A TOKEN OUTSIDE THE CURATED LIST (RAZA 2026-11-01: BATMAN's own Trade page said "No route between those
+  // two tokens on Rhea right now"). pools() is the curated top 200, so a token with no pool there could not
+  // be routed even from its own page. Its Rhea pools come from the same endpoint's whole-of-Rhea lookup
+  // (?q=<contract>, the one search and off-list pool pages use), still ranked by liquidity -- never "the
+  // newest pool" -- and every candidate is quoted on Rhea itself before it can be used.
+  var offP = {};
+  function poolsWith(rows, id) {
+    if (id === WNEAR || rows.some(function (r) { return (r.tokens || []).some(function (t) { return t.i === id; }); })) return Promise.resolve([]);
+    if (!offP[id]) {
+      offP[id] = fetch('/lxapi/nearpools?q=' + encodeURIComponent(id)).then(function (r) { return r.json(); }).then(function (d) {
+        return ((d && d.ok && d.rows) || []).filter(function (r) { return (r.tokens || []).some(function (t) { return t.i === id; }); });
+      });
+      offP[id].catch(function () { delete offP[id]; });         // a failure is not an answer
+    }
+    return offP[id].catch(function () { return []; });
+  }
   function poolsBetween(rows, a, b, k) {
     return rows.filter(function (r) {
       var ids = (r.tokens || []).map(function (t) { return t.i; });
@@ -201,6 +220,12 @@
     return callView(REF, 'get_return', { pool_id: +poolId, token_in: tin, amount_in: String(amt), token_out: tout })
       .then(function (r) { return String(r || '0'); });
   }
+  // A DCL pool's id is "<token>|<token>|<fee>", the two contracts sorted; its quote is DCL's own view.
+  function dclReturn(poolId, tin, tout, amt) {
+    return callView(DCL, 'quote', { pool_ids: [poolId], input_token: tin, output_token: tout, input_amount: String(amt), tag: null })
+      .then(function (r) { return String((r && r.amount) || '0'); });
+  }
+  function hopReturn(h, amt) { return h.pool.dcl ? dclReturn(h.pool.id, h.tin, h.tout, amt) : getReturn(h.pool.id, h.tin, h.tout, amt); }
   // The best of several pools for one leg. More in always gives more out, so choosing the best pool per
   // leg greedily is also the best two-leg route.
   function bestLeg(cands, tin, tout, amt) {
@@ -219,11 +244,22 @@
   function route(fromId, toId, amtRaw) {
     var a = contractOf(fromId), b = contractOf(toId);
     if (a === b) return Promise.resolve(null);
-    return pools().then(function (rows) {
+    return pools().then(function (cur) {
+      return Promise.all([poolsWith(cur, a), poolsWith(cur, b)]).then(function (x) { return cur.concat(x[0], x[1]); });
+    }).then(function (rows) {
       var tries = [];
       tries.push(bestLeg(poolsBetween(rows, a, b, 3), a, b, amtRaw).then(function (x) {
         return x ? { hops: [{ pool: x.pool, tin: a, tout: b, out: x.out }], out: x.out } : null;
       }));
+      // Direct through each DCL fee tier. A tier with no pool answers with an error, which is just "not here".
+      var dclTry = Promise.all(DCL_FEES.map(function (fee) {
+        var id = [a, b].sort().join('|') + '|' + fee;
+        return dclReturn(id, a, b, amtRaw).then(function (o) { return { pool: { id: id, dcl: 1 }, out: o }; }, function () { return null; });
+      })).then(function (rs) {
+        var best = null;
+        rs.forEach(function (x) { if (x && big(x.out) > BigInt(0) && (!best || big(x.out) > big(best.out))) best = x; });
+        return best ? { hops: [{ pool: best.pool, tin: a, tout: b, out: best.out }], out: best.out } : null;
+      });
       [WNEAR, USDC].forEach(function (m) {
         if (m === a || m === b) return;
         var l1 = poolsBetween(rows, a, m, 2), l2 = poolsBetween(rows, m, b, 2);
@@ -235,9 +271,12 @@
           });
         }));
       });
-      return Promise.all(tries).then(function (rs) {
-        var best = null;
-        rs.forEach(function (r) { if (r && (!best || big(r.out) > big(best.out))) best = r; });
+      // DCL wins only where the classic pools have no route, or give more than 1% less: the classic path is
+      // the one tested end to end on mainnet, and a near-tie is not worth moving a pair onto the other contract.
+      return Promise.all([Promise.all(tries), dclTry]).then(function (rs) {
+        var best = null, d = rs[1];
+        rs[0].forEach(function (r) { if (r && (!best || big(r.out) > big(best.out))) best = r; });
+        if (d && (!best || big(d.out) * BigInt(100) > big(best.out) * BigInt(101))) best = d;
         return best;
       });
     });
@@ -245,7 +284,7 @@
   // The same pools, re-asked hop by hop (spot price and the final refresh use this).
   function along(hops, amtRaw) {
     var p = Promise.resolve(String(amtRaw));
-    hops.forEach(function (h) { p = p.then(function (amt) { return getReturn(h.pool.id, h.tin, h.tout, amt); }); });
+    hops.forEach(function (h) { p = p.then(function (amt) { return hopReturn(h, amt); }); });
     return p;
   }
 
@@ -393,7 +432,19 @@
           a.min_amount_out = i === q.hops.length - 1 ? q.min : '0';
           return a;
         });
-        if (rt) {
+        var dclHop = q.hops.length === 1 && q.hops[0].pool.dcl ? q.hops[0] : null;
+        if (dclHop) {
+          // A DCL SWAP: the fee transfer and then ft_transfer_call to DCL, the shape the classic swap takes
+          // without a router (the router speaks Rhea's classic actions only). The message is DCL's own, as
+          // Rhea's app sends it on chain: {"Swap":{pool_ids, output_token, min_output_amount, skip_unwrap_near}}.
+          actions.push({ type: 'FunctionCall', params: { methodName: 'ft_transfer',
+            args: { receiver_id: acct, amount: q.fee, memo: 'LumosCore platform fee ' + (feeBps() / 100) + '%' }, gas: '30' + TGAS, deposit: '1' } });
+          used += 30;
+          actions.push({ type: 'FunctionCall', params: { methodName: 'ft_transfer_call',
+            args: { receiver_id: DCL, amount: q.net, msg: JSON.stringify({ Swap: { pool_ids: [dclHop.pool.id], output_token: outC,
+              min_output_amount: q.min, skip_unwrap_near: !outNative } }) },
+            gas: String(Math.min(SWAP_GAS, MAX_TX_GAS - used)) + TGAS, deposit: '1' } });
+        } else if (rt) {
           // ONE action: the gross amount to the router, which takes the fee only if the swap fills.
           actions.push({ type: 'FunctionCall', params: { methodName: 'ft_transfer_call',
             args: { receiver_id: rt, amount: q.amount, msg: JSON.stringify({ fee_bps: feeBps(), actions: acts, skip_unwrap_near: !outNative }) },

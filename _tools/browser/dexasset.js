@@ -1016,7 +1016,7 @@
       // ONE READOUT SHAPE ON EVERY POINT (RAZA 2026-11-01: "it shows 2 different types of hovers ... make it just
       // like Stellar"). A quiet stretch is drawn with flat points that carry no candle, and those used to drop
       // the Volume and Trades rows. Where the series has per-candle volume at all, every point now has both:
-      // a quiet point reads $0 and 0 trades, and a candle older than the trades feed reaches reads "—".
+      // a quiet point reads $0 and 0 trades (Trades: see below).
       if (S.vol) {
         var row = el('div', 'lxrow');
         row.appendChild(tipEl('l', 'Volume'));
@@ -1025,8 +1025,12 @@
       }
       // Trades in this candle (RAZA 2026-11-01: "I don't see the number of trades"), Stellar's row under Volume.
       // Counted from the recent-trades feed on the same pool, so only for candles that feed fully covers.
+      // ...but only on a chart the trades feed covers END TO END (RAZA 2026-11-01 saw "—" on 1W/1M/1Y). The free
+      // feed reaches back 24 hours at most (300 trades) and no free NEAR source counts trades per past candle,
+      // so a longer range, or a busy token's day, has no Trades row on ANY point: one shape per chart, and
+      // never a count that is really "the part we could see".
       var nTr = tradesIn(p[0], S.bucket);
-      if (S.vol) {
+      if (S.vol && TR.ts && TR.from <= S.t0 + S.bucket) {
         var trow = el('div', 'lxrow');
         trow.appendChild(tipEl('l', 'Trades'));
         trow.appendChild(tipEl('p', nTr == null ? '—' : nTr.toLocaleString('en-US')));
