@@ -81,6 +81,14 @@
   var GAS_MARGIN = '100000000000000000000000';          // 0.1 NEAR kept free for gas across the approvals
   var SLIP_BPS = 10;                                    // min_amounts at 99.9%, as nearmint.js
   var TGAS = '000000000000';
+  // THE NETWORK FEE IS GAS, MEASURED (RAZA 2026-10-31: blank until both assets were picked, and what it then showed
+  // was the storage DEPOSITS, not a fee). The full sequence on mainnet -- nspear.near's pool 8978, 2026-10-21:
+  // register_tokens+storage_deposit 0.000577, token storage_deposit 0.000235, add_simple_pool 0.000340, wNEAR
+  // storage_deposit 0.000232, near_deposit 0.000192, two ft_transfer_call 0.000734 + 0.000733, wNEAR
+  // storage_deposit 0.000225, add_liquidity 0.000470 -- burnt 0.00434 NEAR (NearBlocks transaction_fee). An
+  // account already registered skips some of it, so this is the most a creation costs, rounded, like Stellar's
+  // fixed "≈ 0.00001 XLM". Shown from the moment the dialog opens.
+  var NET_FEE = '≈ 0.0043 NEAR';
   var LABEL = 'Create pool';                            // lumoscore.com's own label (_ammdata.js), not the design's
 
   function $(s, r) { return (r || document).querySelector(s); }
@@ -391,7 +399,7 @@
   // by the next repaint.
   var QUIET = {
     'Connect a NEAR wallet first.': 1,       // lx-gate owns the button's label in this state
-    'Choose both assets.': 1,                // the two empty pickers say this already
+    'Select both assets.': 1,                // the two empty pickers say this already
     'Enter an amount for both assets.': 1    // so do the two empty amount fields
   };
   function sayAuto(text, tone) {
@@ -522,14 +530,9 @@
     if (net) {
       var nv = net.querySelector('strong');
       if (nv) {
-        var t = (H.fee && H.fee.total);
-        if (t == null) { if (nv.textContent !== '—') nv.textContent = '—'; }
-        else {
-          var txt = '≈ ' + fmtNear(t);
-          if (nv.textContent !== txt) nv.textContent = txt;
-        }
+        if (nv.textContent !== NET_FEE) nv.textContent = NET_FEE;
       }
-      net.title = 'Storage deposits attached to the pool and liquidity calls. Rhea refunds whatever the storage did not need.';
+      net.title = 'Gas burnt by the whole sequence, measured on mainnet. Storage deposits are separate, and Rhea refunds what the storage did not need.';
     }
 
     var px = summaryRow('Initial pool price');
@@ -557,7 +560,10 @@
       // A message ending in an ellipsis is progress, not a refusal, so it is not painted red.
       if (!why || QUIET[why]) sayAuto('');
       else sayAuto(why, why.slice(-1) === '…' ? '' : 'bad');
-      go.disabled = !ok;
+      // DIMMED, NOT DISABLED (RAZA 2026-10-31: pressing Create pool with one asset said nothing, where Stellar
+      // answers "Select both assets." under the button). A disabled button never fires a click, so create() -- which
+      // already states the blocker in red -- was never reached. The look stays Stellar's dimmed one (data-lxdis).
+      go.disabled = false;
       if (ok) {
         go.removeAttribute('aria-disabled');
         go.removeAttribute('data-lxdis');
@@ -571,6 +577,7 @@
         go.setAttribute('data-lxdis', '1');
         go.style.opacity = '.55';
         go.style.cursor = 'not-allowed';
+        go.style.pointerEvents = 'auto';
       }
     }
   }
@@ -582,7 +589,7 @@
     if (H.hold === undefined) return 'Reading your wallet…';
     if (H.hold === null) return 'Could not read your wallet.';
     var a = H.pick[0], b = H.pick[1];
-    if (!a || !b) return 'Choose both assets.';
+    if (!a || !b) return 'Select both assets.';
     if (same(a, b) || poolId(a) === poolId(b)) return 'Pick two different assets.';
     var am = amounts();
     if (!(am[0] > 0) || !(am[1] > 0)) return 'Enter an amount for both assets.';

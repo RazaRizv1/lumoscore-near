@@ -237,10 +237,13 @@
   function short(p, raw, have) {
     var s = sides(p), m = meta(s.pay);
     if (m.dec == null || have == null) return '';
-    if (S().big(raw) > S().big(have)) return 'Insufficient ' + m.code + ' balance — you have ' + floorTxt(have, m.dec);
+    if (S().big(raw) > S().big(have)) return 'Insufficient ' + m.code + ' balance — you have ' + floorTxt(have, m.dec) + ' ' + m.code;
     var room = S().swapRoom(s.pay, have);
+    // RAZA 2026-10-31: the gas case read "keep 0.2 NEAR for gas; up to 0 can be swapped". It now leads with
+    // the balance, Stellar's sentence, and names the keep after it -- the wording of the dashboard dialog.
     if (S().big(raw) > S().big(room)) {
-      return 'Insufficient ' + m.code + ' balance — keep 0.2 NEAR for gas; up to ' + floorTxt(room, m.dec) + ' can be swapped';
+      return 'Insufficient ' + m.code + ' balance — you have ' + floorTxt(have, m.dec) + ' ' + m.code
+        + ', and a NEAR swap keeps 0.2 NEAR back for network fees';
     }
     return '';
   }
