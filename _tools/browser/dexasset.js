@@ -912,7 +912,7 @@
     // Only now is the gate lifted: the box stays hidden while it holds the design's Aptos prices,
     // and opens the moment it holds this token's own.
     pc.classList.add('lxda');
-    wireChartHover(pc, { pts: pts, L: L, R: R, t0: t0, tspan: tspan, y: y, K: K, bucket: FIT.bucket });
+    wireChartHover(pc, { pts: pts, L: L, R: R, t0: t0, tspan: tspan, y: y, K: K, bucket: FIT.bucket, vol: vmax > 0 });
     watchChartWidth();
   }
   // The right gutter is sized in pixels, so a new width redraws rather than stretches.
@@ -953,7 +953,7 @@
     return v >= 0.01 ? ('$' + v.toFixed(2)) : '<$0.01';
   }
   function tradesIn(t, bucket) {
-    if (!TR.ts || !(bucket > 0) || t < TR.from) return 0;
+    if (!TR.ts || !(bucket > 0) || t < TR.from) return null;           // not known, which is not "none"
     var n = 0;
     for (var i = 0; i < TR.ts.length; i++) if (TR.ts[i] >= t && TR.ts[i] < t + bucket) n++;
     return n;
@@ -1013,7 +1013,11 @@
       tip.appendChild(tipEl('l', mcap ? 'Market cap' : 'Price'));
       tip.appendChild(tipEl('p', head));
       if (sub) tip.appendChild(tipEl('v', sub));
-      if (volUsd > 0) {
+      // ONE READOUT SHAPE ON EVERY POINT (RAZA 2026-11-01: "it shows 2 different types of hovers ... make it just
+      // like Stellar"). A quiet stretch is drawn with flat points that carry no candle, and those used to drop
+      // the Volume and Trades rows. Where the series has per-candle volume at all, every point now has both:
+      // a quiet point reads $0 and 0 trades, and a candle older than the trades feed reaches reads "—".
+      if (S.vol) {
         var row = el('div', 'lxrow');
         row.appendChild(tipEl('l', 'Volume'));
         row.appendChild(tipEl('p', usdCompact(volUsd)));
@@ -1022,10 +1026,10 @@
       // Trades in this candle (RAZA 2026-11-01: "I don't see the number of trades"), Stellar's row under Volume.
       // Counted from the recent-trades feed on the same pool, so only for candles that feed fully covers.
       var nTr = tradesIn(p[0], S.bucket);
-      if (nTr > 0) {
+      if (S.vol) {
         var trow = el('div', 'lxrow');
         trow.appendChild(tipEl('l', 'Trades'));
-        trow.appendChild(tipEl('p', nTr.toLocaleString('en-US')));
+        trow.appendChild(tipEl('p', nTr == null ? '—' : nTr.toLocaleString('en-US')));
         tip.appendChild(trow);
       }
       tip.style.opacity = 1;
