@@ -912,7 +912,7 @@
     // Only now is the gate lifted: the box stays hidden while it holds the design's Aptos prices,
     // and opens the moment it holds this token's own.
     pc.classList.add('lxda');
-    wireChartHover(pc, { pts: pts, L: L, R: R, t0: t0, tspan: tspan, y: y, K: K });
+    wireChartHover(pc, { pts: pts, L: L, R: R, t0: t0, tspan: tspan, y: y, K: K, bucket: FIT.bucket });
     watchChartWidth();
   }
   // The right gutter is sized in pixels, so a new width redraws rather than stretches.
@@ -936,13 +936,13 @@
   // elements — .lxda-chtip / .lxda-chdot / .lxda-chvl, styled by the inherited sheet — with the date, the
   // price in the chart's unit and dollars beneath it, and that bucket's volume in dollars.
   // Stellar's readout date, in 24-hour time (RAZA 2026-10-29: "the time format above the price should be of
-  // 24hr format instead of AM-PM"): "Oct 28, 16:45" on 1D and 1W, where an hour means something, and
-  // "Oct 28" on the longer ranges.
+  // 24hr format instead of AM-PM"): "Oct 28, 16:45" wherever a point is shorter than a day -- 1D (15 min),
+  // 1W (1 h) and 1M (4 h; RAZA 2026-11-01 hovered 1M and saw no time) -- and "Oct 28" on 1Y's daily points.
   function tipDate(ms) {
     var d = new Date(ms), mo = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     if (!isFinite(d.getTime())) return '';
     var two = function (v) { return (v < 10 ? '0' : '') + v; };
-    var hm = (CH_VIEW.label === '1D' || CH_VIEW.label === '1W') ? (', ' + two(d.getHours()) + ':' + two(d.getMinutes())) : '';
+    var hm = (CH_VIEW.label === '1D' || CH_VIEW.label === '1W' || CH_VIEW.label === '1M') ? (', ' + two(d.getHours()) + ':' + two(d.getMinutes())) : '';
     return mo[d.getMonth()] + ' ' + d.getDate() + hm;
   }
   function usdCompact(v) {
@@ -951,6 +951,12 @@
     if (v >= 1e6) return '$' + (v / 1e6).toFixed(2) + 'M';
     if (v >= 1e3) return '$' + (v / 1e3).toFixed(1) + 'K';
     return v >= 0.01 ? ('$' + v.toFixed(2)) : '<$0.01';
+  }
+  function tradesIn(t, bucket) {
+    if (!TR.ts || !(bucket > 0) || t < TR.from) return 0;
+    var n = 0;
+    for (var i = 0; i < TR.ts.length; i++) if (TR.ts[i] >= t && TR.ts[i] < t + bucket) n++;
+    return n;
   }
   function tipEl(cls, text) {
     var e = el('div', cls, text);
@@ -1012,6 +1018,15 @@
         row.appendChild(tipEl('l', 'Volume'));
         row.appendChild(tipEl('p', usdCompact(volUsd)));
         tip.appendChild(row);
+      }
+      // Trades in this candle (RAZA 2026-11-01: "I don't see the number of trades"), Stellar's row under Volume.
+      // Counted from the recent-trades feed on the same pool, so only for candles that feed fully covers.
+      var nTr = tradesIn(p[0], S.bucket);
+      if (nTr > 0) {
+        var trow = el('div', 'lxrow');
+        trow.appendChild(tipEl('l', 'Trades'));
+        trow.appendChild(tipEl('p', nTr.toLocaleString('en-US')));
+        tip.appendChild(trow);
       }
       tip.style.opacity = 1;
       var tw = tip.offsetWidth, th = tip.offsetHeight, tx = lx + 14;
@@ -1675,24 +1690,32 @@
     if (!pool) { TR.none = true; TR.rows = []; syncPanel(); return; }
     TR.pool = pool;
     var at = attempt || 0;
-    getJsonOnce('lumos.nearGtTr.v1.' + pool.id, 'https://api.geckoterminal.com/api/v2/networks/near/pools/'
+    // v2: the first element is { meta: 1, ts, from } for the chart readout's trade count (below).
+    getJsonOnce('lumos.nearGtTr.v2.' + pool.id, 'https://api.geckoterminal.com/api/v2/networks/near/pools/'
       + encodeURIComponent(pool.id) + '/trades', 60000, function (j) {
-      var out = [];
-      ((j && j.data) || []).forEach(function (x) {
+      var out = [], ts = [], list = (j && j.data) || [];
+      list.forEach(function (x) {
         var a = x && x.attributes;
         if (!a) return;
         var buy = a.to_token_address === d.i, sell = a.from_token_address === d.i;
         if (!buy && !sell) return;
         var amt = +(buy ? a.to_token_amount : a.from_token_amount), nearAmt = +(buy ? a.from_token_amount : a.to_token_amount);
         var addr = String(a.tx_from_address || ''), t = Date.parse(a.block_timestamp || '');
+        if (isFinite(t)) ts.push(t);                          // every trade counts, listed or not
         if (!(amt > 0) || !(nearAmt > 0) || !isFinite(t) || !ACCT_RE.test(addr)) return;
         out.push({ addr: addr, side: buy ? 'buy' : 'sell', amt: amt, near: nearAmt, px: nearAmt / amt, t: t,
           hash: /^[A-Za-z0-9]{20,64}$/.test(a.tx_hash || '') ? a.tx_hash : '' });
       });
       out.sort(function (p, q) { return q.t - p.t; });
-      return out.length ? out : [{ empty: 1 }];               // an empty pool is an answer, not a failure
+      // WHAT THE COUNT COVERS. GeckoTerminal sends the pool's last 24 hours of trades, capped at 300: under the
+      // cap that is the whole day, at the cap only back to the oldest one sent. A candle starting before that
+      // gets no Trades row, because a partial count would read as a quiet hour.
+      var from = list.length >= 300 ? Math.min.apply(null, ts.length ? ts : [Date.now()]) : Date.now() - 86400000;
+      return [{ meta: 1, ts: ts, from: from }].concat(out);  // never empty: an empty pool is an answer, not a failure
     }).then(function (rows) {
-      TR.rows = rows.length === 1 && rows[0].empty ? [] : rows;
+      var m = rows[0] && rows[0].meta ? rows[0] : null;         // slice, not shift: the array is shared
+      TR.ts = m ? m.ts : null; TR.from = m ? m.from : 0;
+      TR.rows = m ? rows.slice(1) : rows;
       TR.err = false; TR.at = Date.now();
       syncPanel();
     }, function () {
