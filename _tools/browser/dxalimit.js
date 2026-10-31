@@ -386,7 +386,7 @@
       }
       var txs = D().buildPlace(who, o, pre);
       window.__lxnLastLimit = { plan: o, pre: pre, txs: txs };
-      if (b) b.textContent = txs.length > 1 ? ('Approve ' + txs.length + ' transactions in your wallet…') : 'Confirm in wallet…';
+      if (b) b.textContent = 'Confirm in wallet…';
       return D().sign(txs);
     }).then(function (res) {
       var v = D().verdict(res);

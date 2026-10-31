@@ -1666,7 +1666,7 @@
       flbl.textContent = 'Checking…';
       window.lxnDcl.buildCancel(who, ids).then(function (b) {
         window.__lxnLastCancel = b;
-        flbl.textContent = b.txs.length > 1 ? ('Approve ' + b.txs.length + ' in your wallet…') : 'Confirm in wallet…';
+        flbl.textContent = 'Confirm in wallet…';
         return window.lxnDcl.sign(b.txs);
       }).then(function () {
         m.classList.remove('open', 'show', 'active');

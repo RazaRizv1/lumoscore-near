@@ -803,7 +803,7 @@
         if (fresh.from !== 'near' && S().big(bt.storage) > have) {
           throw new Error('Not enough NEAR for the token registration this swap needs.');
         }
-        setGo(false, bt.steps > 1 ? ('Approve ' + bt.steps + ' in your wallet…') : 'Confirm in wallet…');
+        setGo(false, 'Confirm in wallet…');
         window.__lxnLastSwap = { quote: fresh, txs: bt.txs };
         return S().sign(bt).then(function (res) { return { res: res, q: fresh }; });
       });
@@ -1123,7 +1123,7 @@
         if (ord.sell === D().WNEAR) need += S().big(ord.spendRaw);
         if (need > have) throw new Error('Not enough NEAR for this order and the storage it needs (' + show(pre.storage, 24, 4) + ' NEAR).');
         var txs = D().buildPlace(who, ord, pre);
-        limGo(false, txs.length > 1 ? ('Approve ' + txs.length + ' in your wallet…') : 'Confirm in wallet…');
+        limGo(false, 'Confirm in wallet…');
         window.__lxnLastLimit = { order: ord, txs: txs };
         return D().sign(txs);
       });

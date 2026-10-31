@@ -465,7 +465,7 @@
           throw new Error('Not enough NEAR for this swap and the storage it needs.');
         }
         if (fresh.from !== 'near' && S().big(bt.storage) > have) throw new Error('Not enough NEAR for the token registration this swap needs.');
-        label(P, bt.steps > 1 ? 'Approve ' + bt.steps + ' transactions in your wallet…' : 'Confirm in wallet…', false);
+        label(P, 'Confirm in wallet…', false);
         window.__lxnLastSwap = { quote: fresh, txs: bt.txs };
         return S().sign(bt).then(function (res) { return { res: res, q: fresh }; });
       });
