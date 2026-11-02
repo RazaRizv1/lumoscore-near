@@ -15,7 +15,7 @@
 //                       serves, and the NEAR tokens it takes plus those only Omni/Wormhole carry
 // WHAT HAS NO NEAR SOURCE says so with the design's em dash: the Launchpad box (no NEAR launchpad
 // deployed yet) and Platform Activity, which shows the design's own "No platform activity yet." row --
-// LumosCore has no NEAR activity marker to read until NEAR writes exist.
+// until the platform's own NEAR writes are read (activity(), below).
 (function () {
   if (window.__lxnDash) return;
   window.__lxnDash = 1;
@@ -159,11 +159,73 @@
     list.setAttribute('data-lxact', '1');
   }
 
+  // ...and then the platform's own NEAR writes (browser/nearcore.js platformActivity: every swap, limit order and
+  // bridge pays its fee to fees-lumoscore.near in the same transaction). Stellar's row: the pair's logos, a
+  // sentence, the verb and the trader, the time and the transaction link. A failed read keeps the empty row.
+  var TX = 'https://nearblocks.io/txns/';
+  var XPI = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>';
+  function esc(t) { return String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+  function ago(ms) {
+    var s = Math.max(0, (Date.now() - ms) / 1000);
+    if (s < 60) return 'now';
+    if (s < 3600) return Math.floor(s / 60) + 'm';
+    if (s < 86400) return Math.floor(s / 3600) + 'h';
+    return Math.floor(s / 86400) + 'd';
+  }
+  function amt(f) {
+    if (!f) return '';
+    var v = f.v == null ? '' : Number(f.v);
+    var n = v === '' ? '' : (v >= 1000 ? v.toLocaleString('en-US', { maximumFractionDigits: 2 }) : String(+v.toPrecision(6)));
+    return '<b>' + esc((n ? n + ' ' : '') + f.s) + '</b>';
+  }
+  function logo(f) {
+    var l = esc(String((f && f.s) || '?').charAt(0).toUpperCase());
+    return '<span class="act-inl lx-dimg lx-fgi" data-l="' + l + '">' + (f && f.ic ? '<img src="' + esc(f.ic) + '" alt="" onerror="this.remove()">' : '') + '</span>';
+  }
+  function who(a) {
+    var av = '';
+    try { if (window.lxIdent) av = '<img class="lx-actav" width="20" height="20" alt="" src="data:image/svg+xml;utf8,' + encodeURIComponent(String(window.lxIdent(a, 20))) + '">'; } catch (e) {}
+    var sh = a.length > 22 ? a.slice(0, 8) + '…' + a.slice(-6) : a;
+    return '<a class="lx-actwho" href="/account/near/' + encodeURIComponent(a) + '" title="' + esc(a) + '">' + av + esc(sh) + '</a>';
+  }
+  function actRow(r) {
+    var m = String(r.memo || ''), verb, cls, type;
+    if (/limit order/i.test(m)) { verb = 'Limit order'; cls = 'swap'; type = 'Placed a limit order selling ' + amt(r.give); }
+    else if (/^lx:(ni|om|wh)$/.test(m)) {
+      verb = 'Bridge'; cls = 'bridge';
+      type = 'Bridged ' + amt(r.give) + ' via ' + ({ 'lx:ni': 'NEAR Intents', 'lx:om': 'Omni Bridge', 'lx:wh': 'Wormhole' })[m];
+    } else if (r.give && r.get) { verb = 'Swap'; cls = 'swap'; type = 'Swapped ' + amt(r.give) + ' for ' + amt(r.get); }
+    else { verb = 'Trade'; cls = 'swap'; type = r.give ? ('Traded ' + amt(r.give)) : 'Traded on LumosCore'; }
+    var b = (verb === 'Swap') ? r.get : null;
+    var glyph = '<span class="lx-fg' + (b ? ' lx-fg2' : '') + '" aria-hidden="true"><span class="lx-fga">' + logo(r.give || r.get) + '</span>'
+      + (b ? '<span class="lx-fgb">' + logo(b) + '</span>' : '') + '</span>';
+    return '<div class="activity-feed-row lx-fr" data-lx-noswap="1">' + glyph
+      + '<div class="info"><div class="type">' + type + '</div><div class="meta lx-actmeta"><span class="lx-actverb ' + cls + '">' + verb + '</span>' + who(r.who) + '</div></div>'
+      + '<div class="lx-frr"><div class="time">' + ago(r.ts) + '</div>'
+      + '<a class="lx-actlink" href="' + TX + encodeURIComponent(r.h) + '" target="_blank" rel="noopener nofollow" title="View transaction">' + XPI + '</a></div></div>';
+  }
+  function activity() {
+    var C = window.lxnCore;
+    // nearcore.js can arrive after this script: wait for it (up to 10s) rather than keep the empty row.
+    if (!C || !C.platformActivity) { if ((activity.n = (activity.n || 0) + 1) < 40) setTimeout(activity, 250); return; }
+    C.platformActivity(15).then(function (rows) {
+      var list = document.getElementById('activityList');
+      if (!list || !rows || !rows.length) return;
+      list.innerHTML = rows.map(actRow).join('');
+      list.setAttribute('data-lxact', '1');
+      try { list.setAttribute('data-logoed', '1'); } catch (e) {}
+    }, function () {
+      // FastNEAR refused (its per-visitor allowance) or failed: one more try a minute later.
+      if (!activity.retried) { activity.retried = 1; setTimeout(activity, 60000); }
+    });
+  }
+
   // ---- the Quick actions row -------------------------------------------------------------------------------
   // lx-dashqa (inherited, patched by _neardash.js) routes the cards. Nothing here.
 
   function load() {
     activityEmpty();
+    activity();
     paintStats();
     ['ltok', 'lnew', 'lmint'].forEach(function (k) { box(k, '—'); });
     crossChain();

@@ -57,7 +57,9 @@ const COST_A = money(usdMatch[1]) + ' to create the token and ' + money(usdMatch
 // #costTotal too: the phone's sticky summary bar carries the total as div.val#costTotal, outside both rules, so its
 // mock ("≈ $25") showed until the real figure replaced it (monitor bot, Launchpad mobile, since 2026-10-28).
 const CSS_ALL = 'html:not(.lxn-costready) .cost-row .v,html:not(.lxn-costready) .cost-total .v,'
-  + 'html:not(.lxn-costready) #costTotal{visibility:hidden}';
+  + 'html:not(.lxn-costready) #costTotal{visibility:hidden}'
+  // RAZA 2026-11-03: 'Liq. pool & network' wrapped its dollar figure under the NEAR one. Kept on one line, as Stellar's.
+  + '.cost-row .v,.cost-total .v{white-space:nowrap}';
 const CSS_REVIEW = [
   CSS_ALL,
   'html:not(.lxn-lprev) .hero-card .hero-icon,html:not(.lxn-lprev) .hero-name,html:not(.lxn-lprev) .hero-ticker,'
@@ -73,7 +75,16 @@ for (const c of [CSS_ALL, CSS_REVIEW, CSS_CONFIRM]) if (c.indexOf(B) >= 0) { con
 // Exact strings only. Each is launch copy that names the wrong chain or rule; nothing here is a regex
 // over "Stellar".
 const COPY = [
-  ['2-6 uppercase letters', '2-12 letters or digits, starting with a letter'],
+  // RAZA 2026-11-03: the header reads like Stellar's. NOT "a flat $25": NEAR charges $5 + $10 + the storage NEAR
+  // itself asks for, about $22 at the time of writing, and the cost panel prints the real figure.
+  ['<h1>Launch <span class="hl">Your Token</span></h1>', '<h1>Launch a Token on <span class="hl">NEAR</span></h1>'],
+  ['<p>Before creating a token, familiarize yourself with <a class="ui-link" href="#">how it works</a>.</p>',
+    '<p>Issue a NEAR token for $15 in NEAR plus network storage, with its first liquidity pool included.</p>'],
+  ['<h1 class="page-title">Launch <span class="hl">Your Token</span></h1>', '<h1 class="page-title">Launch a Token on <span class="hl">NEAR</span></h1>'],
+  ['<p class="page-sub">Familiarize yourself with <a href="#">how it works</a> before creating.</p>',
+    '<p class="page-sub">Issue a NEAR token for $15 in NEAR plus network storage, with its first liquidity pool included.</p>'],
+  // The base this fork copies still carries an earlier run's ticker line; Stellar's words again (see nearlaunch.js).
+  ['2-12 letters or digits, starting with a letter', '2-6 uppercase letters'],
   ['Once your token is minted on the Stellar network,', 'Once your token is minted on NEAR,'],
   ['Your token is now live on the Stellar network and listed on the LumosCore DEX.', 'Your token is now live on NEAR and listed on the LumosCore DEX.'],
   ['View on Stellar Explorer', 'View on NEAR Explorer'],

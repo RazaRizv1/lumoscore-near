@@ -1039,7 +1039,7 @@
     }
     if (recv) {
       recv.textContent = got > 0
-        ? (pr.side === 'sell' ? (fmtNum(got, 7) + ' NEAR') : (fmtNum(got, Math.min(8, pr.token.dec)) + ' ' + pr.token.code))
+        ? (pr.side === 'sell' ? fmtNum(got, 7) : fmtNum(got, Math.min(8, pr.token.dec)))   // the picker beside it names the token (RAZA 2026-11-03)
         : '—';
     }
     // The dollar line under each amount, as Stellar draws them.
@@ -1083,13 +1083,31 @@
       }
       if (ord) bits.push('Trading fee ' + (ord.feeBps / 100) + '%: ' + show(ord.feeRaw, lim.s.dec, 7) + ' ' + lim.s.code + ', on top of the amount.');
     }
-    limNote(bits.join(' '));
+    // RAZA 2026-11-03: no note under the price ("Filled when … Trading fee …"); the wallet shows the fee transfer.
+    limNote('');
 
     if (!addr()) { limSay(''); limGo(true, 'Connect wallet'); return; }
     if (!(Number(amt) > 0)) { limSay(''); limGo(false, 'Place limit order'); return; }
     if (!(Number(px) > 0)) { limSay(''); limGo(false, 'Place limit order'); return; }
     if (!ord) { limSay('That amount and price are too small to rest an order.'); limGo(false, 'Place limit order'); return; }
 
+    // THE ONE-TIME RHEA STORAGE, CHECKED BEFORE THE BUTTON LIGHTS (RAZA 2026-11-03): an account's first order
+    // needs 0.5 NEAR deposited with Rhea's DCL contract, which pays for keeping its orders on chain and can be
+    // withdrawn. It used to surface only after the press, as 'Not enough NEAR for this order and the storage'.
+    if (lim.regFor !== addr()) {
+      var regWho = lim.regFor = addr(); lim.reg = undefined;
+      D().registered(regWho).then(function (v) { if (lim.regFor === regWho) { lim.reg = v; limitSync(); } }, function () {});
+    }
+    if (lim.reg === false && H.bal.near != null) {
+      var needN = S().big('500000000000000000000000') + S().big(S().SWAP_KEEP) + (ord.sell === D().WNEAR ? S().big(ord.spendRaw) : BigInt(0));
+      if (needN > S().big(H.bal.near)) {
+        limSay('Your first limit order on NEAR needs 0.5 NEAR of storage on Rhea, plus 0.2 NEAR kept for gas'
+          + (ord.sell === D().WNEAR ? ' and the order itself' : '') + '. Rhea holds the 0.5 to keep your orders on chain; you can withdraw it later. You have '
+          + show(H.bal.near, 24, 4) + ' NEAR.');
+        limGo(false, 'Place limit order');
+        return;
+      }
+    }
     var room = roomRaw(lim.s);
     if (room == null) { limSay(balWhy(lim.s) + '.'); limGo(false, 'Place limit order'); return; }
     if (S().big(ord.spendRaw) > S().big(room)) {                    // the order plus its fee

@@ -459,7 +459,8 @@
   }
   function tickerProblem(t) {
     if (!t) return 'Enter a ticker.';
-    if (!/^[A-Z][A-Z0-9]{1,11}$/.test(t)) return 'Ticker: 2-12 letters or digits, starting with a letter.';
+    // Stellar's rule and words (RAZA 2026-11-03: "2-6 uppercase letters"), a subset of the factory's 2-12.
+    if (!/^[A-Z]{2,6}$/.test(t)) return 'Ticker: 2-6 uppercase letters.';
     if (RESERVED.indexOf(t.toLowerCase()) >= 0) return '$' + t + ' is reserved on LumosCore — choose another ticker.';
     return null;
   }
@@ -518,8 +519,7 @@
 
   function wireForm() {
     var tick = $('#tokenTicker');
-    // The design caps the field at 6 characters; NEAR's rule (the factory's) allows 12.
-    if (tick) tick.setAttribute('maxlength', '12');
+    // The design's 6-character cap stands: the ticker is Stellar's 2-6 uppercase letters (RAZA 2026-11-03).
     var btn = $('.summary-cta');
     var timer = null;
     if (tick) tick.addEventListener('input', function () {

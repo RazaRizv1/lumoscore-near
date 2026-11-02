@@ -113,6 +113,7 @@
     // Stellar's row: "Trading fee  0.2%" (RAZA 2026-11-01). NEAR limit orders now carry the fee (neardcl.js).
     var t = window.__lxFeeRate === 0.001 ? '0.1%' : '0.2%';
     if (v.textContent !== t) v.textContent = t;
+    v.style.color = 'var(--green,#22c55e)';                           // Stellar prints the fee in green
   }
 
   // ---- the button ---------------------------------------------------------------------------------
@@ -175,6 +176,8 @@
     mark(frowMono(spendF), text);
     if (frowMono(spendF)) frowMono(spendF).setAttribute('data-lxbal', '1');
     maxButton(spendF, canMax);
+    // Ghost text in every empty field (RAZA 2026-11-03), never a value: the fields still start blank.
+    f.forEach(function (x) { var i = input(x); if (i && i.placeholder !== '0.00') i.placeholder = '0.00'; });
     var tot = input(f[2]);
     if (tot && !phone(p) && tot.hasAttribute('readonly')) tot.removeAttribute('readonly');
     feeRow(p);
@@ -317,6 +320,16 @@
     }
     ai.value = (out && +out > 0) ? out : '';
     recalc(p);
+    if (!(out && +out > 0)) say(p, maxWhy(p, price));
+    else say(p, '');
+  }
+  // Why MAX had nothing to fill: a buy needs a price to divide by, and NEAR held back for gas (0.2) and,
+  // before a first order, Rhea's one-time storage (0.5) can leave nothing to spend.
+  function maxWhy(p, price) {
+    if (side(p) === 'buy' && !(price > 0)) return 'Enter a limit price first — MAX divides your NEAR by it.';
+    if (side(p) === 'sell') return 'You have no ' + code() + ' to sell.';
+    if (acct.bal.near == null) return 'Reading your balance — try again in a moment.';
+    return 'Nothing left to spend: NEAR keeps 0.2 for gas' + (acct.reg === false ? ', and your first order needs 0.5 NEAR of Rhea storage (refundable)' : '') + '. You have ' + fmtDown(acct.bal.near, 24) + ' NEAR.';
   }
   function trunc6(s) {
     var i = s.indexOf('.');

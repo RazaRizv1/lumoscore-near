@@ -595,7 +595,7 @@
       var b = document.createElement('button');
       b.className = 'dex-mk-pgbtn' + (n === pageNo ? ' active' : '');
       b.textContent = String(n);
-      b.addEventListener('click', function () { renderPage(h, d, n); });
+      b.addEventListener('click', function () { renderPage(h, d, n); toTableTop(); });
       return b;
     }
     // ASCENDING. Each insert lands immediately before `next`, so a descending loop stacks the
@@ -608,13 +608,21 @@
       btn.parentNode.replaceChild(clone, btn);
       clone.disabled = !!disabled;
       clone.style.opacity = disabled ? '.4' : '';
-      if (!disabled) clone.addEventListener('click', function () { renderPage(h, d, target); });
+      if (!disabled) clone.addEventListener('click', function () { renderPage(h, d, target); toTableTop(); });
     }
     nav(first, 1, pageNo === 1);
     nav(prev, pageNo - 1, pageNo === 1);
     nav(next, pageNo + 1, pageNo === pages);
     nav(last, pages, pageNo === pages);
 
+    // A SHORTER PAGE MUST NOT DROP THE READER IN THE FOOTER (RAZA 2026-11-03): page 2 holds 21 rows to page 1's
+    // 50, the document shrinks under a scroll position kept from the longer page, and the view landed past the
+    // table. After a page change the table's head is brought to the top of the view if it is above it.
+    function toTableTop() {
+      var t = $('.dex-mk-table') || pager;
+      var top = t.getBoundingClientRect().top;
+      if (top < 0) window.scrollBy(0, top - 80);    // at once: a smooth scroll can be cut short by the reflow
+    }
     // The whole pager is pointless with one page, and the design has no state for that.
     pager.style.display = pages > 1 ? '' : 'none';
   }

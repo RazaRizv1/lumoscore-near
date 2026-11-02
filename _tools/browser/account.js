@@ -161,7 +161,31 @@
       ex.rel = 'noopener nofollow';
       ex.insertAdjacentHTML('beforeend', EXT_SVG);
       sub.appendChild(ex);
+      activeSince(a, sub);
     }
+  }
+  // "Active since Feb 2024" before Explorer, as Stellar prints it (RAZA 2026-11-03). The creation date comes from
+  // NearBlocks' account record (its transaction lists went stale, this one did not); kept for the session.
+  // No date, no words: a failed read leaves the line as it was.
+  function activeSince(a, sub) {
+    var key = 'lxn.created.' + a, hit = null;
+    try { hit = sessionStorage.getItem(key); } catch (e) {}
+    var put = function (ms) {
+      if (!(ms > 0) || sub.querySelector('.lxn-since')) return;
+      var sp = el('span', 'lxn-since', 'Active since ' + new Date(ms).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }));
+      sp.setAttribute('data-logoed', '1');
+      sub.insertBefore(sp, sub.firstChild);
+    };
+    if (hit) { put(+hit); return; }
+    fetch('https://api.nearblocks.io/v1/account/' + encodeURIComponent(a))
+      .then(function (r) { if (!r.ok) throw new Error(String(r.status)); return r.json(); })
+      .then(function (j) {
+        var c = j && j.account && j.account[0] && j.account[0].created, ms = c && c.block_timestamp ? Math.floor(Number(c.block_timestamp) / 1e6) : 0;
+        if (!(ms > 0)) return;
+        try { sessionStorage.setItem(key, String(ms)); } catch (e) {}
+        put(ms);
+      })
+      .catch(function () {});
   }
   // The network badge is NEAR's whatever the link says, so it is set before anything else.
   function paintNet() {
@@ -387,7 +411,9 @@
       total += v; priced++;
       setVal(t.id, v);
     });
-    setStat('total', money(total), unpriced ? ('Estimated · ' + unpriced + (unpriced === 1 ? ' token' : ' tokens') + ' without a price') : 'Estimated value');
+    setStat('total', money(total), 'Estimated value');                // Stellar's line (RAZA 2026-11-03)
+    var tsl = $('.acc-stat .s[data-s="total"]');
+    if (tsl) tsl.title = unpriced ? (unpriced + (unpriced === 1 ? ' token has' : ' tokens have') + ' no price and are not counted') : '';
     setStat('xlm', near ? bal(near.balance) + ' NEAR' : '—', near ? money(near.balance * usd) : '');
     window.__lxnAccountTotal = { usd: total, priced: priced, unpriced: unpriced, nearUsd: usd };
   }
@@ -642,7 +668,8 @@
       var n = data.held.length + 1;
       var an = $('#accAssetsN');
       if (an) an.textContent = String(n);
-      setStat('assets', String(n), data.held.length + (data.held.length === 1 ? ' token held' : ' tokens held'));
+      // The line under the count adds up to it (RAZA 2026-11-03: "18" over "17 tokens held" read as a mismatch).
+      setStat('assets', String(n), 'NEAR + ' + data.held.length + (data.held.length === 1 ? ' token' : ' tokens'));
       paintValues(data.near, data.held, mk);
     }).catch(function (e) {
       var gone = e && (e.code === 'UNKNOWN_ACCOUNT' || /UNKNOWN_ACCOUNT|does not exist/i.test(e.message || ''));

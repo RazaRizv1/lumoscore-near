@@ -127,6 +127,9 @@
     var s = sides(p), state = FEE[s.pay];
     var wnear = asset() && asset().id === S().WNEAR;               // NEAR <-> wNEAR is wrapping, not a swap
     var on = state === true && !wnear;
+    // Stellar parity: the button stays dimmed until there is a quote for an amount you can pay.
+    var raw = payAmountRaw(p), have = bal.raw[s.pay];
+    var ready = on && !!(q && q.ok) && !!raw && !(me() && have != null && short(p, raw, have));
     var label = on ? 'Swap' : SOON;
     // lx-gate saved the design's label before this ran and restores data-lxorig on connect.
     b.setAttribute('data-lxorig', label);
@@ -134,9 +137,9 @@
     if (b.getAttribute('data-lxgate') === '1') return;              // "Connect wallet" belongs to lx-gate
     if (busy) return;
     if (b.textContent !== label) b.textContent = label;
-    b.disabled = !on;
-    if (on) { b.removeAttribute('disabled'); b.removeAttribute('aria-disabled'); b.style.opacity = ''; b.style.cursor = ''; }
-    else { b.setAttribute('aria-disabled', 'true'); b.style.opacity = '.55'; b.style.cursor = 'not-allowed'; }
+    b.disabled = !ready;
+    if (ready) { b.removeAttribute('disabled'); b.removeAttribute('aria-disabled'); b.style.opacity = ''; b.style.cursor = ''; }
+    else { b.setAttribute('aria-disabled', 'true'); b.style.opacity = on ? '.42' : '.55'; b.style.cursor = 'not-allowed'; }
     if (on && !(q && q.ok)) p.setAttribute('data-lxunfill', '1'); else p.removeAttribute('data-lxunfill');
   }
   function checkFee(p) {

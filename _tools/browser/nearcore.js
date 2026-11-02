@@ -324,6 +324,14 @@
 
     var net = {}, who = {};
     function add(c, amt, other) { net[c] = (net[c] || BigInt(0)) + amt; if (other) who[c] = other; }
+    // NEAR that a contract unwrapped in this transaction ("Withdraw <x> NEAR from <contract>" on wrap.near) and
+    // then paid on to this account is the proceeds of a sale (Rhea DCL unwraps for the seller), not change.
+    var wd = {};
+    (T.receipts || []).forEach(function (r) {
+      var o = (r.execution_outcome && r.execution_outcome.outcome) || {};
+      if (o.executor_id !== WNEAR || !okOutcome(o)) return;
+      (o.logs || []).forEach(function (l) { var w = l.split(' '); if (w.length === 5 && w[0] === 'Withdraw' && w[2] === 'NEAR') wd[w[4] + '|' + w[1]] = 1; });
+    });
     (T.receipts || []).forEach(function (r) {
       var rr = r.receipt || {}, out = (r.execution_outcome && r.execution_outcome.outcome) || {};
       if (!okOutcome(out)) return;
@@ -334,12 +342,25 @@
         if (pre === me && to !== me) {
           if (p[0] === 'Transfer') add('near', -big(b.deposit), to);
           else if (p[0] === 'FunctionCall' && to === WNEAR && b.method_name === 'near_deposit') add('near', -big(b.deposit));
-        } else if (to === me && pre !== me && p[0] === 'Transfer' && (sg !== me || pre === WNEAR)) {
+        } else if (to === me && pre !== me && p[0] === 'Transfer' && (sg !== me || pre === WNEAR || wd[pre + '|' + b.deposit])) {
           add('near', big(b.deposit), pre);
         }
       });
       var token = out.executor_id || to;
       (out.logs || []).forEach(function (l) {
+        // wrap.near predates NEP-297 events: its transfers log as "Transfer <amount> from <a> to <b>" (seen on
+        // RAZA's DARK swap, 2026-11-03, whose wNEAR side was missing from Platform Activity). Read those too.
+        // Its wrap and unwrap log too ("Deposit <x> NEAR to <a>", "Withdraw <x> NEAR from <a>"), so a wrap nets out.
+        if (token === WNEAR) {
+          var lw = l.split(' ');
+          if (!/^\d+$/.test(lw[1] || '')) return;
+          if (lw.length === 6 && lw[0] === 'Transfer' && lw[2] === 'from' && lw[4] === 'to') {
+            if (lw[5] === me && lw[3] !== me) add(token, big(lw[1]), lw[3]);
+            else if (lw[3] === me && lw[5] !== me) add(token, -big(lw[1]), lw[5]);
+          } else if (lw.length === 5 && lw[0] === 'Deposit' && lw[3] === 'to' && lw[4] === me) add(token, big(lw[1]));
+          else if (lw.length === 5 && lw[0] === 'Withdraw' && lw[3] === 'from' && lw[4] === me) add(token, -big(lw[1]));
+          if (l.indexOf('EVENT_JSON:') !== 0) return;
+        }
         if (l.indexOf('EVENT_JSON:') !== 0) return;
         var ev; try { ev = JSON.parse(l.slice(11)); } catch (e) { return; }
         if (!ev || ev.standard !== 'nep141' || !ev.data) return;
@@ -385,6 +406,70 @@
           var m = meta[g.c];
           return { ts: g.ts, h: g.h, neg: g.neg, v: m.d == null ? null : units(g.raw, m.d), c: g.c, s: m.s,
             ic: m.ic, inv: g.inv, cause: '', ok: g.ok };
+        });
+      });
+    });
+  }
+
+  // PLATFORM ACTIVITY (RAZA 2026-11-03: "Platform Activity — NEAR" stayed "No platform activity yet." after his
+  // swaps). Every NEAR write LumosCore makes pays its fee to the fee account IN THE SAME TRANSACTION -- a swap,
+  // a limit order, a bridge -- so that account's transactions are exactly the platform's activity, nothing
+  // borrowed from the rest of the chain. Each is decoded from the TRADER's side (the signer), with the same
+  // reader the account pages use, and named by the fee transfer's memo.
+  var FEE_ACCT = 'fees-lumoscore.near';
+  function feeMemo(acts) {
+    var memo = '';
+    (acts || []).forEach(function (a) {
+      var p = actPair(a), b = p[1];
+      if (p[0] !== 'FunctionCall' || b.method_name !== 'ft_transfer' || memo) return;
+      try {
+        var j = JSON.parse(atob(b.args || ''));
+        if (j && j.receiver_id === FEE_ACCT) memo = String(j.memo || 'fee');
+      } catch (e) {}
+    });
+    return memo;
+  }
+  function platformActivity(n) {
+    var key = 'lxn.pact';
+    try {
+      var c = JSON.parse(sessionStorage.getItem(key) || 'null');
+      if (c && Date.now() - c.t < 60000 && c.rows) return Promise.resolve(c.rows);
+    } catch (e) {}
+    return fnPost('account', { account_id: FEE_ACCT }).then(function (j) {
+      var list = ((j && j.account_txs) || []).slice(0, n || 15), okBy = {};
+      list.forEach(function (x) { okBy[x.transaction_hash] = x.is_success !== false; });
+      var hs = list.map(function (x) { return x.transaction_hash; }), calls = [];
+      for (var i = 0; i < hs.length; i += 5) calls.push(fnPost('transactions', { tx_hashes: hs.slice(i, i + 5) }).catch(function (e) { return { err: e }; }));
+      return Promise.all(calls).then(function (rs) {
+        var fails = rs.filter(function (r) { return r && r.err; });
+        if (rs.length && fails.length === rs.length) throw fails[0].err;
+        var legs = [], rows = [];
+        rs.forEach(function (r) {
+          ((r && r.transactions) || []).forEach(function (T) {
+            var tx = T.transaction || {}, sg = tx.signer_id || '', acts = tx.actions || [];
+            if (acts.length === 1 && actPair(acts[0])[0] === 'Delegate') {
+              var da = actPair(acts[0])[1].delegate_action || {};
+              sg = da.sender_id || sg; acts = da.actions || [];
+            }
+            var memo = feeMemo(acts);
+            if (!memo || okBy[tx.hash] === false) return;            // a failed write moved nothing
+            var mine = [];
+            decodeTx(sg, T, okBy, [], mine);
+            legs = legs.concat(mine);
+            rows.push({ h: tx.hash, who: sg, memo: memo, ts: nsMs((T.execution_outcome && T.execution_outcome.block_timestamp) || '') });
+          });
+        });
+        return withMeta(legs).then(function (ft) {
+          var by = {};
+          ft.forEach(function (f) { (by[f.h] = by[f.h] || []).push(f); });
+          rows.forEach(function (r) {
+            var g = by[r.h] || [];
+            r.give = g.filter(function (f) { return f.neg; })[0] || null;
+            r.get = g.filter(function (f) { return !f.neg; }).slice(-1)[0] || null;
+          });
+          rows.sort(function (a, b) { return b.ts - a.ts; });
+          try { sessionStorage.setItem(key, JSON.stringify({ t: Date.now(), rows: rows })); } catch (e) {}
+          return rows;
         });
       });
     });
@@ -445,6 +530,6 @@
     RPC: RPC, WNEAR: WNEAR, NEAR_LOGO: NEAR_LOGO, ICONS: ICONS,
     market: market, view: view, callView: callView, units: units, cleanSym: cleanSym,
     ftMetadata: ftMetadata, tokenMeta: tokenMeta, readHoldings: readHoldings,
-    activityData: activityData, entriesOf: entriesOf, isAccountId: isAccountId, short: short
+    activityData: activityData, platformActivity: platformActivity, entriesOf: entriesOf, isAccountId: isAccountId, short: short
   };
 })();
