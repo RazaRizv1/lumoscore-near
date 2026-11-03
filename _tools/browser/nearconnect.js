@@ -94,7 +94,23 @@
       if (!r.ok) throw new Error('wallet list unavailable');
       return r.json();
     })]).then(function (x) {
-      return new x[0].NearConnector({ network: 'mainnet', manifest: x[1], footerBranding: null, autoConnect: false });
+      // THE EXTENSION GETS TO ANSWER FIRST (RAZA 2026-11-03: HOT's approval appeared 30s+ after 'Awaiting
+      // signature'). The constructor fires 'near-selector-ready'; an installed HOT extension answers with
+      // 'near-wallet-injected', and only then does the library talk to it directly. Connecting in the same tick
+      // as constructing, as this did, could pick the manifest's sandboxed executor instead, which posts the
+      // request to HOT's relay and polls it every 3s until the extension finds it there. So the listener goes
+      // on BEFORE the constructor (an extension may answer synchronously) and the connector is handed out on
+      // that answer, or after 700ms when there is no extension. wrapOpen() starts it when the NEAR list opens, hiding the wait.
+      return new Promise(function (res) {
+        var c = null, done = false, heard = false;
+        function fin() { if (done || !c) return; done = true; clearTimeout(t); window.removeEventListener('near-wallet-injected', hear); res(c); }
+        function hear() { heard = true; setTimeout(fin, 0); }
+        var t = setTimeout(function () { done || fin(); }, 700);
+        window.addEventListener('near-wallet-injected', hear);
+        c = new x[0].NearConnector({ network: 'mainnet', manifest: x[1], footerBranding: null, autoConnect: false });
+        window.__lxnInjected = function () { return heard; };
+        if (heard) setTimeout(fin, 0);
+      });
     });
     _conn.catch(function () { _conn = null; });
     return _conn;
@@ -186,7 +202,12 @@
   function wrapOpen() {
     var o = window.lxwOpenWallet;
     if (typeof o !== 'function' || o.__lxn) return;
-    var w = function (net) { window.__lxNet = net; return o.apply(this, arguments); };
+    var w = function (net) {
+      window.__lxNet = net;
+      // The NEAR list is on screen: start NEAR Connect now, so a click on HOT finds it ready (see connector()).
+      if (String(net || '').toLowerCase() === NET) { try { connector().catch(function () {}); } catch (e) {} }
+      return o.apply(this, arguments);
+    };
     w.__lxn = 1;
     window.lxwOpenWallet = w;
   }
