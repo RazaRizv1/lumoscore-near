@@ -280,7 +280,9 @@
     st.id = 'lxq-vtick-css';
     st.textContent = '#swapModal .lx-vtick{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;'
       + 'margin-left:5px;border-radius:50%;background:var(--green,#35c07f);color:#fff;vertical-align:-2px;flex:0 0 14px}'
-      + '#swapModal .lx-vtick svg{width:9px;height:9px;display:block}';
+      + '#swapModal .lx-vtick svg{width:9px;height:9px;display:block}'
+      // Long warnings wrap inside the modal instead of running past its edge (RAZA 2026-11-03).
+      + '#swapModal .lxq-err,#swapModal .lxq-note{white-space:normal;overflow-wrap:anywhere;line-height:1.45;max-width:100%}';
     document.head.appendChild(st);
   }
   function vtick() {
@@ -859,6 +861,7 @@
     var pane = $('#swapModal .lxo-pane[data-pane="limit"]');
     if (!pane || pane.__b) return;
     pane.__b = 1;
+    tickCss();                                                       // also carries the wrap rule for its notes
     pane.innerHTML = '<div class="lxq-f">'
       + '<div class="lxq-fld"><div class="lxq-lab"><span>You sell</span>'
       + '<span><span class="bal">Available: <span class="lxq-balv">—</span></span> <button type="button" class="lxq-max">MAX</button></span></div>'
@@ -1065,7 +1068,9 @@
     if (!lim.s || !lim.b) { limNote(''); limSay(''); limGo(false, 'Place limit order'); return; }
     if (!pr) {
       limNote('');
-      limSay(NOPOOL + ' — on NEAR one side has to be NEAR.');
+      // RAZA 2026-11-03 (DARK -> USDC): say what to change, not what is missing. Rhea's limit orders rest in a
+      // pool against NEAR here, so a pair of two other tokens has nowhere to rest.
+      limSay('On NEAR, a limit order needs NEAR on one side. Choose NEAR as the token you sell or the one you buy.');
       limGo(false, 'Place limit order');
       return;
     }

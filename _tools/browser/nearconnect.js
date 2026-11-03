@@ -284,11 +284,42 @@
     try { if (window.lxwOpenWallet) window.lxwOpenWallet(NET); } catch (e) {}
   }
 
+  // A WALLET'S REFUSAL AS WORDS (RAZA 2026-11-03: a timed-out or rejected swap read "[object Object]"). Some
+  // wallets reject with a plain object, not an Error, and every screen did String(e.message || e). The signing
+  // calls are wrapped once here so every screen gets an Error whose message is the wallet's own text: its
+  // message, error, reason or code, in that order, else the object as JSON. A timeout gets one sentence.
+  function errText(e) {
+    if (e == null) return '';
+    if (typeof e === 'string') return e;
+    var pick = [e.message, e.error && (e.error.message || e.error), e.reason, e.cause && e.cause.message, e.code];
+    for (var i = 0; i < pick.length; i++) if (typeof pick[i] === 'string' && pick[i] && pick[i] !== '[object Object]') return pick[i];
+    try { var j = JSON.stringify(e); if (j && j !== '{}') return j.slice(0, 180); } catch (x) {}
+    return '';
+  }
+  function plainErr(e) {
+    var m = errText(e);
+    if (/time ?out|timed out|expired/i.test(m)) m = 'Transaction timed out. Please try again.';
+    if (e instanceof Error && e.message === m) return e;
+    var err = new Error(m || 'The wallet gave no reason.');
+    err.raw = e;
+    return err;
+  }
+  function plainErrors(w) {
+    if (!w || w.__lxnPlain) return w;
+    ['signAndSendTransaction', 'signAndSendTransactions', 'signMessage'].forEach(function (k) {
+      if (typeof w[k] !== 'function') return;
+      var f = w[k];
+      w[k] = function () { return Promise.resolve(f.apply(w, arguments)).catch(function (e) { throw plainErr(e); }); };
+    });
+    try { w.__lxnPlain = 1; } catch (e) {}
+    return w;
+  }
+
   // For the signing workstreams: the connected wallet, loading the library only when asked.
   window.lxn = {
     open: openNear,
     account: function () { var a = get('lumos.address'); return (get('lumos.chain') === NET && validAccount(a)) ? a : ''; },
-    wallet: function () { return connector().then(function (c) { return c.wallet(get('lumos.transport') || undefined); }); },
+    wallet: function () { return connector().then(function (c) { return c.wallet(get('lumos.transport') || undefined); }).then(plainErrors); },
     connector: connector,
     validAccount: validAccount
   };

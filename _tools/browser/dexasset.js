@@ -1786,7 +1786,7 @@
       var pool = TR.pool ? TR.pool.pair + ' on Rhea' : 'this pool';
       var none = TR.mine
         ? (!me ? 'Connect a wallet to see your own trades in this asset.'
-          : ('No trades from ' + escH(shortAcct(me)) + ' among the latest ' + TR.rows.length + ' on ' + escH(pool) + (span ? ' (the last ' + span + ')' : '') + '.'))
+          : 'No trades from this wallet in this asset.')                   // Stellar's line (RAZA 2026-11-03)
         : TR.min > 0 ? ('No trades of ' + TR.min.toLocaleString('en-US') + '+ NEAR among the latest ' + TR.rows.length + '.') : 'No trades on this pool recently.';
       tb.innerHTML = phone
         ? '<div class="lxda-ex-empty" data-lxda="1" style="text-align:center;padding:26px 12px;color:var(--text-soft,#8a8fa3);font-size:13.5px">' + none + '</div>'
@@ -1824,6 +1824,8 @@
       if (info.textContent !== it) info.textContent = it;
     }
     var pg = foot && foot.querySelector('.pgn');
+    // One page needs no pager (RAZA 2026-11-03: a lone "1" under "Showing 1–3 of 3").
+    if (pg) { var pdv = pages > 1 ? '' : 'none'; if (pg.style.display !== pdv) pg.style.display = pdv; }
     if (pg) {
       var ps = TR.page + '/' + pages;
       if (pg.getAttribute('data-lxnpg') !== ps) {
@@ -1928,9 +1930,11 @@
             + '<td style="text-align:right"><a class="dxa-hl-explorer" href="' + EXPL_ACCT + encodeURIComponent(r.a) + '" target="_blank" rel="noopener nofollow" aria-label="View on NearBlocks">' + XPO + '</a></td></tr>';
         }).join('') + '</tbody></table>';
     }
-    // The list is the largest 100, so the line says so rather than implying all of them can be paged.
-    h += '<div class="' + pre + '-hl-pgn"><div class="info lxp">Showing ' + (base + 1) + '–' + (base + rows.length) + ' of the top '
-      + all.length + ' holders' + (count != null ? ' (' + count.toLocaleString('en-US') + ' in all' + asOf() + ')' : '') + '</div><div class="pgn">'
+    // Stellar's line (RAZA 2026-11-03): "Showing 1–50 of 614,847 holders". The list itself is the largest 100,
+    // so Next stops there; the total is every holder, or "100+" where no count exists. One page, no pager.
+    var tot = count != null ? count.toLocaleString('en-US') : HL.countMin ? (HL.countMin + '+') : String(all.length);
+    h += '<div class="' + pre + '-hl-pgn"><div class="info lxp">Showing ' + (base + 1) + '–' + (base + rows.length) + ' of '
+      + tot + ' holders</div><div class="pgn"' + (HL.page <= 1 && !more ? ' style="display:none"' : '') + '>'
       + '<button type="button" data-lxhp="prev"' + (HL.page <= 1 ? ' disabled' : '') + '>‹ Prev</button>'
       + '<button type="button" data-lxhp="next"' + (more ? '' : ' disabled') + '>Next ›</button></div></div>';
     extra.innerHTML = h;
@@ -2190,19 +2194,10 @@
         tr.setAttribute('data-lxpool', p.id);
         body.appendChild(tr);
       });
-      // The table lists the largest pools DexScreener returns (it alone carries a pool's TVL and volume, and at
-      // most 30 per token); the count above is Rhea's. Said under the table, so the two cannot be read as one.
-      if (pools.length && (d.poolCount > pools.length || d.poolCapped)) {
-        var fn = extra.querySelector('.lxn-plnote');
-        if (!fn) {
-          fn = el('div', 'lxn-plnote');
-          fn.setAttribute('data-logoed', '1');
-          fn.style.cssText = 'padding:14px 20px;font-size:13px;color:var(--text-soft,#8a8fa3);border-top:1px solid var(--border)';
-          extra.appendChild(fn);
-        }
-        fn.textContent = 'Showing the ' + pools.length + ' largest of ' + (d.poolCapped ? 'more than ' + pools.length : d.poolCount.toLocaleString('en-US'))
-          + ' pools with liquidity on Rhea Finance' + (d.poolTotal > d.poolCount ? ' (' + d.poolTotal.toLocaleString('en-US') + ' counting empty ones)' : '') + '.';
-      }
+      // No note under the table (RAZA 2026-11-03, as on Stellar). It said the table holds only the largest pools
+      // DexScreener returns while the tab count is Rhea's; that caveat is gone from the page by his call.
+      var fn = extra.querySelector('.lxn-plnote');
+      if (fn && fn.parentNode) fn.parentNode.removeChild(fn);
       if (!pools.length) {
         var none = emptyState(/mdxa/.test(extra.className) ? 'mdxa-empty-state' : 'dxa-empty-state',
           'No pools found', 'No pool lists this token on NEAR right now.');

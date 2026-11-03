@@ -181,6 +181,7 @@
     var tot = input(f[2]);
     if (tot && !phone(p) && tot.hasAttribute('readonly')) tot.removeAttribute('readonly');
     feeRow(p);
+    prefillPrice(p);
     recalc(p);
     setCta(p);
   }
@@ -205,6 +206,9 @@
     var o = current(p), op = side(p) === 'sell' ? '≥' : '≤';
     var txt = '—';
     if (o) txt = phone(p) ? (op + ' ' + fmt(o.rests, 8) + ' NEAR') : (code() + '/NEAR ' + op + ' ' + fmt(o.rests, 8));
+    // With a price and no amount yet, the condition as typed (RAZA 2026-11-03: "USDC/NEAR <= [Limit Price]" rather
+    // than a dash); once there is an amount it becomes the pool tick the order really rests at, above.
+    else if (price > 0) txt = phone(p) ? (op + ' ' + fmt(price, 8) + ' NEAR') : (code() + '/NEAR ' + op + ' ' + fmt(price, 8));
     sumRow(p, 'filled when', txt);
     totalUsd(p);
     orderCtx(p);
@@ -343,9 +347,17 @@
     return p.join('.');
   }
 
-  // NO PREFILL. The limit price used to start at the live price; Stellar's Limit pane starts empty and RAZA
-  // asked for the same (2026-10-29: "Keep the total price & amount & total box blank"). The design's own
-  // "4.18" / "100" are cleared by dexasset.js's paintPanel, which also drops the "0.00" placeholders.
+  // THE LIMIT PRICE STARTS AT THE MARKET PRICE (RAZA 2026-11-03, reversing 2026-10-29's blank price; Stellar
+  // fills it too). Amount and Total stay empty. Only an EMPTY price is filled, and never one the user typed or
+  // cleared: a price of theirs is theirs. Refilled on a Buy/Sell switch while they have not typed one.
+  function prefillPrice(p) {
+    var f = fields(p), pi = input(f[0]), d = window.__lxnAssetData;
+    if (!pi || p.__lxnPxTyped || String(pi.value || '').trim() || !pool) return;
+    var px = d && d.price > 0 ? +d.price : 0;
+    if (!(px > 0)) return;
+    pi.value = plainIn(+px.toPrecision(8));
+    recalc(p);
+  }
 
   // ---- the connected account ---------------------------------------------------------------------
   function load() {
@@ -382,8 +394,8 @@
     var b = cta(p), who = me(), a = asset(), label = b ? b.textContent : '';
     busy = true;
     say(p, '');
-    if (b) b.textContent = 'Checking your account…';
-    function stop(text) { busy = false; if (b) b.textContent = label; setCta(p); if (text) say(p, text); }
+    if (b) { b.textContent = 'Checking your account…'; b.classList.add('lx-btnload'); }
+    function stop(text) { busy = false; if (b) { b.textContent = label; b.classList.remove('lx-btnload'); } setCta(p); if (text) say(p, text); }
     Promise.all([D().prereqs(who, o), SW().balance(who, 'near'), o.sell === D().WNEAR ? null : SW().balance(who, o.sell)]).then(function (r) {
       var pre = r[0], nearBal = D().big(r[1]);
       var keep = D().big(SW().SWAP_KEEP);                            // 0.2 NEAR for gas, as a swap keeps
@@ -432,11 +444,11 @@
       if (!p) return;
       if (t.closest('.lxlim-max')) { e.preventDefault(); e.stopImmediatePropagation(); fillMax(p); return; }
       if (t.closest('[class*="dxa-side-btn"]')) {
-        setTimeout(function () {
+        Promise.resolve().then(function () {                       // before paint: no flash (see dxaswap.js)
           var ai = input(fields(p)[1]); if (ai) ai.value = '';
           var ti = input(fields(p)[2]); if (ti) ti.value = '';
           say(p, ''); paint();
-        }, 30);
+        });
         return;
       }
       var b = t.closest('[class*="dxa-trade-cta"]');
@@ -455,6 +467,7 @@
       e.stopImmediatePropagation();
       var clean = numOnly(t.value);
       if (clean !== t.value) t.value = clean;
+      if (t === input(fields(p)[0])) p.__lxnPxTyped = 1;
       if (t === input(fields(p)[2])) fromTotal(p); else recalc(p);
       if (!busy) say(p, '');
     }, true);

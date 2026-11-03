@@ -79,10 +79,13 @@ const COPY = [
   // itself asks for, about $22 at the time of writing, and the cost panel prints the real figure.
   ['<h1>Launch <span class="hl">Your Token</span></h1>', '<h1>Launch a Token on <span class="hl">NEAR</span></h1>'],
   ['<p>Before creating a token, familiarize yourself with <a class="ui-link" href="#">how it works</a>.</p>',
-    '<p>Issue a NEAR token for $15 in NEAR plus network storage, with its first liquidity pool included.</p>'],
+    '<p>Issue a NEAR token for $15 in NEAR plus network storage, with its first liquidity pool included. <a class="ui-link" href="#" data-lxlhiw>How it works</a>.</p>'],
   ['<h1 class="page-title">Launch <span class="hl">Your Token</span></h1>', '<h1 class="page-title">Launch a Token on <span class="hl">NEAR</span></h1>'],
   ['<p class="page-sub">Familiarize yourself with <a href="#">how it works</a> before creating.</p>',
-    '<p class="page-sub">Issue a NEAR token for $15 in NEAR plus network storage, with its first liquidity pool included.</p>'],
+    '<p class="page-sub">Issue a NEAR token for $15 in NEAR plus network storage, with its first liquidity pool included. <a class="ui-link" href="#" data-lxlhiw>How it works</a>.</p>'],
+  // The containers keep the previous run's subtitle (2026-11-03, before the How it works link): bring it forward.
+  ['<p>Issue a NEAR token for $15 in NEAR plus network storage, with its first liquidity pool included.</p>', '<p>Issue a NEAR token for $15 in NEAR plus network storage, with its first liquidity pool included. <a class="ui-link" href="#" data-lxlhiw>How it works</a>.</p>'],
+  ['<p class="page-sub">Issue a NEAR token for $15 in NEAR plus network storage, with its first liquidity pool included.</p>', '<p class="page-sub">Issue a NEAR token for $15 in NEAR plus network storage, with its first liquidity pool included. <a class="ui-link" href="#" data-lxlhiw>How it works</a>.</p>'],
   // The base this fork copies still carries an earlier run's ticker line; Stellar's words again (see nearlaunch.js).
   ['2-12 letters or digits, starting with a letter', '2-6 uppercase letters'],
   ['Once your token is minted on the Stellar network,', 'Once your token is minted on NEAR,'],

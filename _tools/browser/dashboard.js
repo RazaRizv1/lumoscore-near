@@ -188,9 +188,13 @@
     var sh = a.length > 22 ? a.slice(0, 8) + '…' + a.slice(-6) : a;
     return '<a class="lx-actwho" href="/account/near/' + encodeURIComponent(a) + '" title="' + esc(a) + '">' + av + esc(sh) + '</a>';
   }
+  // "Swap" is four letters, and the inherited logo painter treats any 1-5 letter span without a graphic as a
+  // token-icon slot: it blanked the badge and painted a LUMOS logo over it. An empty svg inside is its opt-out
+  // (the same trick createpool.js uses on MAX).
+  var NOICON = '<svg width="0" height="0" aria-hidden="true" style="position:absolute"></svg>';
   function actRow(r) {
     var m = String(r.memo || ''), verb, cls, type;
-    if (/limit order/i.test(m)) { verb = 'Limit order'; cls = 'swap'; type = 'Placed a limit order selling ' + amt(r.give); }
+    if (/limit order/i.test(m)) { verb = 'Order placed'; cls = 'swap'; type = 'Placed a limit order selling ' + amt(r.give); }
     else if (/^lx:(ni|om|wh)$/.test(m)) {
       verb = 'Bridge'; cls = 'bridge';
       type = 'Bridged ' + amt(r.give) + ' via ' + ({ 'lx:ni': 'NEAR Intents', 'lx:om': 'Omni Bridge', 'lx:wh': 'Wormhole' })[m];
@@ -200,9 +204,33 @@
     var glyph = '<span class="lx-fg' + (b ? ' lx-fg2' : '') + '" aria-hidden="true"><span class="lx-fga">' + logo(r.give || r.get) + '</span>'
       + (b ? '<span class="lx-fgb">' + logo(b) + '</span>' : '') + '</span>';
     return '<div class="activity-feed-row lx-fr" data-lx-noswap="1">' + glyph
-      + '<div class="info"><div class="type">' + type + '</div><div class="meta lx-actmeta"><span class="lx-actverb ' + cls + '">' + verb + '</span>' + who(r.who) + '</div></div>'
+      + '<div class="info"><div class="type">' + type + '</div><div class="meta lx-actmeta"><span class="lx-actverb ' + cls + '" data-logoed="1">' + NOICON + verb + '</span>' + who(r.who) + '</div></div>'
       + '<div class="lx-frr"><div class="time">' + ago(r.ts) + '</div>'
       + '<a class="lx-actlink" href="' + TX + encodeURIComponent(r.h) + '" target="_blank" rel="noopener nofollow" title="View transaction">' + XPI + '</a></div></div>';
+  }
+  // Stellar's heading: "Platform Activity — [mark] NEAR" and an "N in 24h" pill on the right, counting the rows
+  // shown (RAZA 2026-11-03). .lx-chainmark and .lx-act24 are Stellar's rules, already in this page's CSS.
+  function head24(rows) {
+    var list = document.getElementById('activityList'), card = list && list.closest('.activity-card');
+    var h3 = card && card.querySelector('h3'), head = card && card.querySelector('.market-head');
+    if (h3 && !h3.querySelector('.lx-chainmark')) {
+      var pulse = h3.querySelector('.live-pulse');
+      h3.textContent = '';
+      if (pulse) h3.appendChild(pulse);
+      h3.appendChild(document.createTextNode('Platform Activity — '));
+      var cm = document.createElement('img');
+      cm.className = 'lx-chainmark'; cm.src = '/assets/networks/near.png'; cm.alt = '';
+      cm.setAttribute('aria-hidden', 'true'); cm.setAttribute('data-lxc', 'NEAR'); cm.setAttribute('data-lxpainted', '1');
+      h3.appendChild(cm);
+      h3.appendChild(document.createTextNode('NEAR'));
+    }
+    if (!head) return;
+    var el = head.querySelector('.lx-act24');
+    if (!el) { el = document.createElement('span'); el.className = 'lx-act24'; el.setAttribute('data-logoed', '1'); head.appendChild(el); }
+    var cut = Date.now() - 864e5, n = 0;
+    rows.forEach(function (r) { if (r.ts >= cut) n++; });
+    el.textContent = n + ' in 24h';
+    el.title = (n === 1 ? '1 transaction' : n + ' transactions') + ' through LumosCore in the last 24 hours';
   }
   function activity() {
     var C = window.lxnCore;
@@ -212,6 +240,7 @@
       var list = document.getElementById('activityList');
       if (!list || !rows || !rows.length) return;
       list.innerHTML = rows.map(actRow).join('');
+      head24(rows);
       list.setAttribute('data-lxact', '1');
       try { list.setAttribute('data-logoed', '1'); } catch (e) {}
     }, function () {

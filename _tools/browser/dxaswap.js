@@ -130,6 +130,9 @@
     // Stellar parity: the button stays dimmed until there is a quote for an amount you can pay.
     var raw = payAmountRaw(p), have = bal.raw[s.pay];
     var ready = on && !!(q && q.ok) && !!raw && !(me() && have != null && short(p, raw, have));
+    // Stellar's resetWidget: switching Buy/Sell shows the button lit with the field empty, until the next
+    // keystroke (RAZA 2026-11-03). A press then says 'Enter an amount.'
+    if (on && !raw && p.__lxnFresh) ready = true;
     var label = on ? 'Swap' : SOON;
     // lx-gate saved the design's label before this ran and restores data-lxorig on connect.
     b.setAttribute('data-lxorig', label);
@@ -272,9 +275,9 @@
     var b = cta(p), who = me(), shown = q, s = sides(p);
     busy = true;
     say(p, '');
-    if (b) b.textContent = 'Checking the route…';
+    if (b) { b.textContent = 'Checking the route…'; b.classList.add('lx-btnload'); }   // Stellar's spinner
     window.__lxnLastSwap = null;
-    function stop(text) { busy = false; setCta(p); if (text) say(p, text); }
+    function stop(text) { busy = false; if (b) b.classList.remove('lx-btnload'); setCta(p); if (text) say(p, text); }
     // The quote on screen may be seconds old: ask again, and refuse if the price has moved past the floor
     // the user was shown.
     S().quote(shown.from, shown.to, shown.amount).then(function (fresh) {
@@ -372,11 +375,14 @@
         return;
       }
       if (t.closest('[class*="dxa-side-btn"]')) {
-        setTimeout(function () {
+        // A microtask, not a timer: it runs after the design's own handler and BEFORE the browser paints, so
+        // the design's redraw is never on screen (RAZA 2026-11-03: a flash on every Buy/Sell switch).
+        p.__lxnFresh = 1;
+        Promise.resolve().then(function () {
           quick(p, null);
           var i2 = input(fields(p)[0]); if (i2) i2.value = '';
           say(p, ''); clearQuote(p); paintStatic(p); checkFee(p);
-        }, 30);
+        });
       }
     }, true);
 
@@ -391,6 +397,7 @@
       if (v !== t.value) t.value = v;
       var ff = fields(p), payI = input(ff[0]), recvI = input(ff[1]);
       quick(p, null);                                  // a typed amount is no longer "25%"
+      p.__lxnFresh = 0;
       // Typing in "You receive" fills "You pay" at the current rate; the real quote then runs on that.
       if (t === recvI && payI) {
         var want = Number(v), s = sides(p), d = window.__lxnAssetData, rt = 0;
