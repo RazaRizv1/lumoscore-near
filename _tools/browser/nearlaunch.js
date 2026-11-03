@@ -793,7 +793,7 @@
     var amt = function (v) { return mobile ? compact(v) : group(v); };
 
     var hp = $('.success-hero p');
-    if (hp && !done) hp.textContent = 'Your token is live on NEAR. Its Rhea pool is not set up yet — finish it from the review step.';
+    if (hp && !done) hp.textContent = 'Your token is live on NEAR. Its pool is not set up yet — finish it from the review step.';
 
     var icon = $('.result-icon');
     if (icon) {

@@ -1747,7 +1747,7 @@
     var show = function (n) { if (n && n.style.display === 'none') n.style.display = ''; };
     show(holder);
     var pgv = foot && foot.querySelector('.pgn');
-    var msg = TR.none ? 'This token has no pool against NEAR on Rhea Finance, so there are no trades to show.'
+    var msg = TR.none ? 'This token has no pool against NEAR, so there are no trades to show.'
       : (TR.err && !TR.rows) ? 'Recent trades could not be loaded right now. Trying again…' : null;
     if (!TR.rows && !msg) {
       show(filt); show(foot);
@@ -1783,7 +1783,6 @@
     var span = TR.rows.length ? ago(TR.rows[TR.rows.length - 1].t) : '';
     if (span === 'now') span = '';
     if (!rows.length) {
-      var pool = TR.pool ? TR.pool.pair + ' on Rhea' : 'this pool';
       var none = TR.mine
         ? (!me ? 'Connect a wallet to see your own trades in this asset.'
           : 'No trades from this wallet in this asset.')                   // Stellar's line (RAZA 2026-11-03)
@@ -2733,7 +2732,7 @@
       return readBook(asset, window.__lxnAssetData || d).then(function (b) {
         if (!b) {
           window.__lxnBook = null;
-          note('No Rhea pool against NEAR for this token, so there is no order book.');
+          note('No pool against NEAR for this token, so there is no order book.');
           paintBookHead(asset, null);
           return;
         }
@@ -2922,7 +2921,7 @@
     var d = window.__lxnAssetData;
     var nm = d && d.name && d.name.toLowerCase() !== String(a.code).toLowerCase() ? (' (' + d.name + ')') : '';
     plain(desc, (d && d.desc) ? d.desc : (a.code + nm + ' is a token on NEAR Protocol. Its price, 24h volume and pools come from '
-      + 'Rhea Finance and DexScreener, and its supply is read from the token contract itself.'));
+      + 'NEAR\'s on-chain pools and DexScreener, and its supply is read from the token contract itself.'));
     // Stellar's settled state: two lines at most, and no 24px held under it for a "Show more" control.
     // Without these the pre-script rule kept that space reserved for good, so NEAR's header stood 22px
     // taller than Stellar's for the same one-line USDC text.

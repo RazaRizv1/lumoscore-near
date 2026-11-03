@@ -245,9 +245,9 @@
       decided = true;
       setCta(RETRY, true);
       status(pend.stage === 'liquidity'
-        ? ('<strong>' + esc(pend.token) + '</strong> is trading on Rhea, but its liquidity is <strong>not locked yet</strong>. '
+        ? ('<strong>' + esc(pend.token) + '</strong> is trading, but its liquidity is <strong>not locked yet</strong>. '
           + 'Press <strong>' + RETRY + '</strong> to lock it — nothing already done is repeated.')
-        : '<strong>' + esc(pend.token) + '</strong> exists and holds your full supply, but its Rhea pool did not finish. '
+        : '<strong>' + esc(pend.token) + '</strong> exists and holds your full supply, but its pool did not finish. '
         + 'Press <strong>' + RETRY + '</strong> to complete it — nothing already done is repeated.');
       return Promise.resolve();
     }
@@ -322,7 +322,7 @@
           + me + ' can spend ' + L().fmtNear(ctx.spend) + '. Nothing has been sent.');
       }
       step(0, 'Create ' + token + ' and mint ' + Number(d.supply).toLocaleString('en-US') + ' ' + args.symbol + ' to you', 'run');
-      step(1, 'Set up its Rhea pool', 'wait');
+      step(1, 'Set up its pool', 'wait');
       step(2, 'Add the starting liquidity', 'wait');
       var tx = buildCreateTx(p);
       return signTxs(me, [tx]).then(function (outs) { return { outs: outs }; }, function (e) { return { err: e }; });
@@ -362,7 +362,7 @@
   function resume(res, me) {
     log = [];
     step(0, 'Created ' + res.token, 'done');
-    step(1, 'Set up its Rhea pool', res.poolId != null ? 'done' : 'wait');
+    step(1, 'Set up its pool', res.poolId != null ? 'done' : 'wait');
     if (res.stage === 'liquidity') {
       step(2, 'Liquidity added', 'done');
       lockStep(res, me).catch(function (e) { stop((e && e.message) || String(e), L().readResult()); });
@@ -378,7 +378,7 @@
     var p = Promise.resolve();
     if (res.poolId == null) {
       p = p.then(function () {
-        step(1, 'Set up its Rhea pool', 'run');
+        step(1, 'Set up its pool', 'run');
         return Promise.all([
           L().callView(token, 'storage_balance_of', { account_id: REF }),
           L().callView(token, 'storage_balance_bounds', {}),
@@ -388,7 +388,7 @@
         ]);
       }).then(function (r) {
         var min = r[1] && r[1].min != null ? String(r[1].min) : '';
-        if (!r[0] && !/^[0-9]+$/.test(min)) throw new Error('The new token did not say what registering Rhea costs.');
+        if (!r[0] && !/^[0-9]+$/.test(min)) throw new Error('The new token did not say what registering the pool contract costs.');
         var st = {
           me: me, refNeedsTokenReg: !r[0], tokenRegMin: min, refAcct: r[2].refAcct,
           registered: (r[3] || []).indexOf(token) >= 0, pool: r[4]
@@ -405,21 +405,21 @@
         });
       }).then(function (got) {
         var o = got.outs ? outcomeFor(got.outs, REF) : null;
-        if (o && failed(o)) throw new Error('Rhea refused the pool step (' + failMsg(o) + ').');
+        if (o && failed(o)) throw new Error('The pool contract refused the pool step (' + failMsg(o) + ').');
         var tok = got.outs ? outcomeFor(got.outs, token) : null;
-        if (tok && failed(tok)) throw new Error('Registering Rhea on the token failed (' + failMsg(tok) + ').');
+        if (tok && failed(tok)) throw new Error('Registering the pool contract on the token failed (' + failMsg(tok) + ').');
         var id = got.pool;
         if (id == null && o) { var v = decodeValue(o); if (typeof v === 'number' || /^[0-9]+$/.test(String(v))) id = Number(v); }
         return (id == null ? findPool(token) : Promise.resolve(id)).then(function (pid) {
-          if (pid == null) throw new Error('The pool was not found on Rhea after the pool step.');
+          if (pid == null) throw new Error('The pool was not found after the pool step.');
           return checkPool(pid, token).then(function (ok) {
-            if (!ok) throw new Error('Rhea pool #' + pid + ' is not a ' + res.ticker + ' / wNEAR pool — stopped before adding liquidity.');
+            if (!ok) throw new Error('Pool #' + pid + ' is not a ' + res.ticker + ' / wNEAR pool — stopped before adding liquidity.');
             res.poolId = Number(pid); res.stage = 'pool';
             res.hashes.pool = hashOf(o) || res.hashes.pool || '';
             res.at.pool = Date.now();
             res.paidYocto = (L().big(res.paidYocto) + L().big(got.paid || '0')).toString();
             L().writeResult(res);
-            step(1, 'Rhea pool #' + pid + ' created', 'done');
+            step(1, 'Pool #' + pid + ' created', 'done');
           });
         });
       });
@@ -443,18 +443,18 @@
       return signTxs(me, txs).then(function (outs) { return { outs: outs, paid: sumDeposits(txs) }; }, function (e) { return { err: e, paid: sumDeposits(txs) }; });
     }).then(function (sent) {
       var o = sent.outs ? outcomeFor(sent.outs, REF) : null;
-      if (o && failed(o)) throw new Error('Rhea did not add the liquidity (' + failMsg(o) + '). Anything deposited stays in your Rhea account and is reused on retry.');
+      if (o && failed(o)) throw new Error('The pool did not take the liquidity (' + failMsg(o) + '). Anything deposited stays in your pool-contract balance and is reused on retry.');
       return L().callView(REF, 'get_pool_shares', { pool_id: Number(res.poolId), account_id: me }).then(function (sh) {
         if (!(L().big(sh || '0') > BigInt(0))) {
           throw new Error(sent.err ? (rejected(sent.err) ? 'The wallet did not approve the liquidity step.' : ('The wallet reported: ' + ((sent.err && sent.err.message) || sent.err)))
-            : 'The liquidity did not reach the pool. Anything deposited stays in your Rhea account and is reused on retry.');
+            : 'The liquidity did not reach the pool. Anything deposited stays in your pool-contract balance and is reused on retry.');
         }
         res.stage = 'liquidity';
         res.hashes.liquidity = hashOf(o) || '';
         res.at.liquidity = Date.now();
         res.paidYocto = (L().big(res.paidYocto) + L().big(sent.paid || '0')).toString();
         L().writeResult(res);
-        step(2, 'Liquidity added — your token is trading on Rhea', 'done');
+        step(2, 'Liquidity added — your token is trading', 'done');
         return lockStep(res, me);
       });
     });
@@ -477,7 +477,7 @@
       return signTxs(me, txs).then(function (outs) { return { outs: outs, paid: sumDeposits(txs) }; }, function (e) { return { err: e, paid: '0' }; });
     }).then(function (sent) {
       var o = sent.outs ? outcomeFor(sent.outs, REF) : null;
-      if (o && failed(o)) throw new Error('Rhea did not move the pool shares (' + failMsg(o) + '). Your liquidity is in the pool but NOT locked yet.');
+      if (o && failed(o)) throw new Error('The pool contract did not move the pool shares (' + failMsg(o) + '). Your liquidity is in the pool but NOT locked yet.');
       return Promise.all([
         L().callView(REF, 'get_pool_shares', { pool_id: id, account_id: me }),
         L().callView(REF, 'get_pool_shares', { pool_id: id, account_id: L().LOCK_ACCOUNT })

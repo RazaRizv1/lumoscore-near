@@ -532,7 +532,7 @@
       if (nv) {
         if (nv.textContent !== NET_FEE) nv.textContent = NET_FEE;
       }
-      net.title = 'Gas burnt by the whole sequence, measured on mainnet. Storage deposits are separate, and Rhea refunds what the storage did not need.';
+      net.title = 'Gas burnt by the whole sequence, measured on mainnet. Storage deposits are separate, and what the storage did not need is refunded.';
     }
 
     var px = summaryRow('Initial pool price');

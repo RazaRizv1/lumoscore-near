@@ -1818,7 +1818,7 @@
         var t = block.querySelector('.order-row, .order-card');
         if (t && !window.__lxOrdTpl) window.__lxOrdTpl = t.cloneNode(true);
         block.innerHTML = '';
-        block.appendChild(el('div', 'lx-wcnote', 'Could not read open orders from Rhea right now.'));
+        block.appendChild(el('div', 'lx-wcnote', 'Could not read open orders right now.'));
         reveal(block);
       });
   }

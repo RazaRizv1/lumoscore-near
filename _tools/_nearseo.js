@@ -43,7 +43,7 @@ const SEO = {
   ],
   'lumoscore-dex': [
     'Trade on NEAR — Swap and Limit Orders | LumosCore',
-    'Swap NEAR tokens routed through Rhea Finance pools and place limit orders, with live prices.',
+    'Swap NEAR tokens at the best on-chain price and place limit orders, with live prices.',
   ],
   'lumoscore-dex-asset': [
     'NEAR Token — Price, Order Book, Holders | LumosCore',
@@ -51,11 +51,11 @@ const SEO = {
   ],
   'lumoscore-amm': [
     'NEAR Liquidity Pools — TVL, Volume, Fees | LumosCore',
-    'Browse Rhea Finance liquidity pools on NEAR with live total value locked, 24h volume and fees. Add or withdraw liquidity and track your positions.',
+    'Browse NEAR liquidity pools with live total value locked, 24h volume and fees. Add or withdraw liquidity and track your positions.',
   ],
   'lumoscore-amm-pool': [
     'NEAR Pool — Liquidity, Volume and Fees | LumosCore',
-    'Pool composition, TVL, volume and fees for a Rhea Finance pool on NEAR, with add and withdraw on the same page.',
+    'Pool composition, TVL, volume and fees for a NEAR liquidity pool, with add and withdraw on the same page.',
   ],
   'lumoscore-account': [
     'NEAR Account — Balances, Tokens and Activity | LumosCore',

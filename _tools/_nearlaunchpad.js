@@ -50,7 +50,7 @@ if (usdMatch[1] !== '5' || usdMatch[2] !== '10') {
 }
 const money = (n) => '$' + (Number(n) % 1 === 0 ? String(Number(n)) : Number(n).toFixed(2));
 const COST_A = money(usdMatch[1]) + ' to create the token and ' + money(usdMatch[2])
-  + ' of starting liquidity that goes into your own Rhea pool, plus the storage deposit NEAR itself requires '
+  + ' of starting liquidity that goes into your token\'s own pool, plus the storage deposit NEAR itself requires '
   + 'for the token contract and the pool. You pay in NEAR at the live rate, and the exact total is shown '
   + 'before you sign.';
 

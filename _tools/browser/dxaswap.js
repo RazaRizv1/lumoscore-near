@@ -300,8 +300,8 @@
       if (v.ok === false) {
         stop(v.why === 'refunded'
           ? (S().ROUTED
-            ? 'Rhea did not fill the swap (the price moved). All of your ' + pm.code + ' came back, the platform fee included.'
-            : 'Rhea did not fill the swap (the price moved). Your ' + pm.code + ' came back; the ' + (S().FEE_BPS / 100) + '% platform fee was kept.')
+            ? 'The pool did not fill the swap (the price moved). All of your ' + pm.code + ' came back, the platform fee included.'
+            : 'The pool did not fill the swap (the price moved). Your ' + pm.code + ' came back; the ' + (S().FEE_BPS / 100) + '% platform fee was kept.')
           : 'The swap failed on chain. Check your wallet activity.');
         return;
       }

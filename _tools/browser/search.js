@@ -415,7 +415,7 @@
     var nr = el('div', 'sp-name-row');
     nr.appendChild(tag('lx-pool-pair', toks.length ? toks.map(function (x) { return x.s || short(x.i); }).join(' / ') : 'Liquidity pool'));
     nr.appendChild(document.createTextNode(' '));
-    nr.appendChild(tag('sp-domain', 'Rhea pool'));
+    nr.appendChild(tag('sp-domain', 'NEAR pool'));
     info.appendChild(nr);
     var usd = (p.liq != null && USD > 0) ? money(p.liq * USD) : '';
     info.appendChild(el('div', 'sp-sub', 'Liquidity pool' + (usd ? ' · ' + usd + ' TVL' : '')));

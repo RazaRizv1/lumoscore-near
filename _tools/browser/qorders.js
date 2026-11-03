@@ -47,7 +47,7 @@
 
   var NEAR_LOGO = '/assets/networks/near.png';
   var CHEVRON = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>';
-  var NOPOOL = 'Limit orders need a Rhea DCL pool for this pair';
+  var NOPOOL = 'Limit orders need a NEAR order-book pool for this pair';
 
   var S = function () { return window.lxnSwap; };
   var D = function () { return window.lxnDcl; };
@@ -606,7 +606,7 @@
       var out = $('#swapAmtOut'); if (out) plain(out, '');
       var det = $('#swapModal .lx-swapd'); if (det) det.style.display = 'none';
       showRate(spotTxt());
-      swapSay((e && e.noroute) ? ('No route between ' + f.code + ' and ' + t.code + ' on Rhea right now.') : ((e && e.message) || 'No quote right now.'));
+      swapSay((e && e.noroute) ? ('No route between ' + f.code + ' and ' + t.code + ' on NEAR right now.') : ((e && e.message) || 'No quote right now.'));
       setGo(false, 'Swap');
     });
   }
@@ -814,8 +814,8 @@
       if (v.ok === false) {
         stop(v.why === 'refunded'
           ? (S().ROUTED
-            ? 'Rhea did not fill the swap (the price moved). All of your ' + f.code + ' came back, the platform fee included.'
-            : 'Rhea did not fill the swap (the price moved). Your ' + f.code + ' came back; the ' + (S().FEE_BPS / 100) + '% platform fee was kept.')
+            ? 'The pool did not fill the swap (the price moved). All of your ' + f.code + ' came back, the platform fee included.'
+            : 'The pool did not fill the swap (the price moved). Your ' + f.code + ' came back; the ' + (S().FEE_BPS / 100) + '% platform fee was kept.')
           : 'The swap failed on chain. Check your wallet activity.');
         return;
       }
@@ -911,7 +911,7 @@
             note.className = 'h';
             note.style.textTransform = 'none';
             note.style.letterSpacing = '0';
-            note.textContent = 'A limit order rests in a Rhea DCL pool, and those are paired against NEAR — so one side of the pair is NEAR.';
+            note.textContent = 'A limit order rests in an order-book pool, and those are paired against NEAR — so one side of the pair is NEAR.';
             m.appendChild(note);
           }
         });
@@ -1006,7 +1006,7 @@
     }, function () {
       if (lim.poolFor !== key) return;
       lim.pool = undefined; lim.poolFor = '';
-      limSay('The Rhea pool for this pair could not be read. Try again in a moment.');
+      limSay('The pool for this pair could not be read. Try again in a moment.');
       limGo(false, 'Place limit order');
     });
   }
@@ -1074,7 +1074,7 @@
       limGo(false, 'Place limit order');
       return;
     }
-    if (lim.pool === undefined) { limNote('Checking Rhea for a ' + pr.token.code + ' / NEAR pool…'); limSay(''); limGo(false, 'Place limit order'); return; }
+    if (lim.pool === undefined) { limNote('Checking for a ' + pr.token.code + ' / NEAR pool…'); limSay(''); limGo(false, 'Place limit order'); return; }
     if (lim.pool === null) { limNote(''); limSay(NOPOOL + ': there is no ' + pr.token.code + ' / NEAR pool.'); limGo(false, 'Place limit order'); return; }
 
     // The tick the order really rests at, and -- since NEAR limit orders carry the LumosCore fee (RAZA
@@ -1106,8 +1106,8 @@
     if (lim.reg === false && H.bal.near != null) {
       var needN = S().big('500000000000000000000000') + S().big(S().SWAP_KEEP) + (ord.sell === D().WNEAR ? S().big(ord.spendRaw) : BigInt(0));
       if (needN > S().big(H.bal.near)) {
-        limSay('Your first limit order on NEAR needs 0.5 NEAR of storage on Rhea, plus 0.2 NEAR kept for gas'
-          + (ord.sell === D().WNEAR ? ' and the order itself' : '') + '. Rhea holds the 0.5 to keep your orders on chain; you can withdraw it later. You have '
+        limSay('Your first limit order on NEAR needs 0.5 NEAR of order-book storage, plus 0.2 NEAR kept for gas'
+          + (ord.sell === D().WNEAR ? ' and the order itself' : '') + '. The order book holds the 0.5 to keep your orders on chain; you can withdraw it later. You have '
           + show(H.bal.near, 24, 4) + ' NEAR.');
         limGo(false, 'Place limit order');
         return;
@@ -1155,7 +1155,7 @@
       if (v.ok === false) {
         // ft_transfer_call returning "0" means the contract refused the order and the tokens came back.
         stop(v.why === 'refunded'
-          ? 'Rhea did not accept the order, so nothing is resting — your ' + (pr.side === 'sell' ? pr.token.code : 'NEAR') + ' came back.'
+          ? 'The order book did not accept the order, so nothing is resting — your ' + (pr.side === 'sell' ? pr.token.code : 'NEAR') + ' came back.'
           : 'The order failed on chain. Check your wallet activity.');
         return;
       }

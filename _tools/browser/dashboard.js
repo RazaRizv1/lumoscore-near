@@ -85,9 +85,9 @@
     var net = row.querySelector('.lx-netcard');
     $$('.status-pill', row).forEach(function (p) { if (p !== net && p.parentNode) p.parentNode.removeChild(p); });
     row.appendChild(pill('Assets', ST.assets == null ? '…' : count(ST.assets), 'Every fungible token on NEAR (NearBlocks)' + netNote(ST.assets)));
-    row.appendChild(pill('Pools', ST.pools == null ? '…' : count(ST.pools), 'Every pool on Rhea Finance, the main NEAR exchange'
+    row.appendChild(pill('Pools', ST.pools == null ? '…' : count(ST.pools), 'Every liquidity pool on NEAR'
       + (ST.poolsSplit ? ': ' + ST.poolsSplit : '') + netNote(ST.pools)));
-    row.appendChild(pill('Trades', ST.trades == null ? '…' : count(ST.trades), 'Trades in the past 24 hours on Rhea Finance, the main NEAR exchange, across its most-traded pools'
+    row.appendChild(pill('Trades', ST.trades == null ? '…' : count(ST.trades), 'Trades in the past 24 hours across the most-traded NEAR pools'
       + netNote(ST.trades, ST.tradesStale)));
     row.appendChild(pill('Accounts', ST.accounts == null ? '…' : compact(ST.accounts),
       (ST.accounts != null && isFinite(ST.accounts) ? count(ST.accounts) + ' — ' : '') + 'every account ever created on NEAR, a running total rather than a daily figure'

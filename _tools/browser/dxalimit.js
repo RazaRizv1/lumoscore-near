@@ -20,7 +20,7 @@
   if (window.__lxnDxaLimit) return;
   window.__lxnDxaLimit = 1;
 
-  var NOPOOL = 'Limit orders need a Rhea DCL pool for this pair';
+  var NOPOOL = 'Limit orders need a NEAR order-book pool for this pair';
   var D = function () { return window.lxnDcl; };
   var SW = function () { return window.lxnSwap; };
   function $(s, r) { return (r || document).querySelector(s); }
@@ -121,8 +121,8 @@
     var b = cta(p);
     if (!b) return;
     var on = !!pool, label;
-    if (pool === undefined && !poolErr) label = 'Checking for a Rhea DCL pool…';
-    else if (poolErr) label = 'Could not reach Rhea — reload to try again';
+    if (pool === undefined && !poolErr) label = 'Checking for an order-book pool…';
+    else if (poolErr) label = 'Could not reach the order book — reload to try again';
     else if (!pool) label = NOPOOL;
     else label = 'Place Limit Order';                               // Stellar's wording, either side
     // lx-gate saved the design's label before this ran and restores data-lxorig on connect.
@@ -333,7 +333,7 @@
     if (side(p) === 'buy' && !(price > 0)) return 'Enter a limit price first — MAX divides your NEAR by it.';
     if (side(p) === 'sell') return 'You have no ' + code() + ' to sell.';
     if (acct.bal.near == null) return 'Reading your balance — try again in a moment.';
-    return 'Nothing left to spend: NEAR keeps 0.2 for gas' + (acct.reg === false ? ', and your first order needs 0.5 NEAR of Rhea storage (refundable)' : '') + '. You have ' + fmtDown(acct.bal.near, 24) + ' NEAR.';
+    return 'Nothing left to spend: NEAR keeps 0.2 for gas' + (acct.reg === false ? ', and your first order needs 0.5 NEAR of order-book storage (refundable)' : '') + '. You have ' + fmtDown(acct.bal.near, 24) + ' NEAR.';
   }
   function trunc6(s) {
     var i = s.indexOf('.');
@@ -378,7 +378,7 @@
 
   // ---- placing the order --------------------------------------------------------------------------
   function validate(p, o) {
-    if (!pool) return pool === null ? NOPOOL + '.' : 'Still checking Rhea — try again in a moment.';
+    if (!pool) return pool === null ? NOPOOL + '.' : 'Still checking the order book — try again in a moment.';
     var f = fields(p);
     if (!(num(input(f[0]) && input(f[0]).value) > 0)) return 'Enter a limit price.';
     if (!(num(input(f[1]) && input(f[1]).value) > 0)) return 'Enter an amount.';
@@ -416,7 +416,7 @@
     }).then(function (res) {
       var v = D().verdict(res);
       if (v.ok === false) {
-        stop(v.why === 'refunded' ? 'Rhea did not accept the order, so your tokens came back (the fee had already been paid).' : 'The order failed on chain. Check your wallet activity.');
+        stop(v.why === 'refunded' ? 'The order book did not accept the order, so your tokens came back (the fee had already been paid).' : 'The order failed on chain. Check your wallet activity.');
         return;
       }
       stop('');

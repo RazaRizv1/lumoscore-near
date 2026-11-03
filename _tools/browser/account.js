@@ -489,7 +489,7 @@
       if (pn) pn.textContent = String(rows.length);
       setStat('pools', String(rows.length), res.failed ? 'some pools could not be read' : rows.length ? 'providing liquidity' : 'none');
       if (!rows.length) {
-        tableNote(tbl, res.capped ? 'No pool liquidity found in the ' + POOL_CAP + ' largest Rhea pools this account trades.'
+        tableNote(tbl, res.capped ? 'No pool liquidity found in the ' + POOL_CAP + ' largest NEAR pools this account trades.'
           : 'This account provides no pool liquidity.', 5);
         return;
       }
@@ -511,7 +511,7 @@
         var cd = el('span', 'acc-code', p.syms.join(' / '));
         cd.setAttribute('data-logoed', '1');
         txt.appendChild(cd);
-        txt.appendChild(el('span', 'acc-dom', 'Rhea pool #' + p.id + (p.farm ? ' · farming' : '')));
+        txt.appendChild(el('span', 'acc-dom', 'Pool #' + p.id + (p.farm ? ' · farming' : '')));
         pair.appendChild(txt);
         c0.appendChild(pair);
         tr.appendChild(c0);

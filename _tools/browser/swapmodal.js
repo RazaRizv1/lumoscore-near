@@ -296,7 +296,7 @@
       q = x;
     }, function (e) {
       if (my !== seq) return;
-      q = { ok: false, amount: raw, from: f.id, to: t.id, why: (e && e.noroute) ? 'No route on Rhea' : 'No quote right now' };
+      q = { ok: false, amount: raw, from: f.id, to: t.id, why: (e && e.noroute) ? 'No route on NEAR' : 'No quote right now' };
     }).then(function () {
       if (my !== seq) return;
       paintQuote(P);
@@ -474,8 +474,8 @@
       if (v.ok === false) {
         stop(v.why === 'refunded'
           ? (S().ROUTED
-            ? 'Rhea did not fill the swap (the price moved). All of your ' + f.code + ' came back, the platform fee included.'
-            : 'Rhea did not fill the swap (the price moved). Your ' + f.code + ' came back; the ' + (S().FEE_BPS / 100) + '% platform fee was kept.')
+            ? 'The pool did not fill the swap (the price moved). All of your ' + f.code + ' came back, the platform fee included.'
+            : 'The pool did not fill the swap (the price moved). Your ' + f.code + ' came back; the ' + (S().FEE_BPS / 100) + '% platform fee was kept.')
           : 'The swap failed on chain. Check your wallet activity.');
         return;
       }

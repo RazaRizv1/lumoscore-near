@@ -637,7 +637,7 @@
           }
         } else if (label.indexOf('participant') === 0) {
           setVal('—');
-          if (sub) sub.textContent = 'Not published by Rhea';
+          if (sub) sub.textContent = 'Not published';
         }
       });
     });
@@ -1038,13 +1038,13 @@
       // has a Rhea pool that is not curated). Stellar's search does the same with its whole network. An exact
       // symbol or contract match only; listed pools first, the rest marked as not curated.
       if (ql.length < 2) { noteHost(h, 'No pools match that search.'); return; }
-      noteHost(h, 'Searching all Rhea pools for “' + ql + '”…');
+      noteHost(h, 'Searching all NEAR pools for “' + ql + '”…');
       fetch('/lxapi/nearpools?q=' + encodeURIComponent(ql)).then(function (r) { return r.json(); }).then(function (d) {
         if (my !== poolQ) return;
-        if (!d || !d.ok) { noteHost(h, 'Could not search Rhea’s pools just now — try again shortly.'); return; }
+        if (!d || !d.ok) { noteHost(h, 'Could not search NEAR pools just now — try again shortly.'); return; }
         if (!(d.rows || []).length) { noteHost(h, 'No pools match that search.'); return; }
         renderPage(h, { ok: true, rows: d.rows, summary: null }, 1);
-      }, function () { if (my === poolQ) noteHost(h, 'Could not search Rhea’s pools just now — try again shortly.'); });
+      }, function () { if (my === poolQ) noteHost(h, 'Could not search NEAR pools just now — try again shortly.'); });
       return;
     }
     renderPage(h, { ok: true, rows: rows, summary: null }, 1);

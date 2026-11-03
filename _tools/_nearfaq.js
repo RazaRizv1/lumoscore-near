@@ -23,7 +23,7 @@ const FAQ = {
     ['A trustline is your account’s permission to hold a given asset, and Stellar will not deliver a token you have not opted into. Each one locks 0.5 XLM of your reserve, released when you remove it.',
      'Before a NEAR account can hold a token, it registers with that token’s contract by paying a small storage deposit, about 0.00125 NEAR. The deposit comes back if you unregister once your balance is zero.'],
     ['From real trades on the Stellar DEX: what the asset last traded at against XLM, read from the network rather than quoted by us. The dollar figure converts that at the live XLM rate, so the two can disagree.',
-     'From Rhea Finance, NEAR’s main exchange: the token’s dollar price from Rhea’s own price feed, shown in NEAR at NEAR’s live rate. The 24-hour figures come from the token’s most active trading pair.'],
+     'From NEAR’s on-chain pools: the token’s dollar price from their price feed, shown in NEAR at NEAR’s live rate. The 24-hour figures come from the token’s most active trading pair.', ['From Rhea Finance, NEAR’s main exchange: the token’s dollar price from Rhea’s own price feed, shown in NEAR at NEAR’s live rate. The 24-hour figures come from the token’s most active trading pair.']],
     ['LumosCore charges 0.2% per trade, reduced to 0.1% if you hold at least 250,000 LUMOS. On top of that Stellar itself charges a network fee of a small fraction of a cent.',
      'LumosCore charges 0.2% per trade. On top of that NEAR itself charges a network fee of a small fraction of a cent.'],
     ['What is a locked issuer address?', 'What does the padlock next to the contract mean?'],
@@ -35,11 +35,11 @@ const FAQ = {
   // rather than describe a flow the page does not have.
   'lumoscore-amm': [
     ['Choose Create pool, pick two assets and an amount of each. The ratio sets the opening price, so match the market rate. Keep spare XLM: a new pool position is a trustline and locks 0.5 XLM of reserve.',
-     'On NEAR, pools live on Rhea Finance: a new pool takes two tokens and an amount of each, and the ratio sets the opening price, so match the market rate. Keep a little NEAR spare for gas and storage deposits. Creating pools from LumosCore on NEAR is coming soon.'],
+     'Choose Create pool, pick two tokens and an amount of each. The ratio sets the opening price, so match the market rate. Keep a little NEAR spare for gas and the small storage deposits a new pool needs.', ['On NEAR, pools live on Rhea Finance: a new pool takes two tokens and an amount of each, and the ratio sets the opening price, so match the market rate. Keep a little NEAR spare for gas and storage deposits. Creating pools from LumosCore on NEAR is coming soon.']],
   ],
   'lumoscore-amm-pool': [
     ['Use Add liquidity on this page: enter an amount for either asset and the other side fills in at the pool’s ratio. A first position also opens a trustline, which locks 0.5 XLM, so keep a little spare.',
-     'Adding liquidity from LumosCore on NEAR is coming soon. In a Rhea pool you deposit every token at the pool’s current ratio, and a first deposit pays a small NEAR storage deposit, so keep a little NEAR spare.'],
+     'Use Add liquidity on this page: you deposit every token at the pool’s current ratio, and a first deposit pays a small NEAR storage deposit, so keep a little NEAR spare.', ['Adding liquidity from LumosCore on NEAR is coming soon. In a Rhea pool you deposit every token at the pool’s current ratio, and a first deposit pays a small NEAR storage deposit, so keep a little NEAR spare.']],
   ],
   // The wallet's first answer described Stellar's claimable balances, which NEAR does not have (the tab
   // is hidden), so the question becomes the NEAR concept a reader actually meets: registration. Send
@@ -60,7 +60,7 @@ const FAQ = {
     ['LumosCore charges 0.2% per trade, reduced to 0.1% if you hold at least 250,000 LUMOS. On top of that Stellar itself charges a network fee of a small fraction of a cent.',
      'LumosCore charges 0.2% per trade. On top of that NEAR itself charges a gas fee of a small fraction of a cent.'],
     ['No. LumosCore takes no fee on a limit order, because a resting order may never fill and charging upfront would not be fair. You pay only the Stellar network fee, a fraction of a cent, whether or not it fills.',
-     'No. LumosCore takes no fee on a limit order, because a resting order may never fill and charging upfront would not be fair. You pay only NEAR gas, a fraction of a cent, whether or not it fills. Your first order also leaves a one-time storage deposit of about 0.5 NEAR with Rhea’s order-book contract, held for your account.'],
+     'Yes. A limit order on NEAR carries the LumosCore fee of 0.2%, taken when you place it, on top of the amount, plus NEAR gas of a fraction of a cent. Your first order also leaves a one-time storage deposit of about 0.5 NEAR with the order-book contract, held for your account and refundable.', ['No. LumosCore takes no fee on a limit order, because a resting order may never fill and charging upfront would not be fair. You pay only NEAR gas, a fraction of a cent, whether or not it fills. Your first order also leaves a one-time storage deposit of about 0.5 NEAR with Rhea’s order-book contract, held for your account.']],
     ['Curated is the set of assets LumosCore has checked and chosen to list. Anyone can issue a token under any ticker on Stellar, so we verify which issuer an asset actually comes from before putting it in front of people.',
      'Curated is the set of assets LumosCore has checked and chosen to list. Anyone can deploy a token under any ticker on NEAR, so we check which contract an asset actually comes from before putting it in front of people.'],
     ['Apply on the List your token page: pick the network, give the asset code, issuing account, description and logo, and pay $250 in XLM from your own wallet. We review it by hand and verify the issuer. Listing is not automatic, but if we say no you get the whole $250 back.',
@@ -89,7 +89,9 @@ for (const dev of ['desktop', 'mobile']) {
     const pairs = FAQ[BASE(key)];
     if (!pairs || typeof json[key] !== 'string') continue;
     let h = json[key];
-    pairs.forEach(([from, to], i) => {
+    pairs.forEach(([from, to, prev], i) => {
+      // A NEAR answer rewritten later lists its earlier wording: a page still carrying that is brought forward.
+      (prev || []).forEach((p) => { h = h.split(p).join(to); });
       // When the NEAR text CONTAINS the Stellar text (an answer that only gains a sentence), an already
       // converted answer would match again and grow on every run. Park converted copies first.
       const PARK = '\u0000lxfaq' + i + '\u0000';

@@ -313,7 +313,7 @@
         var sh = el('div', 'share', (share > 0 && share < 0.01 ? '<0.01' : share.toFixed(2)) + '%');
         sh.style.cssText = 'margin-left:auto;font-weight:800;color:var(--text)';
         row.appendChild(sh);
-        row.title = h.a + (h.staked && h.staked !== '0' ? ' (includes shares staked in Rhea farms)' : '');
+        row.title = h.a + (h.staked && h.staked !== '0' ? ' (includes shares staked in farms)' : '');
         row.setAttribute('data-lxacct', h.a);
         row.style.cursor = 'pointer';
         host.appendChild(row);
@@ -752,7 +752,7 @@
         renderChart();
       }, function () {
         if (gen !== CH.gen) return;
-        if (at < 3) { at++; chartNote('Rhea’s pool history is busy — retrying…'); setTimeout(daily, [3000, 15000, 30000][at - 1]); return; }
+        if (at < 3) { at++; chartNote('Pool history is busy — retrying…'); setTimeout(daily, [3000, 15000, 30000][at - 1]); return; }
         chartNote('Could not load this pool’s history. Reload to try again.');
       });
     };
@@ -1527,7 +1527,7 @@
     dwSay(msg, 'good');
   }
 
-  var DW_OFF = { deposit: 'Pools of more than two tokens take deposits on Rhea', withdraw: 'Pools of more than two tokens are withdrawn on Rhea' };
+  var DW_OFF = { deposit: 'Pools of more than two tokens cannot take deposits here yet', withdraw: 'Pools of more than two tokens cannot be withdrawn here yet' };
   function dwMode() {
     var t = $('.dw-tabs button.active');
     return (t && t.getAttribute('data-dw')) === 'withdraw' ? 'withdraw' : 'deposit';
@@ -1695,7 +1695,7 @@
       })), storageOf(WNEAR, me),
       stableKind() ? nview(REF, 'predict_add_stable_liquidity', { pool_id: +p.id, amounts: amounts0 }) : Promise.resolve(null)]).then(function (r) {
         var st = r[0], bals = r[1], wrapReg = !!r[2], predicted = r[3];
-        if (stableKind() && !(bigI(predicted) > BigInt(0))) throw new Error('Rhea could not price this deposit. Nothing was sent.');
+        if (stableKind() && !(bigI(predicted) > BigInt(0))) throw new Error('The pool could not price this deposit. Nothing was sent.');
         var txs = [], needNear = BigInt(0), refActs = [];
         if (bigI(st.need) > BigInt(0)) { refActs.push(fcall('storage_deposit', { account_id: me, registration_only: false }, 30, st.need)); needNear += bigI(st.need); }
         if (st.fresh.length) refActs.push(fcall('register_tokens', { token_ids: st.fresh }, 30, '1'));
@@ -1733,7 +1733,7 @@
     }).then(function (txs) {
       dwSay(txs.length > 1 ? 'Approve ' + txs.length + ' transactions in your wallet…' : 'Confirm in your wallet…');
       return signTxs(me, txs).then(function (res) {
-        if (failed(res)) throw new Error('A transaction failed on chain. Check your wallet activity; anything sent to Rhea can be withdrawn with “Withdraw to wallet”.');
+        if (failed(res)) throw new Error('A transaction failed on chain. Check your wallet activity; anything sent to the pool contract can be withdrawn with “Withdraw to wallet”.');
         return res;
       });
     });
@@ -1754,7 +1754,7 @@
         return signTxs(me, [{ receiverId: REF, actions: [fcall('remove_liquidity', { pool_id: +p.id, shares: sh, min_amounts: mins }, 60, '1')] }]);
       });
     }).then(function (res) {
-      if (failed(res)) throw new Error('Rhea did not remove the liquidity (the price may have moved past 0.5%). Nothing was removed.');
+      if (failed(res)) throw new Error('The pool did not remove the liquidity (the price may have moved past 0.5%). Nothing was removed.');
       return res;
     });
   }
@@ -1768,7 +1768,7 @@
         .map(function (t) { return { i: t.i, name: t.name, raw: String(deps[t.i]) }; });
       if (DW.sweep.length) {
         Promise.all(DW.sweep.map(function (s) { return decOf(s.i); })).then(function (ds) {
-          dwSay('On Rhea, in your account: ' + DW.sweep.map(function (s, k) { return fromRaw(s.raw, ds[k], 6) + ' ' + (s.i === WNEAR ? 'NEAR' : s.name); }).join(' and ')
+          dwSay('Held for you in the pool contract: ' + DW.sweep.map(function (s, k) { return fromRaw(s.raw, ds[k], 6) + ' ' + (s.i === WNEAR ? 'NEAR' : s.name); }).join(' and ')
             + '. Press “Withdraw to wallet” to bring it home.');
         });
       }
@@ -1791,7 +1791,7 @@
       dwSay(txs.length > 1 ? 'Approve ' + txs.length + ' transactions in your wallet…' : 'Confirm in your wallet…');
       return signTxs(me, txs);
     }).then(function (res) {
-      if (failed(res)) throw new Error('Part of the withdrawal failed on chain. Check your wallet activity; what is still on Rhea can be withdrawn again.');
+      if (failed(res)) throw new Error('Part of the withdrawal failed on chain. Check your wallet activity; what is still in the pool contract can be withdrawn again.');
       return res;
     });
   }
@@ -2068,7 +2068,7 @@
         if (!d || !d.ok) { fail('Could not read the pool. Reload in a moment.', 'Could not load this pool'); return; }
         var row = (d.rows || [])[0];
         if (!row || String(row.id) !== String(id)) {
-          fail('Rhea has no pool with this id.', 'Pool not found');
+          fail('There is no pool with this id.', 'Pool not found');
           return;
         }
         USD = (+d.usd > 0) ? +d.usd : null;

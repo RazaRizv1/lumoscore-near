@@ -33,7 +33,9 @@ const PAIRS = [
   // The Pools strapline (desktop .dex-hero-sub, phone .page-subtitle.lx-sronly). browser/pools.js also
   // rewrites it at run time; this makes the served HTML, which search engines index, say NEAR too.
   ['Provide liquidity and earn fees on Stellar\'s on-chain AMM pools.',
-   'Provide liquidity and earn fees on Rhea\'s pools on NEAR.'],
+   'Provide liquidity and earn fees on NEAR\'s pools.'],
+  // Pages built before 2026-11-04 carry the earlier NEAR line that named Rhea (RAZA: no Rhea on our pages).
+  ['Provide liquidity and earn fees on Rhea\'s pools on NEAR.', 'Provide liquidity and earn fees on NEAR\'s pools.'],
   // Screen-reader headings (visually hidden, read aloud and indexed).
   ['<h1 class="lx-srh1">Your Stellar wallet', '<h1 class="lx-srh1">Your NEAR wallet'],
   ['<h1 class="lx-srh1">Stellar liquidity pool', '<h1 class="lx-srh1">NEAR liquidity pool'],
