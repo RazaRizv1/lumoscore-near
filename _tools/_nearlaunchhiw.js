@@ -4,10 +4,10 @@
 // (matching Stellar reference)". Same component as Stellar's _launchhiw.js (ids, CSS, behaviour), which this
 // fork never received: it is not in the frozen base. Two things in Stellar's copy are NOT true here and were
 // not carried over, both read from browser/nearmint.js:
-//   * "one transaction": a NEAR launch is THREE wallet approvals (token, pool, liquidity) -- the pool id only
-//     exists after the pool step, so they cannot be folded.
-//   * "Your $10 of liquidity stays in the pool for good. Nobody can take it out": on NEAR the pool shares
-//     belong to the launcher and nothing locks them. The note says so instead.
+//   * "one transaction": a NEAR launch is FOUR wallet approvals (token, pool, liquidity, lock) -- the pool id
+//     exists only after the pool step, and the share count only after the liquidity, so they cannot be folded.
+//   * the lock: TRUE here since 2026-11-03 (RAZA: "Yes, lock it"). Step 4 sends the launcher's pool shares to
+//     the all-zeros account, which has no keys (browser/nearmint.js buildLockTxs), so Stellar's note stands.
 //   * the price: $5 + $10 plus NEAR's own storage for the token and pool (about $7 on 2026-11-03), not a
 //     flat $25 -- the cost panel beside the form prints the real figure.
 // The trigger: the subtitle link _nearlaunchpad.js writes (data-lxlhiw), else any control saying "how it works".
@@ -64,7 +64,7 @@ const STYLE = `<style id="${ID}-css">
 // SHORT, AND IN THE READER'S WORDS (RAZA 2026-11-01, on Stellar's first long version): only what the launcher
 // DECIDES or PAYS, and the one non-obvious fact about their money -- here, that the liquidity stays theirs.
 const LEDE = 'Issue your own token on NEAR and open its first liquidity pool &#8212; no code, and no '
-  + 'contract to write. Your wallet approves it in <b>three steps</b>.';
+  + 'contract to write. Your wallet approves it in <b>four steps</b>.';
 
 const STEPS = [
   ['Set it up',
@@ -80,8 +80,8 @@ const STEPS = [
    'The supply is fixed forever &#8212; no more can ever be made.'],
 ];
 
-const NOTE = '<b>Your $10 of liquidity stays yours.</b> The pool shares go to your wallet, so you can '
-  + 'withdraw it later from Pools.';
+const NOTE = '<b>Your $10 of liquidity stays in the pool for good.</b> Nobody can take it out '
+  + '&#8212; not you, and not us. That is what stops a token launched here being rugged.';
 
 const TITLE = 'How a NEAR launch works';
 

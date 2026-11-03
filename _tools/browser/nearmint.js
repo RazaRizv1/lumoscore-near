@@ -1,4 +1,5 @@
-// NEAR Launchpad, the launch itself: the review page's "Confirm & Launch", as three wallet approvals.
+// NEAR Launchpad, the launch itself: the review page's "Confirm & Launch", as four wallet approvals (the
+// fourth locks the liquidity, RAZA 2026-11-03; see buildLockTxs).
 // Ported from the XRPL fork's browser/mint.js (plan built in full before anything is signed, every
 // dependency injectable so the sequence can be captured and tested, partial completion reported in full
 // and resumable). Helpers come from browser/nearlaunch.js through window.__lxnLaunch.
@@ -29,7 +30,7 @@
 // pool 8978), which used the same deposits; only the grouping into three approvals is ours.
 //
 // FEE 30 BPS: 0.3%, the fee nearly every recent [token, wrap.near] simple pool on Rhea was created with.
-// The pool's LP shares belong to the launcher; nothing here locks them.
+// The pool's LP shares are then LOCKED: step 4 sends every one of them to the all-zeros account (buildLockTxs).
 //
 // PARTIAL COMPLETION. lumos.launch.result is written the moment the token exists (stage "token"), again
 // with the pool id (stage "pool") and at the end (stage "done"), so the confirm page always tells the truth
@@ -94,6 +95,19 @@
       pool_id: Number(st.poolId), amounts: [st.poolRaw, st.liq], min_amounts: [less(st.poolRaw, 10), less(st.liq, 10)]
     }, 50, L().REF_LIQ_DEPOSIT)] });
     return txs;
+  }
+
+  // st: { poolId, shares (raw, the launcher's whole balance), registered (is the lock account on the pool) }
+  // THE LOCK (RAZA 2026-11-03), the fourth approval: every share the launcher holds goes to the all-zeros account
+  // (nearlaunch.js LOCK_ACCOUNT -- no keys, no contract, nobody can withdraw). It cannot ride in the liquidity
+  // transaction: Rhea's first deposit does not mint a fixed number of shares (recent pools hold 1e24, 4.7e20,
+  // 2.4e20 ...), and mft_transfer needs the exact amount, so it is read from the chain once the liquidity lands.
+  function buildLockTxs(st) {
+    var acts = [];
+    if (!st.registered) acts.push(fc('mft_register', { token_id: ':' + st.poolId, account_id: L().LOCK_ACCOUNT }, 30, L().LOCK_REG_DEPOSIT));
+    acts.push(fc('mft_transfer', { token_id: ':' + st.poolId, receiver_id: L().LOCK_ACCOUNT, amount: String(st.shares),
+      memo: 'LumosCore launch: liquidity locked' }, 30, '1'));
+    return [{ receiverId: L().REF, actions: acts }];
   }
 
   // ---- signing --------------------------------------------------------------------------------------------
@@ -230,7 +244,10 @@
     if (pend) {
       decided = true;
       setCta(RETRY, true);
-      status('<strong>' + esc(pend.token) + '</strong> exists and holds your full supply, but its Rhea pool did not finish. '
+      status(pend.stage === 'liquidity'
+        ? ('<strong>' + esc(pend.token) + '</strong> is trading on Rhea, but its liquidity is <strong>not locked yet</strong>. '
+          + 'Press <strong>' + RETRY + '</strong> to lock it — nothing already done is repeated.')
+        : '<strong>' + esc(pend.token) + '</strong> exists and holds your full supply, but its Rhea pool did not finish. '
         + 'Press <strong>' + RETRY + '</strong> to complete it — nothing already done is repeated.');
       return Promise.resolve();
     }
@@ -346,7 +363,13 @@
     log = [];
     step(0, 'Created ' + res.token, 'done');
     step(1, 'Set up its Rhea pool', res.poolId != null ? 'done' : 'wait');
+    if (res.stage === 'liquidity') {
+      step(2, 'Liquidity added', 'done');
+      lockStep(res, me).catch(function (e) { stop((e && e.message) || String(e), L().readResult()); });
+      return;
+    }
     step(2, 'Add the starting liquidity', 'wait');
+    step(3, 'Lock the liquidity', 'wait');
     poolAndLiquidity(res, me).catch(function (e) { stop((e && e.message) || String(e), L().readResult()); });
   }
 
@@ -426,12 +449,50 @@
           throw new Error(sent.err ? (rejected(sent.err) ? 'The wallet did not approve the liquidity step.' : ('The wallet reported: ' + ((sent.err && sent.err.message) || sent.err)))
             : 'The liquidity did not reach the pool. Anything deposited stays in your Rhea account and is reused on retry.');
         }
-        res.stage = 'done'; res.ok = true;
+        res.stage = 'liquidity';
         res.hashes.liquidity = hashOf(o) || '';
         res.at.liquidity = Date.now();
         res.paidYocto = (L().big(res.paidYocto) + L().big(sent.paid || '0')).toString();
         L().writeResult(res);
         step(2, 'Liquidity added — your token is trading on Rhea', 'done');
+        return lockStep(res, me);
+      });
+    });
+  }
+  // ---- step 4: lock the liquidity --------------------------------------------------------------------------
+  function lockStep(res, me) {
+    var REF = L().REF, id = Number(res.poolId), tid = ':' + id, big = L().big;
+    step(3, 'Lock the liquidity in the pool for good', 'run');
+    return Promise.all([
+      L().callView(REF, 'get_pool_shares', { pool_id: id, account_id: me }),
+      L().callView(REF, 'mft_has_registered', { token_id: tid, account_id: L().LOCK_ACCOUNT }),
+      L().callView(REF, 'get_pool_shares', { pool_id: id, account_id: L().LOCK_ACCOUNT }).catch(function () { return '0'; })
+    ]).then(function (r) {
+      var mine = String(r[0] || '0'), locked = String(r[2] || '0');
+      if (!(big(mine) > BigInt(0))) {
+        if (big(locked) > BigInt(0)) return { already: true };
+        throw new Error('No pool shares were found in your account to lock.');
+      }
+      var txs = buildLockTxs({ poolId: id, shares: mine, registered: r[1] === true });
+      return signTxs(me, txs).then(function (outs) { return { outs: outs, paid: sumDeposits(txs) }; }, function (e) { return { err: e, paid: '0' }; });
+    }).then(function (sent) {
+      var o = sent.outs ? outcomeFor(sent.outs, REF) : null;
+      if (o && failed(o)) throw new Error('Rhea did not move the pool shares (' + failMsg(o) + '). Your liquidity is in the pool but NOT locked yet.');
+      return Promise.all([
+        L().callView(REF, 'get_pool_shares', { pool_id: id, account_id: me }),
+        L().callView(REF, 'get_pool_shares', { pool_id: id, account_id: L().LOCK_ACCOUNT })
+      ]).then(function (r) {
+        if (big(r[0] || '0') > BigInt(0) || !(big(r[1] || '0') > BigInt(0))) {
+          throw new Error(sent.err ? (rejected(sent.err) ? 'The wallet did not approve the lock step. Your liquidity is in the pool but NOT locked yet.'
+            : ('The wallet reported: ' + ((sent.err && sent.err.message) || sent.err) + '. Your liquidity is in the pool but NOT locked yet.'))
+            : 'The lock did not land. Your liquidity is in the pool but NOT locked yet.');
+        }
+        res.stage = 'done'; res.ok = true; res.locked = true;
+        if (o) res.hashes.lock = hashOf(o) || '';
+        res.at.lock = Date.now();
+        res.paidYocto = (big(res.paidYocto) + big(sent.paid || '0')).toString();
+        L().writeResult(res);
+        step(3, 'Liquidity locked — nobody can withdraw it, not you and not us', 'done');
         running = false;
         status(log.filter(Boolean).join('<br>') + '<br><br><strong>Launched.</strong> Opening your confirmation…');
         // /launchpad/confirm is one url for every chain, served by the lx_chain cookie: re-state it first.
@@ -440,6 +501,7 @@
       });
     });
   }
+
   // Every yocto attached across a group of transactions: what "Total paid" reports. Rhea refunds the unused
   // part of its storage deposits, so the real cost is slightly lower; it is never higher.
   function sumDeposits(txs) {
@@ -474,6 +536,6 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', load);
   else load();
 
-  window.__lxnLaunchPlan = { buildCreateTx: buildCreateTx, buildPoolTxs: buildPoolTxs, buildLiquidityTxs: buildLiquidityTxs,
+  window.__lxnLaunchPlan = { buildCreateTx: buildCreateTx, buildPoolTxs: buildPoolTxs, buildLiquidityTxs: buildLiquidityTxs, buildLockTxs: buildLockTxs,
     decodeValue: decodeValue, findPool: findPool, gate: gate, run: runLaunch };
 })();

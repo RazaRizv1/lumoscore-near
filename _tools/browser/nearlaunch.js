@@ -64,6 +64,13 @@
   var REF_BASE_BYTES = 102, REF_TOKEN_BYTES = 148;
   var REF_POOL_DEPOSIT = '50000000000000000000000';     // 0.05 NEAR, excess refunded by Rhea
   var REF_LIQ_DEPOSIT = '10000000000000000000000';      // 0.01 NEAR, excess refunded by Rhea
+  // THE LIQUIDITY LOCK (RAZA 2026-11-03: "Yes, lock it" -- as Stellar locks the pool's account). The launcher's
+  // pool shares go to the all-zeros implicit account: NEAR's de facto burn address, which exists, holds burned
+  // NEAR and has NO access keys and no contract (checked 2026-11-03), so nobody -- not the launcher, not
+  // LumosCore -- can ever sign for it, and shares there can never be withdrawn. Registering it for the pool's
+  // shares (mft_register) costs Rhea's share record, ~0.00076 NEAR; 0.01 is attached and the rest refunded.
+  var LOCK_ACCOUNT = '0000000000000000000000000000000000000000000000000000000000000000';
+  var LOCK_REG_DEPOSIT = '10000000000000000000000';     // 0.01 NEAR, excess refunded by Rhea
   // NEP-145 registration on a near-contract-standards token (ours, and wrap.near): 125 bytes = 0.00125.
   // Read live from storage_balance_bounds before signing; this figure only prices the panel.
   var FT_REG_EST = '1250000000000000000000';
@@ -229,7 +236,7 @@
     var refAcct = ex.refAcct == null ? REF_ACCOUNT_NEW : String(ex.refAcct);
     var wrapReg = ex.wrapReg == null ? FT_REG_EST : String(ex.wrapReg);
     var tokenReg = ex.tokenReg == null ? FT_REG_EST : String(ex.tokenReg);
-    var rhea = (big(refAcct) + big(REF_POOL_DEPOSIT) + big(REF_LIQ_DEPOSIT) + big(tokenReg) + big(wrapReg)).toString();
+    var rhea = (big(refAcct) + big(REF_POOL_DEPOSIT) + big(REF_LIQ_DEPOSIT) + big(LOCK_REG_DEPOSIT) + big(tokenReg) + big(wrapReg)).toString();
     var network = (big(storage) + big(rhea)).toString();
     var createDeposit = (big(storage) + big(fee)).toString();
     var total = (big(fee) + big(liq) + big(network)).toString();
@@ -926,7 +933,7 @@
   // Shared with browser/nearmint.js, and inspectable from the console and the capture tests.
   L.FACTORY = FACTORY; L.REF = REF; L.WNEAR = WNEAR; L.RPC = RPC; L.SOON = SOON; L.USD = USD;
   L.POOL_FEE_BPS = POOL_FEE_BPS; L.DECIMALS = DECIMALS; L.BYTE = BYTE; L.RESERVED = RESERVED;
-  L.REF_POOL_DEPOSIT = REF_POOL_DEPOSIT; L.REF_LIQ_DEPOSIT = REF_LIQ_DEPOSIT; L.REF_ACCOUNT_NEW = REF_ACCOUNT_NEW;
+  L.REF_POOL_DEPOSIT = REF_POOL_DEPOSIT; L.REF_LIQ_DEPOSIT = REF_LIQ_DEPOSIT; L.LOCK_ACCOUNT = LOCK_ACCOUNT; L.LOCK_REG_DEPOSIT = LOCK_REG_DEPOSIT; L.REF_ACCOUNT_NEW = REF_ACCOUNT_NEW;
   L.factory = factory; L.view = view; L.callView = callView; L.viewAccount = viewAccount; L.config = config;
   L.big = big; L.nearToYocto = nearToYocto; L.yoctoToNear = yoctoToNear; L.fmtNear = fmtNear; L.fmtUsd = fmtUsd;
   L.rateLive = rateLive; L.argsOf = argsOf; L.tokenIdOf = tokenIdOf; L.costPlan = costPlan; L.accountState = accountState;
