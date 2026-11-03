@@ -912,7 +912,6 @@
     // Only now is the gate lifted: the box stays hidden while it holds the design's Aptos prices,
     // and opens the moment it holds this token's own.
     pc.classList.add('lxda');
-    loadCounts(t0, FIT.bucket);
     wireChartHover(pc, { pts: pts, L: L, R: R, t0: t0, tspan: tspan, y: y, K: K, bucket: FIT.bucket, vol: vmax > 0 });
     watchChartWidth();
   }
@@ -959,31 +958,6 @@
     for (var i = 0; i < TR.ts.length; i++) if (TR.ts[i] >= t && TR.ts[i] < t + bucket) n++;
     return n;
   }
-  // TRADES PER CANDLE FROM LUMOSCORE'S OWN POOL INDEX (RAZA 2026-11-03: Trades on every point, every range).
-  // GeckoTerminal's free feed stops at 300 trades, so a busy pool (USDt's 6063) never covered even its own day.
-  // workers/near-pool-indexer counts every swap on a CLASSIC Rhea pool per candle; it starts 2026-10-29 and keeps
-  // 45 days, so a candle older than its 'from' stays unknown. DCL pools (refv2-) are not in it: those keep the feed.
-  var IDX_COUNTS = 'https://near-pool-indexer.usa282.workers.dev/counts';
-  var CNT = { key: '', v: null };
-  function classicId(d) { var p = gtPool(d), m = p && /^refv1-(\d{1,7})$/.exec(String(p.id)); return m ? m[1] : null; }
-  function loadCounts(t0, bucket) {
-    var id = classicId(window.__lxnAssetData);
-    if (!id || !(bucket > 0) || !(t0 > 0)) return;
-    var start = Math.floor(t0 / bucket) * bucket, key = id + '|' + start + '|' + bucket;
-    if (CNT.key === key) return;
-    CNT = { key: key, v: null };
-    fetch(IDX_COUNTS + '?id=' + id + '&from=' + start + '&bucket=' + bucket)
-      .then(function (r) { return r.json(); })
-      .then(function (j) { if (CNT.key === key && j && j.ok && j.n && j.n.length) CNT.v = j; })
-      .catch(function () {});
-  }
-  function countIn(t, bucket) {
-    var c = CNT.v;
-    if (!c || c.bucket !== bucket || t < c.from) return null;
-    var i = Math.floor((t - c.start) / c.bucket);
-    return (i >= 0 && i < c.n.length) ? c.n[i] : null;
-  }
-  function countsCover(S) { var c = CNT.v; return !!(c && c.bucket === S.bucket && c.from <= S.t0 + S.bucket); }
   function tipEl(cls, text) {
     var e = el('div', cls, text);
     e.setAttribute('data-logoed', '1');                         // "Price" is five letters: keep the logo healer off
@@ -1055,9 +1029,8 @@
       // feed reaches back 24 hours at most (300 trades) and no free NEAR source counts trades per past candle,
       // so a longer range, or a busy token's day, has no Trades row on ANY point: one shape per chart, and
       // never a count that is really "the part we could see".
-      var byIdx = countsCover(S);
-      var nTr = byIdx ? countIn(p[0], S.bucket) : tradesIn(p[0], S.bucket);
-      if (S.vol && (byIdx || (TR.ts && TR.from <= S.t0 + S.bucket))) {
+      var nTr = tradesIn(p[0], S.bucket);
+      if (S.vol && TR.ts && TR.from <= S.t0 + S.bucket) {
         var trow = el('div', 'lxrow');
         trow.appendChild(tipEl('l', 'Trades'));
         trow.appendChild(tipEl('p', nTr == null ? '—' : nTr.toLocaleString('en-US')));

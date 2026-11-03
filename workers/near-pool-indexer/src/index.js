@@ -33,7 +33,7 @@
 const REF = 'v2.ref-finance.near';
 const RPCS = ['https://near.drpc.org', 'https://free.rpc.fastnear.com'];
 const ND = 'https://mainnet.neardata.xyz/v0';
-const FWD = 1200, BACK = 2400, BACKFILL_DAYS = 3, KEEP_DAYS = 45, CONC = 8;
+const FWD = 1200, BACK = 2400, BACKFILL_DAYS = 3, KEEP_DAYS = 30, CONC = 8;
 const RUN_MS = 45000;                       // a cron every minute must be done before the next run starts
 // WHAT IS WORTH A NEARDATA READ (RAZA 2026-10-30: "why only so few? It needs to be just like other pool pages").
 // Reading every block that touched any pool spent neardata's ~28 reads a minute on two-token swaps GeckoTerminal
@@ -381,36 +381,12 @@ async function read(url, env) {
     backfilling: m.backDone !== '1' });
 }
 
-// GET /counts?id=<pool>&from=<ms>&bucket=<ms> -> { ok, from, start, bucket, n: [count per bucket] }
-// Swaps per chart candle on one classic pool (RAZA 2026-11-03: the Trade chart's readout must show Trades on every
-// point). GeckoTerminal's free trades feed stops at 300 trades, so a busy pool's day was never covered. 'from' in
-// the answer is where this index starts: a candle before it is unknown, not quiet. Cached 2 minutes at the edge.
-async function counts(url, env, ctx) {
-  const id = url.searchParams.get('id'), bucket = +url.searchParams.get('bucket'), from = +url.searchParams.get('from');
-  if (!/^\d{1,7}$/.test(id || '')) return json({ ok: false, error: 'bad pool id' }, 0);
-  if (!(bucket >= 60000) || !(from > 0)) return json({ ok: false, error: 'bad range' }, 0);
-  const start = Math.floor(from / bucket) * bucket;
-  if (Date.now() - start > 400 * 86400000 || (Date.now() - start) / bucket > 2000) return json({ ok: false, error: 'range too long' }, 0);
-  const cache = caches.default, key = new Request(url.origin + '/counts?id=' + id + '&start=' + start + '&bucket=' + bucket);
-  const hit = await cache.match(key);
-  if (hit) return hit;
-  const [r, m] = await Promise.all([
-    env.DB.prepare("SELECT (ts - ?2) / ?3 AS b, COUNT(*) AS n FROM txs WHERE pool = ?1 AND kind = 'swap' AND ts >= ?2 GROUP BY b").bind(+id, start, bucket).all(),
-    meta(env.DB)]);
-  const len = Math.ceil((Date.now() - start) / bucket), n = new Array(Math.max(0, len)).fill(0);
-  for (const x of r.results || []) if (x.b >= 0 && x.b < len) n[x.b] = x.n;
-  const idxFrom = Math.max(m.backTs ? +m.backTs : (+m.startTs || Date.now()), Date.now() - KEEP_DAYS * 86400000);
-  const res = json({ ok: true, from: idxFrom, start, bucket, n }, 120);
-  ctx.waitUntil(cache.put(key, res.clone()));
-  return res;
-}
-
 export default {
   async scheduled(event, env, ctx) {
     ctx.waitUntil(snapPrices(env).then((r) => console.log('prices', JSON.stringify(r)), (e) => console.error('price snapshot failed', e && e.message)));
     ctx.waitUntil(run(env).then((r) => console.log('indexed', JSON.stringify(r)), (e) => console.error('index run failed', e && e.message)));
   },
-  async fetch(request, env, ctx) {
+  async fetch(request, env) {
     const url = new URL(request.url);
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET' } });
     if (url.pathname === '/pool') {
@@ -418,9 +394,6 @@ export default {
     }
     if (url.pathname === '/prices') {
       try { return await prices(url, env); } catch (e) { return json({ ok: false, error: 'read failed' }, 0); }
-    }
-    if (url.pathname === '/counts') {
-      try { return await counts(url, env, ctx); } catch (e) { return json({ ok: false, error: 'read failed' }, 0); }
     }
     if (url.pathname === '/status') {
       const m = await meta(env.DB);
