@@ -419,67 +419,15 @@
   }
 
   // ---- pools -----------------------------------------------------------------------------------------
-  // RAZA 2026-10-31: "Pools are not being recorded of any individual user". Rhea keeps LP shares per pool
-  // (get_pool_shares) with no call that lists an account's pools, so the pools to ask about are FOUND first:
-  //   * get_deposits lists every token the account has registered with Rhea. Adding liquidity pulls both
-  //     sides from those deposits, so a pool the account is in has ALL its tokens there -- that filter takes
-  //     ~2,500 pools down to a handful (iamempty.near: 11 tokens -> 15 pools, 4 positions).
-  //   * the boost farm's list_farmer_seeds names pools whose shares are STAKED (they leave get_pool_shares).
-  // Then one get_pool_shares per candidate, at most POOL_CAP of them, largest TVL first. Value and TVL are
-  // Rhea's own USD figures (list-top-pools). DCL (concentrated) positions are not read here.
-  var REF = 'v2.ref-finance.near', FARM = 'boostfarm.ref-labs.near';
-  var RHEA_POOLS = 'https://indexer.ref.finance/list-top-pools';
+  // RAZA 2026-10-31: "Pools are not being recorded of any individual user". How an account's pools are found is
+  // lxnCore.positions (nearcore.js), shared with Pools -> My Pools since 2026-11-04.
   var POOL_CAP = 60;
   function poolHref(id, syms) {
     var slug = (syms || []).map(function (x) { return String(x || '').toLowerCase().replace(/[^a-z0-9]/g, ''); })
       .filter(Boolean).join('-').slice(0, 60).replace(/-+$/, '');
     return '/pools/near/' + (slug || 'pool') + '/' + encodeURIComponent(id);
   }
-  function symOf(s) { s = C.cleanSym ? C.cleanSym(s) : String(s || ''); return String(s || '?').slice(0, 16); }
-  function readPositions(a) {
-    return Promise.all([
-      fetch(RHEA_POOLS).then(function (r) { if (!r.ok) throw new Error('rhea pools ' + r.status); return r.json(); }),
-      C.callView(REF, 'get_deposits', { account_id: a }),
-      C.callView(FARM, 'list_farmer_seeds', { farmer_id: a }).catch(function () { return {}; })
-    ]).then(function (r) {
-      var pools = Array.isArray(r[0]) ? r[0] : [], reg = r[1] || {}, seeds = r[2] || {};
-      var staked = {};
-      Object.keys(seeds).forEach(function (k) {
-        var m = /^v2\.ref-finance\.near@(\d+)$/.exec(k), s = seeds[k] || {};
-        if (m) staked[m[1]] = BigInt(s.free_amount || '0') + BigInt(s.locked_amount || '0');
-      });
-      var byId = {};
-      pools.forEach(function (p) { if (p && /^\d+$/.test(String(p.id))) byId[p.id] = p; });
-      var cand = pools.filter(function (p) {
-        return p && byId[p.id] === p && Array.isArray(p.token_account_ids) && BigInt(p.shares_total_supply || '0') > 0n
-          && p.token_account_ids.every(function (t) { return Object.prototype.hasOwnProperty.call(reg, t); });
-      }).sort(function (x, y) { return (+y.tvl || 0) - (+x.tvl || 0); });
-      var capped = cand.length > POOL_CAP;
-      cand = cand.slice(0, POOL_CAP);
-      Object.keys(staked).forEach(function (id) { if (byId[id] && cand.indexOf(byId[id]) < 0) cand.push(byId[id]); });
-      var out = [], i = 0, failed = 0;
-      function next() {
-        if (i >= cand.length) return Promise.resolve();
-        var batch = cand.slice(i, i + 6); i += 6;
-        return Promise.all(batch.map(function (p) {
-          return C.callView(REF, 'get_pool_shares', { pool_id: +p.id, account_id: a }).then(function (sh) {
-            var s = BigInt(sh || '0') + (staked[p.id] || 0n), total = BigInt(p.shares_total_supply);
-            if (s <= 0n) return;
-            var f = Number(s * 1000000000n / total) / 1e9, tvl = +p.tvl;
-            out.push({ id: String(p.id), syms: (p.token_symbols || []).map(symOf), ids: p.token_account_ids,
-              share: f * 100, tvl: isFinite(tvl) ? tvl : null, usd: isFinite(tvl) ? f * tvl : null, farm: !!staked[p.id] });
-          }, function () { failed++; });
-        })).then(next);
-      }
-      return next().then(function () {
-        // A pool that could not be asked is not a pool the account is out of: with none found and any
-        // unread, the answer is "could not read", never "none".
-        if (failed && !out.length) throw new Error('get_pool_shares failed for ' + failed + ' pool(s)');
-        out.sort(function (x, y) { return (y.usd == null ? -1 : y.usd) - (x.usd == null ? -1 : x.usd); });
-        return { rows: out, capped: capped, failed: failed };
-      });
-    });
-  }
+  function readPositions(a) { return C.positions(a); }
   function paintPools(tbl, a, mk) {
     tableNote(tbl, 'Loading pools…', 5);
     var logos = {};

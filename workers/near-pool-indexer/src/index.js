@@ -381,6 +381,20 @@ async function read(url, env) {
     backfilling: m.backDone !== '1' });
 }
 
+// GET /who?id=<account>  -> { ok, pools: [id...], from }: the pools this account has ADDED liquidity to since the
+// index began. Only a candidate list -- whether it still holds shares is the chain's answer (get_pool_shares).
+// Rhea cannot list an account's pools, and its top-pools list leaves out small new ones (RAZA 2026-11-04: the
+// treasury's LUMOS/wNEAR pool 9001 was missing from My Pools).
+const ACCOUNT_ID = /^(?=.{2,64}$)[a-z0-9]+([_-][a-z0-9]+)*(\.[a-z0-9]+([_-][a-z0-9]+)*)*$/;
+async function who(url, env) {
+  const id = String(url.searchParams.get('id') || '').trim().toLowerCase();
+  if (!ACCOUNT_ID.test(id)) return json({ ok: false, error: 'bad account id' }, 0);
+  const [r, m] = await Promise.all([
+    env.DB.prepare("SELECT DISTINCT pool FROM txs WHERE who = ?1 AND kind = 'add' LIMIT 200").bind(id).all(), meta(env.DB)]);
+  return json({ ok: true, pools: (r.results || []).map((x) => x.pool),
+    from: m.backTs ? +m.backTs : (m.startTs ? +m.startTs : null) }, 60);
+}
+
 export default {
   async scheduled(event, env, ctx) {
     ctx.waitUntil(snapPrices(env).then((r) => console.log('prices', JSON.stringify(r)), (e) => console.error('price snapshot failed', e && e.message)));
@@ -391,6 +405,9 @@ export default {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET' } });
     if (url.pathname === '/pool') {
       try { return await read(url, env); } catch (e) { return json({ ok: false, error: 'read failed' }, 0); }
+    }
+    if (url.pathname === '/who') {
+      try { return await who(url, env); } catch (e) { return json({ ok: false, error: 'read failed' }, 0); }
     }
     if (url.pathname === '/prices') {
       try { return await prices(url, env); } catch (e) { return json({ ok: false, error: 'read failed' }, 0); }

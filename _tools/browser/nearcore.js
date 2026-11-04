@@ -526,10 +526,96 @@
     return ACCT_RE.test(v) || /^[0-9a-f]{64}$/.test(v) || /^0x[0-9a-f]{40}$/.test(v);
   }
 
+  // ---- an account's pool positions ----------------------------------------------------------------------
+  // Shared by the account page and Pools -> My Pools (moved here from account.js, RAZA 2026-11-04: "Im connected
+  // with treasury, so why on pools main page, its not showing my pools").
+  // Rhea keeps LP shares per pool (get_pool_shares) with no call that lists an account's pools, so the pools to
+  // ask about are FOUND first:
+  //   * get_deposits lists every token the account has registered with Rhea. Adding liquidity pulls both sides
+  //     from those deposits, so a pool the account is in has ALL its tokens there -- that filter takes ~2,500
+  //     pools in Rhea's top list down to a handful (iamempty.near: 11 tokens -> 15 pools, 4 positions).
+  //   * the boost farm's list_farmer_seeds names pools whose shares are STAKED (they leave get_pool_shares).
+  //   * LumosCore's pool indexer (/who) names every pool the account added liquidity to since 2026-10-29.
+  //     Rhea's top list leaves out small new pools -- the treasury's LUMOS/wNEAR 9001 was not in it -- so
+  //     these are read from the chain (get_pool) when the list does not have them.
+  // Then one get_pool_shares per candidate, at most POOL_CAP of them, largest TVL first. Value and TVL are
+  // Rhea's own USD figures (list-top-pools), absent for a pool the list does not carry. DCL (concentrated)
+  // positions are not read here.
+  var REF = 'v2.ref-finance.near', FARM = 'boostfarm.ref-labs.near';
+  var RHEA_POOLS = 'https://indexer.ref.finance/list-top-pools';
+  var IDX = 'https://near-pool-indexer.usa282.workers.dev';
+  var POOL_CAP = 60;
+  function getJson(u) { return fetch(u).then(function (r) { if (!r.ok) throw new Error(u.split('/')[2] + ' ' + r.status); return r.json(); }); }
+  function positions(a) {
+    return Promise.all([
+      getJson(RHEA_POOLS),
+      callView(REF, 'get_deposits', { account_id: a }),
+      callView(FARM, 'list_farmer_seeds', { farmer_id: a }).catch(function () { return {}; }),
+      getJson(IDX + '/who?id=' + encodeURIComponent(a)).catch(function () { return null; })
+    ]).then(function (r) {
+      var pools = Array.isArray(r[0]) ? r[0] : [], reg = r[1] || {}, seeds = r[2] || {}, ix = r[3];
+      var staked = {};
+      Object.keys(seeds).forEach(function (k) {
+        var m = /^v2\.ref-finance\.near@(\d+)$/.exec(k), s = seeds[k] || {};
+        if (m) staked[m[1]] = big(s.free_amount || '0') + big(s.locked_amount || '0');
+      });
+      var byId = {};
+      pools.forEach(function (p) { if (p && /^\d+$/.test(String(p.id))) byId[p.id] = p; });
+      var cand = pools.filter(function (p) {
+        return p && byId[p.id] === p && Array.isArray(p.token_account_ids) && big(p.shares_total_supply || '0') > BigInt(0)
+          && p.token_account_ids.every(function (t) { return Object.prototype.hasOwnProperty.call(reg, t); });
+      }).sort(function (x, y) { return (+y.tvl || 0) - (+x.tvl || 0); });
+      var capped = cand.length > POOL_CAP;
+      cand = cand.slice(0, POOL_CAP);
+      var off = [];
+      Object.keys(staked).forEach(function (id) { if (byId[id] && cand.indexOf(byId[id]) < 0) cand.push(byId[id]); });
+      ((ix && ix.ok && ix.pools) || []).forEach(function (id) {
+        id = String(id);
+        if (!/^\d{1,7}$/.test(id)) return;
+        if (byId[id]) { if (cand.indexOf(byId[id]) < 0) cand.push(byId[id]); } else if (off.indexOf(id) < 0) off.push(id);
+      });
+      // A pool off Rhea's list, in the list's shape, from the chain. Its symbols come from the tokens' own metadata.
+      var offRead = Promise.all(off.slice(0, 20).map(function (id) {
+        return callView(REF, 'get_pool', { pool_id: +id }).then(function (p) {
+          if (!p || !Array.isArray(p.token_account_ids)) return;
+          return Promise.all(p.token_account_ids.map(function (t) { return tokenMeta(t).catch(function () { return null; }); })).then(function (ms) {
+            cand.push({ id: id, token_account_ids: p.token_account_ids, amounts: p.amounts, shares_total_supply: p.shares_total_supply,
+              token_symbols: ms.map(function (m, k) { return p.token_account_ids[k] === WNEAR ? 'wNEAR' : (m && m.s) || '?'; }), tvl: null });
+          });
+        }).catch(function () {});
+      }));
+      var out = [], failed = 0;
+      return offRead.then(function () {
+        var i = 0;
+        function next() {
+          if (i >= cand.length) return Promise.resolve();
+          var batch = cand.slice(i, i + 6); i += 6;
+          return Promise.all(batch.map(function (p) {
+            return callView(REF, 'get_pool_shares', { pool_id: +p.id, account_id: a }).then(function (sh) {
+              var s = big(sh || '0') + (staked[p.id] || BigInt(0)), total = big(p.shares_total_supply);
+              if (s <= BigInt(0) || total <= BigInt(0)) return;
+              var f = Number(s * BigInt(1000000000) / total) / 1e9, tvl = p.tvl == null ? NaN : +p.tvl;
+              out.push({ id: String(p.id), syms: (p.token_symbols || []).map(function (x) { return String(cleanSym(x) || '?').slice(0, 16); }),
+                ids: p.token_account_ids, amounts: p.amounts || [], fraction: f,
+                share: f * 100, tvl: isFinite(tvl) ? tvl : null, usd: isFinite(tvl) ? f * tvl : null, farm: !!staked[p.id] });
+            }, function () { failed++; });
+          })).then(next);
+        }
+        return next();
+      }).then(function () {
+        // A pool that could not be asked is not a pool the account is out of: with none found and any unread,
+        // the answer is "could not read", never "none".
+        if (failed && !out.length) throw new Error('get_pool_shares failed for ' + failed + ' pool(s)');
+        out.sort(function (x, y) { return (y.usd == null ? -1 : y.usd) - (x.usd == null ? -1 : x.usd); });
+        return { rows: out, capped: capped, failed: failed, cap: POOL_CAP };
+      });
+    });
+  }
+
   window.lxnCore = {
     RPC: RPC, WNEAR: WNEAR, NEAR_LOGO: NEAR_LOGO, ICONS: ICONS,
     market: market, view: view, callView: callView, units: units, cleanSym: cleanSym,
-    ftMetadata: ftMetadata, tokenMeta: tokenMeta, readHoldings: readHoldings,
+    ftMetadata: ftMetadata, tokenMeta: tokenMeta, readHoldings: readHoldings, positions: positions,
     activityData: activityData, platformActivity: platformActivity, entriesOf: entriesOf, isAccountId: isAccountId, short: short
   };
 })();
