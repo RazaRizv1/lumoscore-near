@@ -655,6 +655,20 @@
     }, function () { return undefined; });
   }
 
+  // A POOL JUST CREATED IS NOT READABLE AT ONCE (RAZA 2026-11-04, LUMOS/wNEAR pool 8998: "E85: invalid pool id"
+  // and no liquidity step). add_simple_pool's receipt returns the id a block or two before the RPC's finalised
+  // view holds the pool, and get_pool on it panics with E85. So E85 is asked again, for about 15 seconds, before
+  // it counts as an answer; any other error is passed on at once.
+  function poolSettled(pid, tries) {
+    tries = tries == null ? 10 : tries;
+    return C().callView(REF, 'get_pool', { pool_id: pid }).catch(function (e) {
+      if (tries > 0 && /E85|invalid pool id/i.test(String((e && e.message) || e))) {
+        return new Promise(function (r) { setTimeout(r, 1500); }).then(function () { return poolSettled(pid, tries - 1); });
+      }
+      throw e;
+    });
+  }
+
   // The pool this dialog has just created: the NEWEST match is the right answer here, because it is ours.
   function findOurPool(ta, tb) {
     return C().callView(REF, 'get_number_of_pools', {}).then(function (n) {
@@ -808,7 +822,7 @@
           if (pid == null) throw new Error('No pool to add liquidity to.');
           // The pool decides the ORDER of the amounts; assuming [a, b] would deposit each amount against
           // the wrong token in a pool created by somebody else.
-          return C().callView(REF, 'get_pool', { pool_id: Number(pid) }).then(function (p) {
+          return poolSettled(Number(pid)).then(function (p) {
             var order = (p && p.token_account_ids) || [];
             if (order.length !== 2 || order.indexOf(ta) < 0 || order.indexOf(tb) < 0) {
               throw new Error('That pool holds a different pair than the one chosen.');
