@@ -695,7 +695,10 @@
       });
       var v = Object.keys(byDay).map(function (k) { return byDay[k]; }).sort(function (a, b) { return a[0] - b[0]; });
       v = dropGlitches(v);
-      if (v.length < 2) throw new Error('no history');
+      // A NEW POOL HAS NO HISTORY, and that is an answer, not a failure (RAZA 2026-11-04, LUMOS/wNEAR 9001 read
+      // "Pool history is busy — retrying…" and then "Could not load"). The caller says "Not enough history"; only
+      // an answer is cached, so it is asked again on the next visit.
+      if (v.length < 2) return v;
       try { sessionStorage.setItem(key, JSON.stringify({ t: Date.now(), v: v })); } catch (e) {}
       return v;
     });
