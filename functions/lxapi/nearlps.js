@@ -18,8 +18,9 @@
 // What this cannot see: someone who joined after February and never staked. The page says "largest known".
 //
 // Cached at the edge 6 hours, the last good answer kept a week, a failure never cached.
-const TTL = 21600, KEEP = 604800, VER = 'v1';
+const TTL = 21600, KEEP = 604800, VER = 'v2';   // v2: indexer candidates (2026-11-04); v1 answers cached an empty list for new pools
 const DS = 'https://api.data-service.ref.finance';
+const IDX = 'https://near-pool-indexer.usa282.workers.dev';
 const EX = 'v2.ref-finance.near';
 const FARM = 'boostfarm.ref-labs.near';
 const RPCS = ['https://free.rpc.fastnear.com', 'https://near.drpc.org'];
@@ -75,10 +76,14 @@ async function pool(n, fn) {
 
 export async function build(id) {
   const seed = EX + '@' + id;
-  const [p, lp, sd] = await Promise.all([
+  const [p, lp, sd, ix] = await Promise.all([
     view(EX, 'get_pool', { pool_id: id }),
     getJson(DS + '/api/pool/' + id + '/lp').catch(() => null),
     getJson(DS + '/api/seedv2/' + encodeURIComponent(seed) + '/accounts').catch(() => null),
+    // LumosCore's own pool indexer (workers/near-pool-indexer) records every deposit since 2026-10-29, which is
+    // the part Rhea's February list cannot know: a new pool's providers (RAZA 2026-11-04, LUMOS/wNEAR 9001 read
+    // "No liquidity providers found" with the treasury's deposit in it).
+    getJson(IDX + '/pool?id=' + id + '&kind=add&limit=200').catch(() => null),
   ]);
   const total = big(p && p.shares_total_supply);
   if (total <= 0n) throw new Error('pool has no shares');
@@ -89,8 +94,11 @@ export async function build(id) {
   const farmRows = ((sd && sd.accounts && sd.accounts.accounts) || []).filter((x) => x && validId(String(x.account || '')))
     .sort((a, b) => (Number(b.amount) || 0) - (Number(a.amount) || 0)).slice(0, PER_LIST).map((x) => String(x.account));
   const hasFarm = farmRows.length > 0;
+  // Newest depositors first, once each: they are the ones neither Rhea list has.
+  const ixRows = [];
+  ((ix && ix.ok && ix.rows) || []).forEach((r) => { const a = String((r && r.who) || ''); if (validId(a) && ixRows.indexOf(a) < 0) ixRows.push(a); });
   const seen = {}, cand = [];
-  [lpRows, farmRows].forEach((list) => list.forEach((a) => {
+  [ixRows.slice(0, PER_LIST), lpRows, farmRows].forEach((list) => list.forEach((a) => {
     if (a === FARM || a === EX || seen[a] || cand.length >= MAX_CAND) return;
     seen[a] = 1; cand.push(a);
   }));
@@ -114,7 +122,7 @@ export async function build(id) {
       pct: Number((r.direct + r.staked) * 1000000n / total) / 10000 }));
   return { ok: true, pool: id, at: Date.now(), total: total.toString(), checked: cand.length, unread: failed,
     listAsOf: (lp && lp.pool && lp.pool.updatedAt) || null, providers,
-    src: 'Rhea data service (candidates) + v2.ref-finance.near / boostfarm.ref-labs.near (shares)' };
+    src: 'LumosCore pool indexer + Rhea data service (candidates) + v2.ref-finance.near / boostfarm.ref-labs.near (shares)' };
 }
 
 export async function onRequestGet(context) {
