@@ -172,12 +172,6 @@
     if (s < 86400) return Math.floor(s / 3600) + 'h';
     return Math.floor(s / 86400) + 'd';
   }
-  function amt(f) {
-    if (!f) return '';
-    var v = f.v == null ? '' : Number(f.v);
-    var n = v === '' ? '' : (v >= 1000 ? v.toLocaleString('en-US', { maximumFractionDigits: 2 }) : String(+v.toPrecision(6)));
-    return '<b>' + esc((n ? n + ' ' : '') + f.s) + '</b>';
-  }
   function logo(f) {
     var l = esc(String((f && f.s) || '?').charAt(0).toUpperCase());
     return '<span class="act-inl lx-dimg lx-fgi" data-l="' + l + '">' + (f && f.ic ? '<img src="' + esc(f.ic) + '" alt="" onerror="this.remove()">' : '') + '</span>';
@@ -192,19 +186,39 @@
   // token-icon slot: it blanked the badge and painted a LUMOS logo over it. An empty svg inside is its opt-out
   // (the same trick createpool.js uses on MAX).
   var NOICON = '<svg width="0" height="0" aria-hidden="true" style="position:absolute"></svg>';
+  // Stellar's row shape (RAZA 2026-11-04): "<b>0.001 [icon] wNEAR</b> → <b>0.000054 [icon] QTC</b>", the token's
+  // mark inline before its code, as Stellar's aic() draws it.
+  function inl(f) {
+    if (!f) return '';
+    var l = esc(String(f.s || '?').charAt(0).toUpperCase());
+    return '<span class="act-inl lx-actasset lx-dimg" data-logoed="1" data-l="' + l + '">'
+      + (f.ic ? '<img src="' + esc(f.ic) + '" alt="" onerror="this.remove()">' : '') + '</span>';
+  }
+  function tok(f) {
+    if (!f) return '';
+    var v = f.v == null ? '' : Number(f.v);
+    var n = v === '' ? '' : (v >= 1000 ? v.toLocaleString('en-US', { maximumFractionDigits: 2 }) : String(+v.toPrecision(6)));
+    return '<b>' + (n ? esc(n) + ' ' : '') + inl(f) + esc(f.s) + '</b>';
+  }
+  var INFO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>';
   function actRow(r) {
-    var m = String(r.memo || ''), verb, cls, type;
-    if (/limit order/i.test(m)) { verb = 'Order placed'; cls = 'swap'; type = 'Placed a limit order selling ' + amt(r.give); }
+    var m = String(r.memo || ''), verb, cls, type, unread = false;
+    if (!r.give && !r.get) {
+      // A fee-paying transaction whose token movements could not be read: Stellar's fallback, not a guess.
+      unread = true; verb = ''; cls = 'unread'; type = 'Couldn’t read this transaction';
+    } else if (/limit order/i.test(m)) { verb = 'Order placed'; cls = 'swap'; type = tok(r.give) + ' limit order'; }
     else if (/^lx:(ni|om|wh)$/.test(m)) {
       verb = 'Bridge'; cls = 'bridge';
-      type = 'Bridged ' + amt(r.give) + ' via ' + ({ 'lx:ni': 'NEAR Intents', 'lx:om': 'Omni Bridge', 'lx:wh': 'Wormhole' })[m];
-    } else if (r.give && r.get) { verb = 'Swap'; cls = 'swap'; type = 'Swapped ' + amt(r.give) + ' for ' + amt(r.get); }
-    else { verb = 'Trade'; cls = 'swap'; type = r.give ? ('Traded ' + amt(r.give)) : 'Traded on LumosCore'; }
+      type = tok(r.give) + ' → ' + ({ 'lx:ni': 'NEAR Intents', 'lx:om': 'Omni Bridge', 'lx:wh': 'Wormhole' })[m];
+    } else if (r.give && r.get) { verb = 'Swap'; cls = 'swap'; type = tok(r.give) + ' → ' + tok(r.get); }
+    else { verb = 'Trade'; cls = 'swap'; type = tok(r.give || r.get); }
     var b = (verb === 'Swap') ? r.get : null;
-    var glyph = '<span class="lx-fg' + (b ? ' lx-fg2' : '') + '" aria-hidden="true"><span class="lx-fga">' + logo(r.give || r.get) + '</span>'
+    var glyph = unread ? ('<span class="lx-fg lx-fgt" aria-hidden="true">' + INFO + '</span>')
+      : '<span class="lx-fg' + (b ? ' lx-fg2' : '') + '" aria-hidden="true"><span class="lx-fga">' + logo(r.give || r.get) + '</span>'
       + (b ? '<span class="lx-fgb">' + logo(b) + '</span>' : '') + '</span>';
-    return '<div class="activity-feed-row lx-fr" data-lx-noswap="1">' + glyph
-      + '<div class="info"><div class="type">' + type + '</div><div class="meta lx-actmeta"><span class="lx-actverb ' + cls + '" data-logoed="1">' + NOICON + verb + '</span>' + who(r.who) + '</div></div>'
+    return '<div class="activity-feed-row lx-fr' + (unread ? ' lx-frfail' : '') + '" data-lx-noswap="1">' + glyph
+      + '<div class="info"><div class="type">' + type + '</div><div class="meta lx-actmeta">'
+      + (verb ? '<span class="lx-actverb ' + cls + '" data-logoed="1">' + NOICON + verb + '</span>' : '') + who(r.who) + '</div></div>'
       + '<div class="lx-frr"><div class="time">' + ago(r.ts) + '</div>'
       + '<a class="lx-actlink" href="' + TX + encodeURIComponent(r.h) + '" target="_blank" rel="noopener nofollow" title="View transaction">' + XPI + '</a></div></div>';
   }

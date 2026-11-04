@@ -1733,6 +1733,46 @@
       if (at < 12) setTimeout(function () { loadTrades(at + 1); }, at < CH_RETRY.length ? CH_RETRY[at] : 60000);
     });
   }
+  // ---- My Trades, from the wallet's own activity (browser/nearcore.js) --------------------------------------
+  // Swaps in or out of this token among the account's latest transactions, whichever pool or route they took.
+  // The other side is usually NEAR (or wNEAR); when it is another token the price column has no NEAR figure,
+  // and the row says what was swapped instead of inventing one.
+  var MINE = { who: '', rows: null, busy: false, err: false, at: 0 };
+  function loadMine() {
+    var me = myAcct(), C = window.lxnCore, d = window.__lxnAssetData;
+    if (!me || !C || !C.activityData || !C.entriesOf || !d || MINE.busy) return;
+    if (MINE.who !== me) MINE = { who: me, rows: null, busy: false, err: false, at: 0 };
+    MINE.busy = true;
+    C.activityData(me).then(function (data) {
+      var out = [];
+      C.entriesOf(me, data).forEach(function (en) {
+        if (en.kind !== 'swap' || !en.give || !en.get || en.ok === false) return;
+        var buy = en.get.c === d.i, sell = en.give.c === d.i;
+        if (!buy && !sell) return;
+        var mine = buy ? en.get : en.give, oth = buy ? en.give : en.get;
+        var amt = Number(mine.v);
+        if (!(amt > 0)) return;
+        var isNear = oth.c === 'near' || oth.c === WNEAR, ov = Number(oth.v);
+        out.push({ addr: me, side: buy ? 'buy' : 'sell', amt: amt, t: en.ts, hash: en.h || '',
+          near: isNear && ov > 0 ? ov : null, px: isNear && ov > 0 ? ov / amt : null,
+          oth: isNear ? null : { v: ov > 0 ? ov : null, s: oth.s || '' } });
+      });
+      out.sort(function (a, b) { return b.t - a.t; });
+      if (MINE.who !== me) return;
+      MINE.rows = out; MINE.err = false; MINE.busy = false; MINE.at = Date.now();
+      syncPanel();
+    }, function () {
+      if (MINE.who !== me) return;
+      MINE.busy = false; MINE.err = true; MINE.at = Date.now();
+      syncPanel();
+    });
+  }
+  function pxTxt(r) { return r.px != null ? (xrp(r.px) + ' NEAR') : '—'; }
+  function otherSide(r) {
+    if (r.near != null) return amount(r.near) + ' NEAR';
+    if (r.oth) return (r.oth.v != null ? amount(r.oth.v) + ' ' : '') + escH(r.oth.s);
+    return '—';
+  }
   function paintTrades(panel, phone) {
     var tb = phone ? document.getElementById('mdxaExList') : document.getElementById('dxaExTable');
     var filt = document.getElementById(phone ? 'mdxaPanelFilters' : 'dxaPanelFilters');
@@ -1772,12 +1812,17 @@
     show(filt); show(foot);
     if (pgv && pgv.style.visibility) pgv.style.visibility = '';
     var me = TR.mine ? myAcct() : '';
-    var all = TR.rows.filter(function (r) { return r.near >= TR.min && (!TR.mine || (me && r.addr === me)); });
+    // MY TRADES READ THE WALLET'S OWN SWAPS, not the pool's public feed filtered by address (RAZA 2026-11-04:
+    // his QTC swap never showed). The feed is ONE pool's trades, and a swap routed through another pool -- his
+    // went through a different QTC pool -- was never in it. loadMine() reads his own activity instead.
+    if (TR.mine && me && (MINE.who !== me || !MINE.rows)) loadMine();
+    var src = TR.mine ? ((me && MINE.who === me && MINE.rows) || []) : TR.rows;
+    var all = src.filter(function (r) { return (r.near == null || r.near >= TR.min) && (!TR.mine || (me && r.addr === me)); });
     var pages = Math.max(1, Math.ceil(all.length / TR_PER));
     if (TR.page > pages) TR.page = pages;
     var from = (TR.page - 1) * TR_PER, rows = all.slice(from, from + TR_PER);
     var c = (window.__lxnAssetData && window.__lxnAssetData.symbol) || '';
-    var sig = TR.at + '|' + TR.min + '|' + TR.page + '|' + rows.length + '|' + (phone ? 1 : 0) + '|' + (TR.mine ? 'm' + me : '');
+    var sig = TR.at + '|' + TR.min + '|' + TR.page + '|' + rows.length + '|' + (phone ? 1 : 0) + '|' + (TR.mine ? 'm' + me + MINE.at : '');
     if (tb.__lxnSig === sig && tb.querySelector('[data-lxda]')) return;
     tb.__lxnSig = sig;
     var span = TR.rows.length ? ago(TR.rows[TR.rows.length - 1].t) : '';
@@ -1785,6 +1830,7 @@
     if (!rows.length) {
       var none = TR.mine
         ? (!me ? 'Connect a wallet to see your own trades in this asset.'
+          : !MINE.rows ? (MINE.err ? 'Your trades could not be read right now. Try again in a moment.' : 'Reading your trades…')
           : 'No trades from this wallet in this asset.')                   // Stellar's line (RAZA 2026-11-03)
         : TR.min > 0 ? ('No trades of ' + TR.min.toLocaleString('en-US') + '+ NEAR among the latest ' + TR.rows.length + '.') : 'No trades on this pool recently.';
       tb.innerHTML = phone
@@ -1792,11 +1838,12 @@
         : '<tr class="lxda-ex-empty" data-lxda="1"><td colspan="6" style="text-align:center;padding:26px 12px;color:var(--text-soft,#8a8fa3);font-size:13.5px">' + none + '</td></tr>';
     } else if (phone) {
       tb.innerHTML = rows.map(function (r) {
-        var flow = r.side === 'buy' ? (amount(r.near) + ' NEAR → ' + amount(r.amt) + ' ' + escH(c)) : (amount(r.amt) + ' ' + escH(c) + ' → ' + amount(r.near) + ' NEAR');
+        var oth = otherSide(r);
+        var flow = r.side === 'buy' ? (oth + ' → ' + amount(r.amt) + ' ' + escH(c)) : (amount(r.amt) + ' ' + escH(c) + ' → ' + oth);
         return '<div class="ex-row" data-lxda="1"><span class="ex-ident">' + identSvg(r.addr, 28) + '</span>'
           + '<div class="ex-meta"><div class="nm mono"><a class="lx-acct" href="/account/near/' + encodeURIComponent(r.addr) + '">' + escH(shortAcct(r.addr)) + '</a></div>'
           + '<div class="ex-sub"><span class="type-badge ' + r.side + '">' + (r.side === 'buy' ? '▲ Buy' : '▼ Sell') + '</span></div></div>'
-          + '<div class="ex-num">' + xrp(r.px) + ' NEAR<span class="sub">' + flow + '</span></div>'
+          + '<div class="ex-num">' + pxTxt(r) + '<span class="sub">' + flow + '</span></div>'
           + '<div class="ex-time">' + ago(r.t) + '</div>'
           + (r.hash ? '<a class="row-link lxda-exlink" href="' + EXPL_TX + r.hash + '" target="_blank" rel="noopener nofollow" aria-label="View this trade on NearBlocks">' + XPO + '</a>' : '<span></span>')
           + '</div>';
@@ -1805,8 +1852,8 @@
       tb.innerHTML = rows.map(function (r) {
         return '<tr data-lxda="1"><td>' + wallet(r.addr, 26) + '</td>'
           + '<td><span class="type-badge ' + r.side + '">' + (r.side === 'buy' ? '▲ Buy' : '▼ Sell') + '</span></td>'
-          + '<td><span class="mono">' + xrp(r.px) + ' NEAR</span></td>'
-          + '<td><span class="mono">' + amount(r.amt) + ' ' + escH(c) + '</span><span class="lx-extot">' + amount(r.near) + ' NEAR</span></td>'
+          + '<td><span class="mono">' + pxTxt(r) + '</span></td>'
+          + '<td><span class="mono">' + amount(r.amt) + ' ' + escH(c) + '</span><span class="lx-extot">' + otherSide(r) + '</span></td>'
           + '<td><span class="time">' + ago(r.t) + '</span></td>'
           + '<td style="text-align:right">' + (r.hash ? '<a class="row-link" href="' + EXPL_TX + r.hash + '" target="_blank" rel="noopener nofollow" aria-label="View this trade on NearBlocks">' + XPO + '</a>' : '') + '</td></tr>';
       }).join('');

@@ -19,6 +19,11 @@ const { read, getContents } = require(__dirname + '/lib.js');
 const B = String.fromCharCode(92);
 
 const PAIRS = [
+  // The Trade page's SWAP button says "Swap" from the first paint (RAZA 2026-11-04: it read "Place Buy Order"
+  // until browser/dxaswap.js took the button over, about a second, longer on a slow load). The Limit
+  // pane's "Place Limit Order" button is a different string and is untouched.
+  ['<button class="dxa-trade-cta">Place Buy Order</button>', '<button class="dxa-trade-cta">Swap</button>'],
+  ['<button class="mdxa-trade-cta">Place Buy Order</button>', '<button class="mdxa-trade-cta">Swap</button>'],
   // The search panel's footer, on every page with the search.
   ['<span>Search assets, pools and wallets on Stellar.</span>',
    '<span>Search assets, pools and wallets on NEAR.</span>'],

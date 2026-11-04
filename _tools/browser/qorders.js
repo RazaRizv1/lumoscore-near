@@ -282,7 +282,9 @@
       + 'margin-left:5px;border-radius:50%;background:var(--green,#35c07f);color:#fff;vertical-align:-2px;flex:0 0 14px}'
       + '#swapModal .lx-vtick svg{width:9px;height:9px;display:block}'
       // Long warnings wrap inside the modal instead of running past its edge (RAZA 2026-11-03).
-      + '#swapModal .lxq-err,#swapModal .lxq-note{white-space:normal;overflow-wrap:anywhere;line-height:1.45;max-width:100%}';
+      + '#swapModal .lxq-err,#swapModal .lxq-note{white-space:normal;overflow-wrap:anywhere;line-height:1.45;max-width:100%}'
+      // Room above and below the warning, so it never touches the field over it or the button under it.
+      + '#swapModal .lxo-pane[data-pane="limit"] .lxq-err:not(:empty){margin:12px 2px 14px;padding:0 2px}';
     document.head.appendChild(st);
   }
   function vtick() {
@@ -892,6 +894,9 @@
           function pick(a) {
             if (side === 'sell') { lim.s = heldOf(a) || a; if (same(lim.b, a)) lim.b = null; }
             else { lim.b = a; if (same(lim.s, a)) lim.s = null; }
+            // A non-NEAR pick next to a non-NEAR token: the other side empties, and its list then offers NEAR only.
+            var nr = function (x) { return !!x && (x.id === 'near' || x.id === 'wrap.near'); };
+            if (!nr(a)) { if (side === 'sell' && lim.b && !nr(lim.b)) lim.b = null; if (side !== 'sell' && lim.s && !nr(lim.s)) lim.s = null; }
             var pe = lEl('.lxq-price'); if (pe) pe.value = '';
             lim.pool = undefined; lim.poolFor = '';
             limitSync();
@@ -900,6 +905,10 @@
           }
           var other = side === 'sell' ? lim.b : lim.s;
           var list = (side === 'sell' ? H.held : curated()).filter(function (a) { return !same(a, other); });
+          // ONE SIDE IS NEAR (RAZA 2026-11-04): once the other side holds a token that is not NEAR, this list
+          // offers NEAR and wNEAR only, so a pair that cannot rest in an order-book pool (DARK -> QTC) can't be picked.
+          var nearish = function (a) { return !!a && (a.id === 'near' || a.id === 'wrap.near'); };
+          if (other && !nearish(other)) list = list.filter(nearish);
           if (side === 'sell') {
             var mine = list.filter(function (a) { return a.id === 'near' || rawBal(a) == null || S().big(rawBal(a)) > BigInt(0); });
             if (!mine.length) { menuHead(m, emptyWhy()); return; }
