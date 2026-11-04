@@ -1096,7 +1096,8 @@
       if (ord && ord.rests > 0) {
         bits.push('Filled when 1 ' + pr.token.code + ' reaches ' + fmtNum(ord.rests, ord.rests < 1 ? 10 : 6) + ' NEAR (the pool’s nearest tick).');
       }
-      if (ord) bits.push('Trading fee ' + (ord.feeBps / 100) + '%: ' + show(ord.feeRaw, lim.s.dec, 7) + ' ' + lim.s.code + ', on top of the amount.');
+      // Limit orders are free (neardcl.js LIMIT_FEE_BPS, RAZA 2026-11-04): a fee line only if one is ever charged again.
+      if (ord && ord.feeBps > 0) bits.push('Trading fee ' + (ord.feeBps / 100) + '%: ' + show(ord.feeRaw, lim.s.dec, 7) + ' ' + lim.s.code + ', on top of the amount.');
     }
     // RAZA 2026-11-03: no note under the price ("Filled when … Trading fee …"); the wallet shows the fee transfer.
     limNote('');

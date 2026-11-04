@@ -44,15 +44,16 @@
   var ORDER_STORAGE = '10000000000000000000000';            // 0.01 NEAR held per resting order (measured)
   var STORAGE_TOPUP = '100000000000000000000000';           // 0.1 NEAR: ten more orders
   var GAS_ORDER = 180, GAS_CANCEL = 180, GAS_REG = 30;      // TGas, as the SDK sends them
-  // THE LUMOSCORE FEE ON A LIMIT ORDER (RAZA 2026-11-01: "If its feasible on Near, then we should charge 0.2%
-  // fees" -- Stellar's are free only because a fee could not be attached there). 0.2% of what the order sells,
-  // 0.1% at the 250,000-LUMOS tier (window.__lxFeeRate, browser/feerate.js), in the sold token, ON TOP of the
-  // order: an order sells and buys exactly what was typed. Taken when the order is PLACED, as an ft_transfer to
-  // the fee account in the same transaction as the ft_transfer_call -- the swap's own shape (browser/nearswap.js)
-  // -- so it is paid whether or not the order later fills or is cancelled; DCL offers no way to take it on fill.
-  var GAS_FEE = 30;
-  function feeBps() { return window.__lxFeeRate === 0.001 ? 10 : 20; }
-  function feeAccount() { try { return window.lxnSwap.feeAccount(); } catch (e) { return 'fees-lumoscore.near'; } }
+  // THE LUMOSCORE FEE ON A LIMIT ORDER was 0.2% (0.1% at the LUMOS tier), taken at placement as an ft_transfer to the
+  // fee account in the order's own transaction (RAZA 2026-11-01: "If its feasible on Near, then we should charge 0.2%").
+  //
+  // REMOVED 2026-11-04 -- LIMIT ORDERS ARE FREE, AS ON STELLAR (RAZA: "lets remove fees on limit orders just like on
+  // Stellar"). His reason on Stellar applies here exactly: "what if the order never fills. the user would have still
+  // paid the fees" -- and on NEAR the first LUMOS order showed the other half of it: DCL refused the order (E600) AFTER
+  // the fee transfer in the same transaction had landed, and no single transaction can make the fee wait on DCL's
+  // answer. So nothing is taken: an order sells and buys exactly what was typed, and the transaction is the
+  // ft_transfer_call alone. Only Swap charges (browser/nearswap.js).
+  var LIMIT_FEE_BPS = 0;
 
   // ---- reads: one queue, at most two in flight, so a page never bursts the free RPC -------------------
   var Q = [], active = 0;
@@ -226,7 +227,7 @@
     var msgPoint = splitPool(pool.id).x === sell ? point : -point;
     if (msgPoint === 0) msgPoint = 0;                                  // never "-0" in the JSON
     if (big(sellRaw) <= BigInt(0)) return null;
-    var bps = feeBps(), feeRaw = (big(sellRaw) * BigInt(bps) / BigInt(10000)).toString();
+    var bps = LIMIT_FEE_BPS, feeRaw = (big(sellRaw) * BigInt(bps) / BigInt(10000)).toString();
     return {
       pool: pool.id, side: side, sell: sell, buy: buy, sellRaw: sellRaw, tokenRaw: amtRaw, nearRaw: nearRaw,
       feeBps: bps, feeRaw: feeRaw, spendRaw: (big(sellRaw) + big(feeRaw)).toString(),       // what leaves the wallet
@@ -253,13 +254,8 @@
   // registration. Resolves { dcl: null|'register'|'topup', dclDeposit, needBuyReg, buyRegDeposit,
   // needWrapReg, wrapRegDeposit, storage (total NEAR raw) }.
   function prereqs(me, o) {
-    // The fee account must hold a balance on the sold token, as for a swap; a token it is not registered on
-    // cannot be sold through an order yet (the same answer the swap gives).
-    var feeOk = window.lxnSwap && window.lxnSwap.feeReady ? window.lxnSwap.feeReady(o.sell) : Promise.resolve(true);
-    return feeOk.then(function (ok) {
-      if (ok === false) throw new Error('Orders selling this token are not enabled yet.');
-      if (ok !== true) throw new Error('Could not check the fee setup — try again.');
-    }).then(function () { return Promise.all([
+    // No fee, so the fee account's registration on the sold token no longer matters here (it still does for Swap).
+    return Promise.resolve().then(function () { return Promise.all([
       storageOf(DCL, me),
       storageOf(o.buy, me),
       o.sell === WNEAR ? storageOf(WNEAR, me) : Promise.resolve(true)
@@ -334,11 +330,10 @@
     if (o.sell === WNEAR) {
       var wrap = [];
       if (pre.needWrapReg) wrap.push(fc('storage_deposit', { account_id: me, registration_only: true }, 10, pre.wrapRegDeposit));
-      wrap.push(fc('near_deposit', {}, 10, o.spendRaw));                // the order and its fee
+      wrap.push(fc('near_deposit', {}, 10, o.spendRaw));                // the order (no fee: spendRaw = sellRaw)
       txs.push({ signerId: me, receiverId: WNEAR, actions: wrap });
     }
     txs.push({ signerId: me, receiverId: o.sell, actions: [
-      fc('ft_transfer', { receiver_id: feeAccount(), amount: o.feeRaw, memo: 'LumosCore limit order fee ' + (o.feeBps / 100) + '%' }, GAS_FEE, '1'),
       fc('ft_transfer_call', { receiver_id: DCL, amount: o.sellRaw, msg: msgFor(o) }, GAS_ORDER, '1')] });
     return txs;
   }

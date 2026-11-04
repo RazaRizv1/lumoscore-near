@@ -123,22 +123,11 @@
   function code() { var d = window.__lxnAssetData, a = asset(); return (d && d.symbol) || (a && a.code) || ''; }
 
   // ---- the fee row --------------------------------------------------------------------------------
-  // lx-feemodal owns the row and rewrites its .lx-feehint (hidden in this pane by the head stylesheet);
-  // the figure that is true for a limit order goes beside it, in an element lx-feemodal never touches.
+  // NONE: NEAR limit orders are free, as Stellar's (RAZA 2026-11-04; neardcl.js LIMIT_FEE_BPS). Like Stellar's Limit
+  // pane, this one says nothing about fees -- the inherited lx-feemodal no longer builds a row here, and anything a
+  // stale container still carries is removed rather than left claiming a fee.
   function feeRow(p) {
-    var row = $('.lx-feerow', p);
-    if (!row) return;
-    var v = $('.lxn-limfee', row);
-    if (!v) {
-      v = document.createElement('span');
-      v.className = 'mono lxp lxn-limfee';
-      v.setAttribute('data-logoed', '1');
-      row.appendChild(v);
-    }
-    // Stellar's row: "Trading fee  0.2%" (RAZA 2026-11-01). NEAR limit orders now carry the fee (neardcl.js).
-    var t = window.__lxFeeRate === 0.001 ? '0.1%' : '0.2%';
-    if (v.textContent !== t) v.textContent = t;
-    v.style.color = 'var(--green,#22c55e)';                           // Stellar prints the fee in green
+    $$('.lx-feerow, .lx-feebanner-wrap, .lx-feetier, .lxn-limfee', p).forEach(function (n) { if (n.parentNode) n.parentNode.removeChild(n); });
   }
 
   // ---- the button ---------------------------------------------------------------------------------
@@ -479,10 +468,10 @@
     Promise.all([D().prereqs(who, o), SW().balance(who, 'near'), o.sell === D().WNEAR ? null : SW().balance(who, o.sell)]).then(function (r) {
       var pre = r[0], nearBal = D().big(r[1]);
       var keep = D().big(SW().SWAP_KEEP);                            // 0.2 NEAR for gas, as a swap keeps
-      // What leaves the wallet is the order plus its fee (neardcl plan().spendRaw).
+      // What leaves the wallet is the order itself (neardcl plan().spendRaw; limit orders carry no fee).
       var needNear = D().big(pre.storage) + (o.sell === D().WNEAR ? D().big(o.spendRaw) : BigInt(0));
       if (o.sell !== D().WNEAR && D().big(o.spendRaw) > D().big(r[2])) {
-        throw new Error('You only have ' + fmtDown(r[2], dec) + ' ' + code() + ' — the order and its ' + (o.feeBps / 100) + '% fee need ' + fmtDown(o.spendRaw, dec) + '.');
+        throw new Error('You only have ' + fmtDown(r[2], dec) + ' ' + code() + ' — the order needs ' + fmtDown(o.spendRaw, dec) + '.');
       }
       if (needNear + keep > nearBal) {
         // The figures, not just the verdict (RAZA 2026-11-04: a 13,500 NEAR buy read "Not enough NEAR" beside "Avail: 0.95").
