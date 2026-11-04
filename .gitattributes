@@ -1,0 +1,2 @@
+# Its sha256 is stored forever in the LUMOS token on NEAR (reference_hash): the bytes must never change, not even line endings.
+assets/tokens/lumos-near.json -text

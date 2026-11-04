@@ -14,7 +14,7 @@
 //! Keep at least ~3 NEAR liquid on the factory account above its own storage: on a failed launch the
 //! storage it forwarded comes back as a separate refund receipt, which may land after the callback has
 //! already refunded the caller from the factory's own balance.
-use near_sdk::json_types::U128;
+use near_sdk::json_types::{Base64VecU8, U128};
 use near_sdk::serde_json::{self, json};
 use near_sdk::store::Vector;
 use near_sdk::{
@@ -33,6 +33,7 @@ const MIN_PREPAID: Gas = Gas::from_tgas(100);
 const EXTRA_BYTES: u64 = 2_000;
 const MAX_ICON: usize = 16 * 1024;
 const MAX_NAME: usize = 48;
+const MAX_REFERENCE: usize = 256;
 
 /// Prefixes that would let a launch pass itself off as LumosCore, NEAR infrastructure or a major
 /// stablecoin. `usdc.lumoscore.near` must never exist.
@@ -41,6 +42,9 @@ const RESERVED: &[&str] = &[
     "launchpad", "app", "api", "www", "docs", "near", "wnear", "wrap", "usdc", "usdt", "usd", "dai",
     "eth", "weth", "btc", "wbtc", "official", "team", "support", "treasury", "rewards", "swap",
     "bridge", "pool", "pools", "staking",
+    // token.<project>.near is how NEAR projects name their own token (token.rhealab.near is RHEA), so a launch at
+    // token.lumoscore.near would read as LumosCore's own (RAZA 2026-11-04).
+    "token",
 ];
 
 #[near(serializers = [json])]
@@ -55,6 +59,13 @@ pub struct TokenArgs {
     pub total_supply: U128,
     /// A data:image/png|jpeg|webp;base64 URL, at most 16 KB. SVG is refused: it can carry script.
     pub icon: Option<String>,
+    /// NEP-148 reference: an https URL to a JSON file of off-chain details (description, website, socials),
+    /// NEAR's nearest thing to a stellar.toml. The token standard requires it to come with reference_hash, the
+    /// sha256 of that file (32 bytes), and the token contract checks the pair on init -- so the file is pinned.
+    #[serde(default)]
+    pub reference: Option<String>,
+    #[serde(default)]
+    pub reference_hash: Option<Base64VecU8>,
 }
 
 #[near(serializers = [json])]
@@ -111,6 +122,10 @@ fn valid_name(n: &str) -> bool {
     !n.is_empty() && n.len() <= MAX_NAME && n.trim() == n && !n.chars().any(|c| c.is_control())
 }
 
+fn valid_reference(r: &str) -> bool {
+    r.len() <= MAX_REFERENCE && r.starts_with("https://") && !r.chars().any(|c| c.is_whitespace() || c.is_control())
+}
+
 fn valid_icon(i: &str) -> bool {
     i.len() <= MAX_ICON
         && ["data:image/png;base64,", "data:image/jpeg;base64,", "data:image/webp;base64,"]
@@ -135,6 +150,13 @@ impl Factory {
         require!(valid_name(&a.name), "Bad name: 1-48 characters, no leading/trailing spaces");
         require!(a.decimals <= 24, "Decimals must be 0-24");
         require!(a.total_supply.0 > 0, "Total supply must be positive");
+        require!(a.reference.is_some() == a.reference_hash.is_some(), "reference and reference_hash go together");
+        if let Some(r) = &a.reference {
+            require!(valid_reference(r), "Reference must be an https URL of at most 256 characters");
+        }
+        if let Some(h) = &a.reference_hash {
+            require!(h.0.len() == 32, "reference_hash must be the 32-byte sha256 of the reference file");
+        }
         if let Some(i) = &a.icon {
             require!(valid_icon(i), "Icon must be a PNG/JPEG/WebP data URL of at most 16 KB");
         }
@@ -145,6 +167,7 @@ impl Factory {
             + a.name.len() as u64
             + a.symbol.len() as u64
             + a.icon.as_ref().map_or(0, |i| i.len() as u64)
+            + a.reference.as_ref().map_or(0, |r| r.len() as u64 + 32)
             + EXTRA_BYTES
     }
 
@@ -176,8 +199,8 @@ impl Factory {
                 "name": args.name,
                 "symbol": args.symbol,
                 "icon": args.icon,
-                "reference": null,
-                "reference_hash": null,
+                "reference": args.reference,
+                "reference_hash": args.reference_hash,
                 "decimals": args.decimals,
             }
         }))
@@ -340,6 +363,8 @@ mod tests {
             decimals: 18,
             total_supply: U128(1_000_000_000_000_000_000_000_000_000),
             icon: None,
+            reference: None,
+            reference_hash: None,
         }
     }
 
@@ -480,6 +505,8 @@ mod tests {
             decimals: 18,
             total_supply: U128(1_000_000_000 * 10u128.pow(18)),
             icon: None,
+            reference: None,
+            reference_hash: None,
         }
     }
 
@@ -499,6 +526,55 @@ mod tests {
         f.set_paused(true);
         testing_env!(ctx.attached_deposit(NearToken::from_near(3)).build());
         f.create_reserved_token(lumos(), "treasury.near".parse().unwrap());
+    }
+
+    #[test]
+    #[should_panic(expected = "That name is reserved")]
+    fn token_prefix_is_reserved() {
+        let (mut ctx, mut f) = setup();
+        testing_env!(ctx.attached_deposit(NearToken::from_near(5)).build());
+        f.create_token(args("token"));
+    }
+
+    fn with_ref(mut a: TokenArgs, r: Option<&str>, h: Option<Vec<u8>>) -> TokenArgs {
+        a.reference = r.map(|x| x.to_string());
+        a.reference_hash = h.map(Base64VecU8::from);
+        a
+    }
+
+    #[test]
+    #[should_panic(expected = "reference and reference_hash go together")]
+    fn reference_without_hash_is_refused() {
+        let (mut ctx, mut f) = setup();
+        testing_env!(ctx.attached_deposit(NearToken::from_near(5)).build());
+        f.create_token(with_ref(args("solar"), Some("https://lumoscore.com/x.json"), None));
+    }
+
+    #[test]
+    #[should_panic(expected = "Reference must be an https URL")]
+    fn plain_http_reference_is_refused() {
+        let (mut ctx, mut f) = setup();
+        testing_env!(ctx.attached_deposit(NearToken::from_near(5)).build());
+        f.create_token(with_ref(args("solar"), Some("http://lumoscore.com/x.json"), Some(vec![7u8; 32])));
+    }
+
+    #[test]
+    #[should_panic(expected = "reference_hash must be the 32-byte sha256")]
+    fn short_reference_hash_is_refused() {
+        let (mut ctx, mut f) = setup();
+        testing_env!(ctx.attached_deposit(NearToken::from_near(5)).build());
+        f.create_token(with_ref(args("solar"), Some("https://lumoscore.com/x.json"), Some(vec![7u8; 31])));
+    }
+
+    #[test]
+    fn reference_pair_is_accepted_and_paid_for() {
+        let (mut ctx, mut f) = setup();
+        let url = "https://lumoscore.com/assets/tokens/lumos-near.json";
+        let a = with_ref(lumos(), Some(url), Some(vec![7u8; 32]));
+        assert_eq!(Factory::storage_bytes(&a), Factory::storage_bytes(&lumos()) + url.len() as u64 + 32);
+        let storage = Factory::storage_cost(&a);
+        testing_env!(ctx.predecessor_account_id(accounts(0)).attached_deposit(storage).build());
+        f.create_reserved_token(a, "treasury.near".parse().unwrap());
     }
 
     #[test]

@@ -1,0 +1,13 @@
+{
+  "name": "LumosCore",
+  "symbol": "LUMOS",
+  "decimals": 18,
+  "contract": "lumos.lumoscore.near",
+  "total_supply": "1000000000",
+  "description": "The native token of LumosCore, a multichain platform for token launches, DEX trading, liquidity and cross-chain transfers. LUMOS carries reduced trading fees for holders and is distributed to liquidity providers.",
+  "website": "https://lumoscore.com",
+  "icon": "https://lumoscore.com/assets/tokens/lumos.png",
+  "socials": {
+    "x": "https://x.com/LumosCore"
+  }
+}

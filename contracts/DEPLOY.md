@@ -3,8 +3,11 @@
 RAZA runs these himself, in his own terminal. Claude never handles the account's keys.
 
 Factory wasm: contracts/factory/target/near/lumoscore_factory.wasm
-sha256 42e4621719b89241c09aff9052b63af9e98f012873260ca64ace17d701c7101c (2026-10-22: 15/15 unit tests;
-testnet 19/19 public launch + 10/10 owner-only reserved launch, on the same wasm)
+sha256 5a4c4b7f4a45be161ed581a4acab42b0b995496c1f48ce072e3c66aea1d711dd, 338,082 bytes (2026-11-04: 20/20 unit
+tests). Changed from the 2026-10-22 build (42e46217…, testnet 19/19 + 10/10) in two ways, both RAZA's:
+- `token` is a reserved prefix: token.lumoscore.near would read as LumosCore's own token.
+- TokenArgs takes optional `reference` + `reference_hash` (NEP-148): an https URL to a JSON of off-chain details
+  and the sha256 of that file, which the token contract requires together. NOT re-run on testnet since.
 
 Init args (factory-init-args.json):
 - owner_id     lumoscore.near        (may call set_min_fee / set_fee_account / set_paused / set_owner,
@@ -12,8 +15,8 @@ Init args (factory-init-args.json):
 - fee_account  fees-lumoscore.near
 - min_fee      0.5 NEAR              floor for direct contract calls; the page charges max(min_fee, $5 in NEAR)
 
-1. Fund lumoscore.near with ~4 NEAR (≈3.24 locked for code storage, ~0.3 spare for instant refunds, rest gas).
-   Below ~3.35 NEAR the deploy itself fails. If a failed launch ever finds the spare short, refund by hand
+1. Fund lumoscore.near with ~4.2 NEAR (≈3.38 locked for code storage, ~0.3 spare for instant refunds, rest gas).
+   Below ~3.5 NEAR the deploy itself fails. If a failed launch ever finds the spare short, refund by hand
    with lumoscore.near's full-access key (the page pre-checks the name, so failures should be rare).
 2. Give the CLI a key for lumoscore.near (interactive; your seed phrase or wallet login stays on this PC):
    near account import-account network-config mainnet
@@ -26,15 +29,20 @@ Init args (factory-init-args.json):
 factory's owner can mint it, through create_reserved_token, as `lumos.lumoscore.near`: the same fixed-supply,
 keyless token as any launch, no LumosCore fee, supply sent to the account named in owner_id.
 
-lumos-mint-args.json holds the arguments. TWO VALUES ARE RAZA'S DECISION — edit them before minting:
-- owner_id      the treasury that receives the whole supply (placeholder REPLACE-WITH-TREASURY-ACCOUNT.near;
-                the call fails on it, so it cannot be minted by accident)
-- total_supply  1,000,000,000 LUMOS at 18 decimals as drafted (1e27 in base units); Stellar's LUMOS is 1B
+lumos-mint-args.json holds the arguments, all decided by RAZA (2026-11-04):
+- owner_id        treasury.lumoscore.near — create it from lumoscore.near BEFORE minting (step 4b)
+- total_supply    1,000,000,000 LUMOS at 18 decimals (1e27 in base units), as Stellar's LUMOS
+- reference       https://lumoscore.com/assets/tokens/lumos-near.json (description, website, logo, X)
+- reference_hash  3NuJheVBBJLsQGQ/usRjx2kyL6QeC9IScpUZmV0qJ8k= — sha256 of that file's exact 520 bytes. Stored in
+                  the token forever: the file can never be edited without breaking the match (.gitattributes keeps
+                  its bytes from line-ending conversion). It goes live on lumoscore.com with the NEAR release.
 Name LumosCore, symbol LUMOS, decimals 18, icon = lumos-icon.webp.txt (128px WebP, 7,991 chars, under the
 contract's 16 KB limit; sha256 a6ec9f04…bd81, made from /assets/tokens/lumos.png).
 
-4. Fund lumoscore.near with ~1.8 NEAR more (storage for the token account is 1.74461 NEAR; any excess of
-   the attached deposit over storage goes to fees-lumoscore.near).
+4. Fund lumoscore.near with ~1.8 NEAR more (storage for the token account is ~1.7455 NEAR with the reference;
+   any excess of the attached deposit over storage goes to fees-lumoscore.near).
+4b. Create the treasury (prints its new seed phrase once — write it down, then import it into a wallet):
+   near account create-account fund-myself treasury.lumoscore.near '0.5 NEAR' autogenerate-new-keypair print-to-terminal sign-as lumoscore.near network-config mainnet sign-with-keychain send
 5. Mint:
    near contract call-function as-transaction lumoscore.near create_reserved_token file-args C:/LumosCore-NEAR/contracts/lumos-mint-args.json prepaid-gas '150.0 Tgas' attached-deposit '1.75 NEAR' sign-as lumoscore.near network-config mainnet sign-with-keychain send
 6. Then in the build: set NEAR_LUMOS = 'lumos.lumoscore.near' in _tools/near-lumos.js (the one switch: card
