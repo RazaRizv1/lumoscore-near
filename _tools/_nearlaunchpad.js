@@ -44,15 +44,16 @@ const usdMatch = launchSrc.match(/var USD = \{ create: ([\d.]+), liq: ([\d.]+) \
 if (!usdMatch) { console.error('  ! could not read `var USD = { create, liq }` from browser/nearlaunch.js — aborting'); process.exit(1); }
 // TEST PRICING GUARD: a reduced price shipped by accident would charge cents for a $5 service with
 // nothing on the page to say so. Shouts on every build until the real numbers are back.
-if (usdMatch[1] !== '5' || usdMatch[2] !== '10') {
+if (usdMatch[1] !== '5' || usdMatch[2] !== '5') {
   console.warn('  ⚠ TEST PRICING ACTIVE: create $' + usdMatch[1] + ' / liquidity $' + usdMatch[2]
-    + ' — restore { create: 5, liq: 10 } in _tools/browser/nearlaunch.js before release');
+    + ' — restore { create: 5, liq: 5 } in _tools/browser/nearlaunch.js before release');
 }
 const money = (n) => '$' + (Number(n) % 1 === 0 ? String(Number(n)) : Number(n).toFixed(2));
-const COST_A = money(usdMatch[1]) + ' to create the token and ' + money(usdMatch[2])
-  + ' of starting liquidity that goes into your token\'s own pool, plus the storage deposit NEAR itself requires '
-  + 'for the token contract and the pool. You pay in NEAR at the live rate, and the exact total is shown '
-  + 'before you sign.';
+// A flat $25, as on Stellar (RAZA 2026-11-04): $5 creation, $10 of starting liquidity ($5 in NEAR plus $5 worth of
+// the new token), $10 for the pool and network. browser/nearlaunch.js USD_POOL tops the last line up to $10.
+const COST_A = 'A flat $25: ' + money(usdMatch[1]) + ' to create the token, $10 of starting liquidity (' + money(usdMatch[2])
+  + ' in NEAR plus ' + money(usdMatch[2]) + ' worth of your new token) and $10 for the pool and network. The NEAR part is paid at '
+  + 'the live rate, and the exact total is shown before you sign.';
 
 // #costTotal too: the phone's sticky summary bar carries the total as div.val#costTotal, outside both rules, so its
 // mock ("≈ $25") showed until the real figure replaced it (monitor bot, Launchpad mobile, since 2026-10-28).
@@ -79,13 +80,16 @@ const COPY = [
   // itself asks for, about $22 at the time of writing, and the cost panel prints the real figure.
   ['<h1>Launch <span class="hl">Your Token</span></h1>', '<h1>Launch a Token on <span class="hl">NEAR</span></h1>'],
   ['<p>Before creating a token, familiarize yourself with <a class="ui-link" href="#">how it works</a>.</p>',
-    '<p>Issue a NEAR token for $15 in NEAR plus network storage, with its first liquidity pool included. <a class="ui-link" href="#" data-lxlhiw>How it works</a>.</p>'],
+    '<p>Issue a NEAR token for a flat $25 in NEAR, with its first liquidity pool included. <a class="ui-link" href="#" data-lxlhiw>How it works</a>.</p>'],
   ['<h1 class="page-title">Launch <span class="hl">Your Token</span></h1>', '<h1 class="page-title">Launch a Token on <span class="hl">NEAR</span></h1>'],
   ['<p class="page-sub">Familiarize yourself with <a href="#">how it works</a> before creating.</p>',
-    '<p class="page-sub">Issue a NEAR token for $15 in NEAR plus network storage, with its first liquidity pool included. <a class="ui-link" href="#" data-lxlhiw>How it works</a>.</p>'],
+    '<p class="page-sub">Issue a NEAR token for a flat $25 in NEAR, with its first liquidity pool included. <a class="ui-link" href="#" data-lxlhiw>How it works</a>.</p>'],
   // The containers keep the previous run's subtitle (2026-11-03, before the How it works link): bring it forward.
-  ['<p>Issue a NEAR token for $15 in NEAR plus network storage, with its first liquidity pool included.</p>', '<p>Issue a NEAR token for $15 in NEAR plus network storage, with its first liquidity pool included. <a class="ui-link" href="#" data-lxlhiw>How it works</a>.</p>'],
-  ['<p class="page-sub">Issue a NEAR token for $15 in NEAR plus network storage, with its first liquidity pool included.</p>', '<p class="page-sub">Issue a NEAR token for $15 in NEAR plus network storage, with its first liquidity pool included. <a class="ui-link" href="#" data-lxlhiw>How it works</a>.</p>'],
+  ['<p>Issue a NEAR token for $15 in NEAR plus network storage, with its first liquidity pool included.</p>', '<p>Issue a NEAR token for a flat $25 in NEAR, with its first liquidity pool included. <a class="ui-link" href="#" data-lxlhiw>How it works</a>.</p>'],
+  ['<p class="page-sub">Issue a NEAR token for $15 in NEAR plus network storage, with its first liquidity pool included.</p>', '<p class="page-sub">Issue a NEAR token for a flat $25 in NEAR, with its first liquidity pool included. <a class="ui-link" href="#" data-lxlhiw>How it works</a>.</p>'],
+  // The flat $25 (RAZA 2026-11-04): pages built before it carry the $15 line; bring it forward.
+  ['<p>Issue a NEAR token for $15 in NEAR plus network storage, with its first liquidity pool included. <a class="ui-link" href="#" data-lxlhiw>How it works</a>.</p>', '<p>Issue a NEAR token for a flat $25 in NEAR, with its first liquidity pool included. <a class="ui-link" href="#" data-lxlhiw>How it works</a>.</p>'],
+  ['<p class="page-sub">Issue a NEAR token for $15 in NEAR plus network storage, with its first liquidity pool included. <a class="ui-link" href="#" data-lxlhiw>How it works</a>.</p>', '<p class="page-sub">Issue a NEAR token for a flat $25 in NEAR, with its first liquidity pool included. <a class="ui-link" href="#" data-lxlhiw>How it works</a>.</p>'],
   // The base this fork copies still carries an earlier run's ticker line; Stellar's words again (see nearlaunch.js).
   ['2-12 letters or digits, starting with a letter', '2-6 uppercase letters'],
   ['Once your token is minted on the Stellar network,', 'Once your token is minted on NEAR,'],

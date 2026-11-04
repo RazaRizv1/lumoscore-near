@@ -70,9 +70,9 @@ const STEPS = [
   ['Set it up',
    'Name, ticker, logo, and how much of the supply you keep &#8212; up to 30%. The rest goes into the '
    + 'pool.'],
-  ['Pay in NEAR',
-   '$5 to create the token and $10 of liquidity, plus the storage NEAR charges for the token and its '
-   + 'pool. Paid in NEAR at the current rate; the total is shown before you sign.'],
+  ['Pay $25',
+   '$5 to create the token, $10 of liquidity ($5 in NEAR plus $5 worth of your new token), $10 for the pool '
+   + 'and network. The NEAR part is paid at the current rate.'],
   ['Your token goes live',
    'The supply is created, your share lands in your wallet, and the rest opens a pool so people can '
    + 'trade it straight away.'],

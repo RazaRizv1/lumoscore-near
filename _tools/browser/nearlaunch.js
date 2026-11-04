@@ -41,10 +41,23 @@
 
   // THE PRICES. Written as a literal on one line because _nearlaunchpad.js parses this exact line to write
   // the mint-cost FAQ and its FAQPage structured data, so the copy cannot quote a price the page does
-  // not charge. Its TEST PRICING guard shouts on every build if these are not { create: 5, liq: 10 }.
-  var USD_REAL = { create: 5, liq: 10 };
-  var USD = { create: 5, liq: 10 };
+  // not charge. Its TEST PRICING guard shouts on every build if these are not { create: 5, liq: 5 }.
+  // liq is the NEAR side of the starting pool: $5 (RAZA 2026-11-04: "its $5 in near and $5 in token itself for
+  // liquidity"). The token side is the launcher's share of the new supply, worth $5 at the opening price by
+  // construction (the pool's price IS NEAR deposited / tokens deposited), so the pool opens holding $10.
+  var USD_REAL = { create: 5, liq: 5 };
+  var USD = { create: 5, liq: 5 };
   var TEST_PRICING = USD.create !== USD_REAL.create || USD.liq !== USD_REAL.liq;
+  // A FLAT $25, AS ON STELLAR AND XRPL (RAZA 2026-11-04: "Yes, flat $25"): $5 creation + $10 liquidity + $10
+  // for the pool and network. NEAR's own storage for the token and pool costs less than $10 (about $6.70 at
+  // $4.31/NEAR), and the difference rides in the creation deposit, which the factory forwards to the fee
+  // account above storage exactly as it does the $5. If storage alone ever costs more than $10 (NEAR above
+  // roughly $5.75), nothing is added and the real, higher figure is charged and shown -- never less than cost.
+  var USD_POOL = 10;
+  // The LIQUIDITY LINE is $10 too (RAZA 2026-11-04: "the launcher still pays $25", "anything extra will be used
+  // as revenue"): $5 of it is the NEAR that goes into the pool (USD.liq), the other $5 joins the creation
+  // deposit and reaches the fee account with the rest of the revenue.
+  var USD_LIQ_LINE = 10;
 
   // ---- storage, measured rather than guessed (2026-10-21) ---------------------------------------------
   // NEAR charges 1e19 yocto (0.00001 NEAR) per byte of storage.
@@ -230,7 +243,6 @@
       storage = (BigInt(bytes) * BYTE).toString();
     }
     var usdFee = nearToYocto(USD.create / rate);
-    var fee = cfg ? maxBig(usdFee, cfg.min_fee) : usdFee;
     var extra = Number(d.extra) > 0 ? Number(d.extra) : 0;
     var liq = nearToYocto(USD.liq / rate + extra);
     var refAcct = ex.refAcct == null ? REF_ACCOUNT_NEW : String(ex.refAcct);
@@ -238,12 +250,22 @@
     var tokenReg = ex.tokenReg == null ? FT_REG_EST : String(ex.tokenReg);
     var rhea = (big(refAcct) + big(REF_POOL_DEPOSIT) + big(REF_LIQ_DEPOSIT) + big(LOCK_REG_DEPOSIT) + big(tokenReg) + big(wrapReg)).toString();
     var network = (big(storage) + big(rhea)).toString();
+    // The flat $25 (USD_POOL above): what the pool-and-network line falls short of $10 is added to the fee.
+    var poolFloor = big(nearToYocto(USD_POOL / rate));
+    var topUp = poolFloor > big(network) ? (poolFloor - big(network)) : BigInt(0);
+    // ...and what the liquidity line charges above the NEAR the pool receives (USD_LIQ_LINE above).
+    var liqRev = big(nearToYocto(Math.max(0, USD_LIQ_LINE - USD.liq) / rate));
+    var fee = (big(usdFee) + topUp + liqRev).toString();
+    if (cfg) fee = maxBig(fee, cfg.min_fee);
     var createDeposit = (big(storage) + big(fee)).toString();
     var total = (big(fee) + big(liq) + big(network)).toString();
     return {
       args: a, tokenId: tokenIdOf(d.ticker), storage: storage, fee: fee, createDeposit: createDeposit,
       liq: liq, poolRaw: poolRawOf(d), refAcct: refAcct, wrapReg: wrapReg, tokenReg: tokenReg,
-      rhea: rhea, network: network, total: total, rate: rate
+      rhea: rhea, network: network, total: total, rate: rate,
+      // What the cost panel shows on its three lines: $5 creation, $10 liquidity, $10 pool & network.
+      showCreate: (big(fee) - topUp - liqRev).toString(), showLiq: (big(liq) + liqRev).toString(),
+      showPool: (big(network) + topUp).toString()
     };
   }
 
@@ -292,9 +314,9 @@
   function paintCosts() {
     if (!(panel.rate > 0)) return;
     var p = costPlan(currentDraft(), panel.rate, panel.ex);
-    setCost('create', p.fee, panel.rate);
-    setCost('liq', p.liq, panel.rate);
-    setCost('pool', p.network, panel.rate);
+    setCost('create', p.showCreate, panel.rate);
+    setCost('liq', p.showLiq, panel.rate);
+    setCost('pool', p.showPool, panel.rate);
     setCost('total', p.total, panel.rate);
     L.lastPlan = p;
     // SHOWN ONLY ONCE THE FACTORY HAS ANSWERED (or refused): lifting on the price alone shows the estimate and
