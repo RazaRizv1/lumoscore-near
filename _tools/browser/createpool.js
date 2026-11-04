@@ -651,7 +651,27 @@
         var ids = (p.tokens || []).map(function (t) { return t.i; });
         return ids.length === 2 && ids.indexOf(ta) >= 0 && ids.indexOf(tb) >= 0;
       }).sort(function (x, y) { return (y.liq || 0) - (x.liq || 0); })[0];
-      return hit ? Number(hit.id) : null;
+      if (hit) return Number(hit.id);
+      // AN EMPTY POOL IS REUSED, never duplicated (RAZA 2026-11-04: LUMOS/wNEAR 8998 was created, the liquidity
+      // step failed, and a retry would have created a second empty pool, because the list above only carries
+      // pools with liquidity). An EMPTY pool at the normal fee is the one case the trap described above cannot
+      // be: with no reserves, the first deposit sets the price itself, and a fee above normal is refused.
+      return findEmptyPool(ta, tb);
+    }, function () { return undefined; });
+  }
+  function findEmptyPool(ta, tb) {
+    return C().callView(REF, 'get_number_of_pools', {}).then(function (n) {
+      n = Number(n) || 0;
+      if (n <= 0) return null;
+      var from = Math.max(0, n - 300);
+      return C().callView(REF, 'get_pools', { from_index: from, limit: n - from }).then(function (ps) {
+        for (var i = (ps || []).length - 1; i >= 0; i--) {
+          var p = ps[i], t = (p && p.token_account_ids) || [];
+          if (p.pool_kind === 'SIMPLE_POOL' && t.length === 2 && t.indexOf(ta) >= 0 && t.indexOf(tb) >= 0
+            && Number(p.total_fee) === POOL_FEE_BPS && String(p.shares_total_supply) === '0') return from + i;
+        }
+        return null;
+      });
     }, function () { return undefined; });
   }
 
