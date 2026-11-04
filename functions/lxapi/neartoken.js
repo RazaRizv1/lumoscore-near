@@ -35,7 +35,7 @@ const KEEP = 86400;
 const WNEAR = 'wrap.near';
 const RPC = 'https://free.rpc.fastnear.com';
 const PAIRS = 'https://api.dexscreener.com/token-pairs/v1/near/';
-const VER = 'v5';   // v2: web, x, desc; v3: curated logo first (2026-10-29); v5: own pools (2026-11-04)
+const VER = 'v6';   // v2: web, x, desc; v3: curated logo first (2026-10-29); v5: own pools; v6: their count (2026-11-04)
 
 // NEAR account-id rules (nomicon): 2-64 chars, lowercase alphanumerics separated by single - _ or .,
 // no leading/trailing separator. Implicit accounts (64 hex) and eth-implicit (0x + 40 hex) satisfy
@@ -257,7 +257,8 @@ async function build(id, context) {
     // live pools of it (556 counting empty ones). Curated tokens carry Rhea's counts, baked from both pool
     // contracts by _tools/_nearpoolcounts.js; any other token keeps DexScreener's figure, which the page marks
     // "30+" when it is the cap.
-    pools, poolCount: (cur && cur.pcl > 0) ? cur.pcl : own.length, poolTotal: (cur && cur.pc > 0) ? cur.pc : null,
+    // A pool read from the chain (ownPools) counts too: LUMOS read "Pools 0" above its own LUMOS/wNEAR row (2026-11-04).
+    pools, poolCount: (cur && cur.pcl > 0) ? cur.pcl : Math.max(own.length, pools.length), poolTotal: (cur && cur.pc > 0) ? cur.pc : null,
     poolCapped: !(cur && cur.pcl > 0) && own.length >= 30, logos,
     curated: !!cur, cg: (cur && cur.cg) || '', web, x, desc: DESC[id] || '',
     lock: { keys, locked: keys == null ? null : (keys > 0 ? false : null) },

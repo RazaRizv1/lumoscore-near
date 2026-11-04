@@ -89,6 +89,22 @@
     n.textContent = text || '';
     n.style.display = text ? '' : 'none';
   }
+  // A plain note above the button, in the pane's own soft text -- not the red .lxda-swaperr, which is for errors.
+  function info(p, text) {
+    var b = cta(p);
+    if (!b || !b.parentNode) return;
+    var n = $('.lxlim-info', p);
+    if (!n) {
+      if (!text) return;
+      n = document.createElement('div');
+      n.className = 'lxlim-info';
+      n.setAttribute('data-logoed', '1');
+      n.style.cssText = 'margin:0 0 10px;font:400 12.5px/1.5 "Hanken Grotesk",system-ui,sans-serif;color:var(--text-soft,#8a8fa3)';
+      b.parentNode.insertBefore(n, b);
+    }
+    if (n.textContent !== (text || '')) n.textContent = text || '';
+    n.style.display = text ? '' : 'none';
+  }
   function toast(text) { try { if (typeof window.lxToast === 'function') window.lxToast(text); } catch (e) {} }
 
   // ---- state --------------------------------------------------------------------------------------
@@ -135,9 +151,8 @@
     else if (cp) label = 'Create order-book pool';
     else if (!pool) label = NOPOOL;
     else label = 'Place Limit Order';                               // Stellar's wording, either side
-    if (cp && !busy) say(p, 'This token has no order-book pool yet, so limit orders have nowhere to rest. Creating one costs '
-      + '0.1 NEAR (plus 0.00125 NEAR to register the pool on the token, if needed) and opens it at '
-      + fmt(cp.opensAt, 8) + ' NEAR per ' + code() + ', the current price.');
+    info(p, cp ? code() + ' has no order-book pool yet. Creating one costs about 0.1 NEAR and opens it at '
+      + fmt(cp.opensAt, 8) + ' NEAR, the current price.' : '');
     // lx-gate saved the design's label before this ran and restores data-lxorig on connect.
     b.setAttribute('data-lxorig', label);
     b.setAttribute('data-lxdis', on ? '0' : '1');
@@ -419,7 +434,7 @@
       D().forget(a.id);
       pool = undefined;
       stop('');
-      say(p, '');
+      info(p, '');
       toast('Order-book pool created for ' + code() + ' at ' + fmt(cp.opensAt, 8) + ' NEAR');
       paint();
       return D().poolFor(a.id).then(function (pl) { pool = pl; paint(); load(); try { if (window.__lxnBookReload) window.__lxnBookReload(); } catch (e) {} });

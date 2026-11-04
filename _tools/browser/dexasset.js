@@ -1493,10 +1493,14 @@
       })
       .catch(function (e) {
         if (gen !== chGen) return;
-        var hopeless = /no wNEAR pool|NEAR in NEAR|no token|short|empty/.test(String((e && e.message) || ''));
+        // A 404 is GeckoTerminal saying it has never seen the pool (RAZA 2026-11-04: LUMOS/wNEAR 9001, hours old,
+        // read "The price feed is busy — retrying…"). Retrying cannot change that, so it is said once, plainly.
+        var unknown = /^404$/.test(String((e && e.message) || ''));
+        var hopeless = unknown || /no wNEAR pool|NEAR in NEAR|no token|short|empty/.test(String((e && e.message) || ''));
         var at = attempt || 0;
         if (hopeless || at >= CH_RETRY.length) {
           if (want === '1D' && PERF.h1 === 'pending') { PERF.h1 = 'done'; paintPerf(LASTD); }
+          if (unknown && !lastRawPts) chartNote("No price history yet. This token's pool is too new for the chart's price feed.");
           if (!hopeless && !lastRawPts) chartNote('The price feed did not answer. Reload the page to try again.');
           return;
         }

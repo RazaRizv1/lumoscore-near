@@ -1084,7 +1084,8 @@
       return;
     }
     if (lim.pool === undefined) { limNote('Checking for a ' + pr.token.code + ' / NEAR pool…'); limSay(''); limGo(false, 'Place limit order'); return; }
-    if (lim.pool === null) { limNote(''); limSay(NOPOOL + ': there is no ' + pr.token.code + ' / NEAR pool.'); limGo(false, 'Place limit order'); return; }
+    // A classic pool is not an order-book pool: "there is no LUMOS / NEAR pool" read false beside LUMOS/wNEAR 9001 (RAZA 2026-11-04).
+    if (lim.pool === null) { limNote(''); limSay(pr.token.code + ' has no order-book pool yet, so limit orders have nowhere to rest. Its Trade page can create one (Limit tab).'); limGo(false, 'Place limit order'); return; }
 
     // The tick the order really rests at, and -- since NEAR limit orders carry the LumosCore fee (RAZA
     // 2026-11-01; neardcl.js) -- what that fee is, because it comes on top of the amount typed.
