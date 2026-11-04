@@ -117,14 +117,27 @@
   }
 
   // ---- the button ---------------------------------------------------------------------------------
+  // A TOKEN WITH NO ORDER-BOOK POOL CAN BE GIVEN ONE (RAZA 2026-11-04, LUMOS: "Also fix limit and orderbook tabs"
+  // -> "yes"). Only when the page has a price for it: the pool opens at that price (neardcl.js planCreate), so a
+  // token without one keeps NOPOOL rather than inviting a guessed opening price.
+  function createPlan() {
+    var d = window.__lxnAssetData, a = asset();
+    if (pool !== null || poolErr || !a || dec == null || !(d && d.price > 0)) return null;
+    try { return D().planCreate(a.id, dec, +d.price); } catch (e) { return null; }
+  }
   function setCta(p) {
     var b = cta(p);
     if (!b) return;
-    var on = !!pool, label;
+    var cp = createPlan();
+    var on = !!pool || !!cp, label;
     if (pool === undefined && !poolErr) label = 'Checking for an order-book pool…';
     else if (poolErr) label = 'Could not reach the order book — reload to try again';
+    else if (cp) label = 'Create order-book pool';
     else if (!pool) label = NOPOOL;
     else label = 'Place Limit Order';                               // Stellar's wording, either side
+    if (cp && !busy) say(p, 'This token has no order-book pool yet, so limit orders have nowhere to rest. Creating one costs '
+      + '0.1 NEAR (plus 0.00125 NEAR to register the pool on the token, if needed) and opens it at '
+      + fmt(cp.opensAt, 8) + ' NEAR per ' + code() + ', the current price.');
     // lx-gate saved the design's label before this ran and restores data-lxorig on connect.
     b.setAttribute('data-lxorig', label);
     b.setAttribute('data-lxdis', on ? '0' : '1');
@@ -387,6 +400,35 @@
     return '';
   }
 
+  // The pool, created in the connected wallet; then the pane asks the chain for it again and becomes a normal Limit pane.
+  function createPool(p) {
+    if (busy) return;
+    var cp = createPlan(), who = me(), a = asset(), b = cta(p), label = b ? b.textContent : '';
+    if (!cp) return;
+    if (!who) { say(p, 'Connect a NEAR wallet first.'); return; }
+    busy = true;
+    if (b) { b.textContent = 'Checking…'; b.classList.add('lx-btnload'); }
+    function stop(text) { busy = false; if (b) { b.textContent = label; b.classList.remove('lx-btnload'); } setCta(p); if (text) say(p, text); }
+    D().buildCreate(who, cp).then(function (txs) {
+      window.__lxnLastCreate = { plan: cp, txs: txs };
+      if (b) b.textContent = 'Confirm in wallet…';
+      return D().sign(txs);
+    }).then(function (res) {
+      var last = res && res[res.length - 1], st = last && last.status;
+      if (st && st.Failure) { stop('Creating the pool failed on chain. Check your wallet activity.'); return; }
+      D().forget(a.id);
+      pool = undefined;
+      stop('');
+      say(p, '');
+      toast('Order-book pool created for ' + code() + ' at ' + fmt(cp.opensAt, 8) + ' NEAR');
+      paint();
+      return D().poolFor(a.id).then(function (pl) { pool = pl; paint(); load(); try { if (window.__lxnBookReload) window.__lxnBookReload(); } catch (e) {} });
+    }).catch(function (e) {
+      var m = (e && e.message) || '';
+      stop(e && e.lxnWallet ? D().walletErr(e, 'created') : (m || 'The pool could not be created.'));
+    });
+  }
+
   function place(p) {
     if (busy) return;
     var o = current(p), msg = validate(p, o);
@@ -457,6 +499,7 @@
       e.preventDefault();
       e.stopImmediatePropagation();
       if (b.disabled) return;
+      if (!pool && createPlan()) { createPool(p); return; }
       place(p);
     }, true);
     // Typing is claimed at the pane, so the design's own handler cannot write its mock total after ours.

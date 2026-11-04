@@ -276,6 +276,42 @@
       });
     }); });
   }
+  // ---- creating a token's order-book pool ----------------------------------------------------------------
+  // RAZA 2026-11-04 ("Also fix limit and orderbook tabs" -> "yes"): LUMOS had a classic pool and no DCL pool, so
+  // its Limit pane could only say NOPOOL. DCL pools are open to anyone (6,412 of them, two operators). Rhea's own
+  // app (ref-ui src/services/swapV3.ts create_pool) sends, in order:
+  //   * storage_deposit on each token the DCL contract is not registered on (registration_only, the token's min)
+  //   * create_pool {token_a, token_b, fee, init_point} on dclv2, 0.1 NEAR attached, 180 TGas
+  // The pool opens at the token's CURRENT price, never a typed one: init_point is a point where "1 raw token_x =
+  // 1.0001^p raw token_y", token_x being the first of the two ids sorted -- the order the pool id names them in.
+  var CREATE_FEE = 2000;                                     // 0.2%, the tier Rhea's main wNEAR pools use (USDC|wrap.near|2000)
+  var CREATE_DEPOSIT = '100000000000000000000000';           // 0.1 NEAR, Rhea's own create_pool deposit
+  function planCreate(token, dec, priceNear) {
+    if (!(priceNear > 0) || dec == null) throw new Error('This token has no price to open an order-book pool at.');
+    var ids = [token, WNEAR].sort(), x = ids[0], y = ids[1];
+    var decX = x === WNEAR ? 24 : +dec, decY = y === WNEAR ? 24 : +dec;
+    var px = x === token ? priceNear : 1 / priceNear;          // token_x priced in token_y, human units
+    var point = getPointByPrice(feeToPointDelta(CREATE_FEE), px, Math.pow(10, decY) / Math.pow(10, decX));
+    var at = pointToPrice(decX, decY, point);                  // what the pool will actually open at
+    return { x: x, y: y, fee: CREATE_FEE, point: point, pool: poolIdFor(x, y, CREATE_FEE),
+      opensAt: x === token ? at : 1 / at, deposit: CREATE_DEPOSIT };
+  }
+  // The transactions for plan c, after reading which tokens still need DCL registered on them.
+  function buildCreate(me, c) {
+    return Promise.all([c.x, c.y].map(function (t) {
+      return storageOf(t, DCL).then(function (s) { return s ? null : storageMin(t).then(function (m) { return { t: t, m: m }; }); });
+    })).then(function (regs) {
+      var txs = [];
+      regs.forEach(function (r) {
+        if (r) txs.push({ signerId: me, receiverId: r.t, actions: [fc('storage_deposit', { account_id: DCL, registration_only: true }, GAS_REG, r.m)] });
+      });
+      txs.push({ signerId: me, receiverId: DCL, actions: [fc('create_pool', { token_a: c.x, token_b: c.y, fee: c.fee, init_point: c.point }, 180, c.deposit)] });
+      return txs;
+    });
+  }
+  // A pool answer kept for the page session is dropped, so the next poolFor asks the chain again.
+  function forget(token) { delete POOL[token]; }
+
   // Is this account registered on the DCL contract? true / false, or rejects when it could not ask.
   function registered(me) { return storageOf(DCL, me).then(function (s) { return !!s; }); }
 
@@ -487,6 +523,7 @@
     DCL: DCL, WNEAR: WNEAR, FEES: FEES, ORDER_STORAGE: ORDER_STORAGE, STORAGE_TOPUP: STORAGE_TOPUP,
     feeToPointDelta: feeToPointDelta, getPointByPrice: getPointByPrice, priceToPoint: priceToPoint, pointToPrice: pointToPrice,
     poolIdFor: poolIdFor, splitPool: splitPool, poolFor: poolFor, tokenPriceAt: tokenPriceAt,
+    planCreate: planCreate, buildCreate: buildCreate, forget: forget,
     plan: plan, msgFor: msgFor, prereqs: prereqs, registered: registered, buildPlace: buildPlace,
     activeOrders: activeOrders, getOrder: getOrder, buildCancel: buildCancel,
     sign: sign, walletErr: walletErr, verdict: verdict, book: book, bookFrom: bookFrom,

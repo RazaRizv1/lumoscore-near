@@ -28,13 +28,14 @@
 // Subrequests per miss: market (0 when warm, 4 cold) + 1 DexScreener + 3 RPC = at most 8.
 import { CURATED } from './_nearcurated.js';
 import { marketBody } from './nearmarket.js';
+import { ownPools, ownLiquidity } from './_nearownpools.js';
 
 const TTL = 120;
 const KEEP = 86400;
 const WNEAR = 'wrap.near';
 const RPC = 'https://free.rpc.fastnear.com';
 const PAIRS = 'https://api.dexscreener.com/token-pairs/v1/near/';
-const VER = 'v4';   // v2: web, x, desc; v3: curated logo first (2026-10-29)
+const VER = 'v5';   // v2: web, x, desc; v3: curated logo first (2026-10-29); v5: own pools (2026-11-04)
 
 // NEAR account-id rules (nomicon): 2-64 chars, lowercase alphanumerics separated by single - _ or .,
 // no leading/trailing separator. Implicit accounts (64 hex) and eth-implicit (0x + 40 hex) satisfy
@@ -111,6 +112,9 @@ function xHref(u) {
 const DESC = {
   // Circle's native USDC on NEAR (Stellar: GA5Z...KZVN, desc from circle.com's stellar.toml).
   '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1': 'USDC is a fully collateralized US Dollar stablecoin.',
+  // LumosCore's own token: the description its NEP-148 reference publishes (assets/tokens/lumos-near.json).
+  'lumos.lumoscore.near': 'The native token of LumosCore, a multichain platform for token launches, DEX trading, liquidity and '
+    + 'cross-chain transfers. LUMOS carries reduced trading fees for holders and is distributed to liquidity providers.',
 };
 
 // Plain text, bounded: names and symbols are whatever the contract's deployer chose.
@@ -138,12 +142,13 @@ function usdOf(p, id) {
 
 async function build(id, context) {
   const cur = CURATED.find((c) => c.i === id) || null;
-  const [market, pairsRaw, meta, supplyRaw, keys] = await Promise.all([
+  const [market, pairsRaw, meta, supplyRaw, keys, ownP] = await Promise.all([
     marketBody(context).catch(() => null),
     getJson(PAIRS + encodeURIComponent(id), null, 6000).catch(() => null),
     view(id, 'ft_metadata'),
     view(id, 'ft_total_supply'),
     fullAccessKeys(id),
+    cur && cur.pool != null ? ownPools(context).catch(() => []) : [],
   ]);
   const pairs = Array.isArray(pairsRaw) ? pairsRaw : null;
   let partial = !pairs || !meta.ok || !supplyRaw.ok || keys == null;
@@ -230,6 +235,18 @@ async function build(id, context) {
         url: /^https:\/\/dexscreener\.com\//.test(String(p.url || '')) ? String(p.url) : '',
       };
     });
+  // The token's own pool (_nearownpools.js) when DexScreener does not list it yet: its reserves from the chain.
+  for (const o of ownP) {
+    const ids = o.token_account_ids || [];
+    if (ids.indexOf(id) < 0 || pools.some((p) => p.id === 'refv1-' + o.id)) continue;
+    const other = ids.find((t) => t !== id) || '', oc = CURATED.find((x) => x.i === other);
+    const ln = ownLiquidity([o])[id];
+    pools.unshift({ pair: symbol + ' / ' + (other === WNEAR ? 'wNEAR' : clean(oc && oc.s, 24)),
+      base: { i: id, s: symbol }, quote: { i: other, s: other === WNEAR ? 'wNEAR' : clean(oc && oc.s, 24) },
+      dex: 'ref', liqUsd: ln != null && nearUsd ? ln * nearUsd : 0, volUsd: 0, liq: ln != null ? ln : null, vol: 0,
+      id: 'refv1-' + o.id, url: '' });
+    if (logos[id] === undefined) logos[id] = logo;
+  }
   for (const k of Object.keys(logos)) if (!logos[k]) delete logos[k];
 
   const body = {

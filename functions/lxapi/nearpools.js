@@ -24,8 +24,9 @@
 //
 // Cached like nearmarket: versioned key, 2 minutes fresh, last good kept a day, failures never cached.
 import { CURATED } from './_nearcurated.js';
+import { ownPools, ownPrices } from './_nearownpools.js';
 
-const TTL = 120, KEEP = 86400, VER = 'v2';
+const TTL = 120, KEEP = 86400, VER = 'v3';   // v3: LumosCore's own pools joined (2026-11-04)
 const WNEAR = 'wrap.near';
 const POOLS = 'https://indexer.ref.finance/list-top-pools';
 const PRICES = 'https://indexer.ref.finance/list-token-price';
@@ -51,8 +52,11 @@ async function getJson(u, ms) {
 }
 const num = (v) => { const n = Number(v); return isFinite(n) ? n : null; };
 
-async function build() {
-  const [pools, prices] = await Promise.all([getJson(POOLS, 8000), getJson(PRICES, 6000)]);
+async function build(context) {
+  const [pools, prices, own] = await Promise.all([getJson(POOLS, 8000), getJson(PRICES, 6000), ownPools(context).catch(() => [])]);
+  // LumosCore's own pools join the list where Rhea's lacks them, and price their token if Rhea has not (_nearownpools.js).
+  if (Array.isArray(pools)) for (const o of own) if (!pools.some((p) => String(p.id) === o.id)) pools.push(o);
+  ownPrices(own, prices);
   const nearUsd = num((prices[WNEAR] || {}).price);
   if (!(nearUsd > 0)) throw new Error('no NEAR price');
   if (!Array.isArray(pools) || !pools.length) throw new Error('rhea: no pools');
@@ -127,8 +131,10 @@ async function allPools(context) {
   const key = new Request('https://lumoscore.internal/lxapi/nearpools/' + VER + '/all');
   const hit = await caches.default.match(key);
   if (hit) return hit.json();
-  const [pools, prices] = await Promise.all([getJson(POOLS, 12000), getJson(PRICES, 6000)]);
+  const [pools, prices, own] = await Promise.all([getJson(POOLS, 12000), getJson(PRICES, 6000), ownPools(context).catch(() => [])]);
   if (!Array.isArray(pools) || !pools.length) throw new Error('rhea: no pools');
+  for (const o of own) if (!pools.some((p) => String(p.id) === o.id)) pools.push(o);
+  ownPrices(own, prices);
   const px = {};
   for (const t in prices) { const p = num((prices[t] || {}).price), d = num((prices[t] || {}).decimal); if (p != null) px[t] = [p, d]; }
   const all = { px, pools: pools.filter((p) => p && /^\d+$/.test(String(p.id)) && Array.isArray(p.token_account_ids)).map((p) => ({
@@ -250,7 +256,7 @@ export async function onRequestGet(context) {
   if (hit) body = await hit.json();
   else {
     try {
-      body = await build();
+      body = await build(context);
       const put = (req, ttl) => cache.put(req, new Response(JSON.stringify(body), {
         headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=' + ttl } }));
       context.waitUntil(Promise.all([put(fresh, TTL), put(kept, KEEP)]));

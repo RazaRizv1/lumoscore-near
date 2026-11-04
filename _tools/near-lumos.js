@@ -10,4 +10,7 @@
 //
 // Rebuild with `node _tools/rebuild.js` after changing it. Check the result on the token page before shipping:
 // the discount pieces were Stellar's and have only been seen running on NEAR with the tier switched off.
-module.exports = { NEAR_LUMOS: 'lumos.lumoscore.near' };   // minted 2026-11-04, verified on chain
+// NEAR_LUMOS_POOL: LUMOS's own LUMOS/wNEAR pool on Rhea (created by treasury.lumoscore.near 2026-11-04). Until Rhea's
+// indexer lists and prices it, the market, pool list, swap routing and token page read it from the chain through
+// functions/lxapi/_nearownpools.js.
+module.exports = { NEAR_LUMOS: 'lumos.lumoscore.near', NEAR_LUMOS_POOL: 9001 };   // minted 2026-11-04, verified on chain

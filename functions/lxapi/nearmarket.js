@@ -24,6 +24,7 @@
 // asset against its main market), not a sum over every pool. 24h change is reported only when the token
 // is the BASE of that pair, since that is the side the change describes; otherwise null, not a guess.
 import { CURATED } from './_nearcurated.js';
+import { ownPools, ownPrices, ownLiquidity } from './_nearownpools.js';
 
 const TTL = 120;                        // seconds a fresh answer is served from cache
 const KEEP = 86400;                     // seconds the last good answer survives as a fallback
@@ -53,8 +54,11 @@ async function getJson(u, ms) {
   } finally { clearTimeout(t); }
 }
 
-async function build() {
-  const prices = await getJson(PRICES);
+async function build(context) {
+  const [prices, own] = await Promise.all([getJson(PRICES), ownPools(context).catch(() => [])]);
+  // A curated token Rhea has not priced yet is priced by its own pool (_nearownpools.js: LUMOS, 2026-11-04).
+  ownPrices(own, prices);
+  const ownLiq = ownLiquidity(own);
   const nearUsd = +((prices[WNEAR] || {}).price || 0);
   if (!(nearUsd > 0)) throw new Error('no NEAR price');
 
@@ -96,7 +100,7 @@ async function build() {
     if (c.i === WNEAR) continue;                       // NEAR is the unit, not a row
     const usd = +((prices[c.i] || {}).price || 0);
     if (!(usd > 0)) continue;                          // no live price: not listed rather than $0
-    const s = agg[c.i] || { v: 0, t: 0, x: 0, d: null };
+    const s = agg[c.i] || { v: 0, t: ownLiq[c.i] != null ? ownLiq[c.i] * nearUsd : 0, x: 0, d: null };
     const p = usd / nearUsd;
     rows.push({ i: c.i, n: c.s, nm: c.n, logo: c.logo || '', st: c.st ? 1 : 0, vf: 1, dc: c.d,
       p, d: s.d, v: s.v / nearUsd, t: s.t / nearUsd, x: s.x, cg: c.cg || '', hi: null, lo: null,
@@ -115,15 +119,15 @@ export async function marketBody(context) {
   const cache = caches.default;
   // The cache outlives a deployment, so the key carries the answer's SHAPE version: a new deploy that
   // changes what a row holds must not serve the previous version's answer for two minutes. Bump it
-  // whenever the row shape changes (v3: rows carry cg; history is fetched by the page).
-  const fresh = new Request('https://lumoscore.internal/lxapi/nearmarket/v5/fresh');
-  const kept = new Request('https://lumoscore.internal/lxapi/nearmarket/v5/kept');
+  // whenever the row shape changes (v3: rows carry cg; history is fetched by the page; v6: own-pool prices).
+  const fresh = new Request('https://lumoscore.internal/lxapi/nearmarket/v6/fresh');
+  const kept = new Request('https://lumoscore.internal/lxapi/nearmarket/v6/kept');
 
   const hit = await cache.match(fresh);
   if (hit) return await hit.json();
 
   try {
-    const body = await build();
+    const body = await build(context);
     const put = (req, ttl) => cache.put(req, new Response(JSON.stringify(body), {
       headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=' + ttl } }));
     context.waitUntil(Promise.all([put(fresh, TTL), put(kept, KEEP)]));
