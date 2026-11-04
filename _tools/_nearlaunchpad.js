@@ -49,11 +49,12 @@ if (usdMatch[1] !== '5' || usdMatch[2] !== '5') {
     + ' — restore { create: 5, liq: 5 } in _tools/browser/nearlaunch.js before release');
 }
 const money = (n) => '$' + (Number(n) % 1 === 0 ? String(Number(n)) : Number(n).toFixed(2));
-// A flat $25, as on Stellar (RAZA 2026-11-04): $5 creation, $10 of starting liquidity ($5 in NEAR plus $5 worth of
-// the new token), $10 for the pool and network. browser/nearlaunch.js USD_POOL tops the last line up to $10.
-const COST_A = 'A flat $25: ' + money(usdMatch[1]) + ' to create the token, $10 of starting liquidity (' + money(usdMatch[2])
-  + ' in NEAR plus ' + money(usdMatch[2]) + ' worth of your new token) and $10 for the pool and network. The NEAR part is paid at '
-  + 'the live rate, and the exact total is shown before you sign.';
+// A flat $25, as on Stellar (RAZA 2026-11-04): $5 creation, $10 for liquidity, $10 for the pool and network. The
+// pool opens with $5 of NEAR (usdMatch[2]) and $5 worth of the new token; the rest is LumosCore's. Worded so it does
+// not suggest the whole $10 goes into the pool. browser/nearlaunch.js USD_POOL / USD_LIQ_LINE set the $10 lines.
+const COST_A = 'A flat $25: ' + money(usdMatch[1]) + ' to create the token, $10 for liquidity and $10 for the pool and network, '
+  + 'paid in NEAR at the live rate. Your pool opens with ' + money(usdMatch[2]) + ' in NEAR and ' + money(usdMatch[2])
+  + ' worth of your new token, and the exact total is shown before you sign.';
 
 // #costTotal too: the phone's sticky summary bar carries the total as div.val#costTotal, outside both rules, so its
 // mock ("≈ $25") showed until the real figure replaced it (monitor bot, Launchpad mobile, since 2026-10-28).

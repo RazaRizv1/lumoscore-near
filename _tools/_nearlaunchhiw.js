@@ -71,8 +71,10 @@ const STEPS = [
    'Name, ticker, logo, and how much of the supply you keep &#8212; up to 30%. The rest goes into the '
    + 'pool.'],
   ['Pay $25',
-   '$5 to create the token, $10 of liquidity ($5 in NEAR plus $5 worth of your new token), $10 for the pool '
-   + 'and network. The NEAR part is paid at the current rate.'],
+   // RAZA 2026-11-04: worded so it does not suggest the whole $10 goes into the pool -- $5 of NEAR does, beside
+   // $5 worth of the new token; the rest of the $10 is LumosCore's (browser/nearlaunch.js USD_LIQ_LINE).
+   '$5 to create the token, $10 for liquidity and $10 for the pool and network, paid in NEAR at the current '
+   + 'rate. Your pool opens with $5 in NEAR and $5 worth of your new token.'],
   ['Your token goes live',
    'The supply is created, your share lands in your wallet, and the rest opens a pool so people can '
    + 'trade it straight away.'],
@@ -80,7 +82,7 @@ const STEPS = [
    'The supply is fixed forever &#8212; no more can ever be made.'],
 ];
 
-const NOTE = '<b>Your $10 of liquidity stays in the pool for good.</b> Nobody can take it out '
+const NOTE = '<b>Your pool&#8217;s starting liquidity stays in it for good.</b> Nobody can take it out '
   + '&#8212; not you, and not us. That is what stops a token launched here being rugged.';
 
 const TITLE = 'How a NEAR launch works';
