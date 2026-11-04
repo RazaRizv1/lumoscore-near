@@ -6,7 +6,7 @@
 // WHAT THE CONTRACT DOES (v2.3.15, checked 2026-10-21 against Rhea's own SDK -- github ref-finance/ref-sdk
 // src/dcl-swap/swap.ts + limit-order.ts + src/utils.ts -- and against real mainnet transactions):
 //   * PLACE = ft_transfer_call of the SELL token to dclv2.ref-labs.near, 1 yocto, 180 TGas, with msg
-//     {"LimitOrderWithSwap":{pool_id, buy_token, point, client_id:"", referral_id:""}}. A price that crosses
+//     {"LimitOrderWithSwap":{client_id:"", pool_id, buy_token, point}} (no referral_id: 2.4.1 rejects ""). . A price that crosses
 //     the pool swaps first and rests the remainder. ft_transfer_call returns the amount USED: "0" means the
 //     contract refused the order and the tokens came back.
 //   * Before it (separate transactions, SDK order): storage_deposit on the BUY token if the account is not
@@ -234,7 +234,11 @@
     };
   }
   function msgFor(o) {
-    return JSON.stringify({ LimitOrderWithSwap: { pool_id: o.pool, buy_token: o.buy, point: o.point, client_id: '', referral_id: '' } });
+    // NO referral_id (RAZA 2026-11-04, the first LUMOS sell order: dclv2 2.4.1 panicked "E600: invalid msg: the account
+    // ID is invalid" on "referral_id":"", refunded the tokens and kept nothing -- but the fee transfer before it in the
+    // same transaction had landed). Rhea's own app (ref-ui src/services/swapV3.ts) sends { client_id: '', pool_id,
+    // buy_token, point } and nothing else.
+    return JSON.stringify({ LimitOrderWithSwap: { client_id: '', pool_id: o.pool, buy_token: o.buy, point: o.point } });
   }
 
   function storageOf(contract, me) { return callView(contract, 'storage_balance_of', { account_id: me }); }
