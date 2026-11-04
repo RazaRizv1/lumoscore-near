@@ -35,7 +35,16 @@
   function fields(p) { return $$('[class*="dxa-trade-field"]', p); }
   function input(f) { return f ? $('input', f) : null; }
   function cta(p) { return $('[class*="dxa-trade-cta"]', p); }
-  function side(p) { return $('[class*="dxa-side-btn"].sell.active', p) ? 'sell' : 'buy'; }
+  // The side just clicked wins until the design's own handler has moved .active (RAZA 2026-11-04: Sell LUMOS read
+  // "Balance: 1.15545 NEAR" on the swap pane, whose pattern this shares). A real click runs the repaint microtask straight after this layer's capture listener,
+  // BEFORE the design's handler, so .active still named the old side and the NEAR balance was painted under Sell.
+  function side(p) { return p.__lxnSideNext || ($('[class*="dxa-side-btn"].sell.active', p) ? 'sell' : 'buy'); }
+  function claimSide(p, btn) {
+    // classList, not a /s/ regex: the build injects this file through a template literal, which drops the
+    // backslash -- the regex shipped as /(^|s)sell(s|$)/ and every click read as Buy.
+    p.__lxnSideNext = btn.classList.contains('sell') ? 'sell' : 'buy';
+    setTimeout(function () { p.__lxnSideNext = null; }, 0);
+  }
 
   // The leading number and nothing after it (XRPL limit.js): a mis-aimed paste stops at the first stray
   // character instead of being turned into a different, plausible price.
@@ -424,7 +433,21 @@
     busy = true;
     if (b) { b.textContent = 'Checking…'; b.classList.add('lx-btnload'); }
     function stop(text) { busy = false; if (b) { b.textContent = label; b.classList.remove('lx-btnload'); } setCta(p); if (text) say(p, text); }
+    // HOT will not sign anything that leaves under 0.2 NEAR (SWAP_KEEP) and says only "User rejected the request"
+    // (RAZA 2026-11-04: the treasury held 0.164 NEAR; the registration landed, create_pool never did). So the
+    // shortfall is named here, before the wallet opens, from the transactions actually about to be sent.
     D().buildCreate(who, cp).then(function (txs) {
+      return SW().balance(who, 'near').then(function (have) {
+        var need = D().big(SW().SWAP_KEEP);
+        txs.forEach(function (t) { t.actions.forEach(function (x) { need += D().big(x.params.deposit); }); });
+        if (D().big(have) < need) {
+          throw new Error('Creating the pool needs ' + fmt(D().toNum(need.toString(), 24), 4) + ' NEAR in this wallet — '
+            + fmt(D().toNum(D().big(cp.deposit).toString(), 24), 4) + ' for the pool, the rest kept for gas — and it has '
+            + fmt(D().toNum(String(have), 24), 4) + ' NEAR.');
+        }
+        return txs;
+      });
+    }).then(function (txs) {
       window.__lxnLastCreate = { plan: cp, txs: txs };
       if (b) b.textContent = 'Confirm in wallet…';
       return D().sign(txs);
@@ -462,9 +485,11 @@
         throw new Error('You only have ' + fmtDown(r[2], dec) + ' ' + code() + ' — the order and its ' + (o.feeBps / 100) + '% fee need ' + fmtDown(o.spendRaw, dec) + '.');
       }
       if (needNear + keep > nearBal) {
+        // The figures, not just the verdict (RAZA 2026-11-04: a 13,500 NEAR buy read "Not enough NEAR" beside "Avail: 0.95").
+        var needTxt = fmt(D().toNum((needNear + keep).toString(), 24), 4), haveTxt = fmt(D().toNum(nearBal.toString(), 24), 4);
         throw new Error(o.sell === D().WNEAR
-          ? 'Not enough NEAR for this order' + (D().big(pre.storage) > BigInt(0) ? ' and the storage it needs' : '') + ' — keep 0.2 NEAR for gas.'
-          : 'Not enough NEAR for the storage this order needs.');
+          ? 'This order needs ' + needTxt + ' NEAR, including ' + (D().big(pre.storage) > BigInt(0) ? 'its storage and ' : '') + '0.2 NEAR kept for gas. This wallet has ' + haveTxt + ' NEAR.'
+          : 'The storage this order needs, with 0.2 NEAR kept for gas, comes to ' + needTxt + ' NEAR. This wallet has ' + haveTxt + ' NEAR.');
       }
       var txs = D().buildPlace(who, o, pre);
       window.__lxnLastLimit = { plan: o, pre: pre, txs: txs };
@@ -501,6 +526,7 @@
       if (!p) return;
       if (t.closest('.lxlim-max')) { e.preventDefault(); e.stopImmediatePropagation(); fillMax(p); return; }
       if (t.closest('[class*="dxa-side-btn"]')) {
+        claimSide(p, t.closest('[class*="dxa-side-btn"]'));
         Promise.resolve().then(function () {                       // before paint: no flash (see dxaswap.js)
           var ai = input(fields(p)[1]); if (ai) ai.value = '';
           var ti = input(fields(p)[2]); if (ti) ti.value = '';

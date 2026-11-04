@@ -42,7 +42,16 @@
   function input(f) { return f ? $('input', f) : null; }
   function cta(p) { return $('[class*="dxa-trade-cta"]', p); }
   function phone(p) { return /mdxa-/.test((p && p.className) || ''); }
-  function side(p) { return $('[class*="dxa-side-btn"].sell.active', p) ? 'sell' : 'buy'; }
+  // The side just clicked wins until the design's own handler has moved .active (RAZA 2026-11-04: Sell LUMOS read
+  // "Balance: 1.15545 NEAR"). A real click runs the repaint microtask straight after this layer's capture listener,
+  // BEFORE the design's handler, so .active still named the old side and the NEAR balance was painted under Sell.
+  function side(p) { return p.__lxnSideNext || ($('[class*="dxa-side-btn"].sell.active', p) ? 'sell' : 'buy'); }
+  function claimSide(p, btn) {
+    // classList, not a /s/ regex: the build injects this file through a template literal, which drops the
+    // backslash -- the regex shipped as /(^|s)sell(s|$)/ and every click read as Buy.
+    p.__lxnSideNext = btn.classList.contains('sell') ? 'sell' : 'buy';
+    setTimeout(function () { p.__lxnSideNext = null; }, 0);
+  }
   function mark(node, text) {
     if (!node) return;
     try { node.removeAttribute('data-logo'); node.setAttribute('data-logoed', '1'); } catch (e) {}
@@ -375,6 +384,7 @@
         return;
       }
       if (t.closest('[class*="dxa-side-btn"]')) {
+        claimSide(p, t.closest('[class*="dxa-side-btn"]'));
         // A microtask, not a timer: it runs after the design's own handler and BEFORE the browser paints, so
         // the design's redraw is never on screen (RAZA 2026-11-03: a flash on every Buy/Sell switch).
         p.__lxnFresh = 1;

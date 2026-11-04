@@ -750,7 +750,8 @@
     var what = item.getAttribute('data-lxpi');
     closeRowMenu();
     if (!acct) return;
-    if (what === 'details') window.location.href = '/pools/near/id/' + encodeURIComponent(acct);
+    var href = (m && m.__lxFor && m.__lxFor.getAttribute('data-lxphref')) || '';   // the kebab that opened it
+    if (what === 'details') window.location.href = href || ('/pools/near/pool/' + encodeURIComponent(acct));
     else if (what === 'copy') copyText(acct);
   }
 
@@ -2014,9 +2015,105 @@
       tr.appendChild(td);
       body.appendChild(tr);
     }
-    // NEAR liquidity positions are not read yet (Rhea's per-account shares need their own indexer), so
-    // the panel shows the design's empty state rather than the mock rows it ships with.
-    empty('No liquidity positions');
+    // RAZA 2026-11-04: "Liq Pools 0" while treasury.lumoscore.near held all of LUMOS/wNEAR 9001. The positions are
+    // lxnCore.positions (nearcore.js) -- the reader Pools -> My Pools and the account page use -- painted into the
+    // design's row the way the XRPL fork fills it (Stellar's figures: share, your side of each reserve).
+    var a = addr();
+    if (!a || !tpl || !C.positions) { empty('No liquidity positions'); return; }
+    empty('Reading your positions…');
+    function setCount(n) {
+      var cnt = [].filter.call(document.querySelectorAll('.asset-tabs .cnt'), function (c) {
+        return !(c.closest && c.closest('.lx-wcgroup'));
+      });
+      if (cnt[1]) cnt[1].textContent = String(n);
+    }
+    function fmtAmt(v) {
+      if (v == null || !isFinite(v)) return '—';
+      if (v > 0 && v < 0.0001) return '<0.0001';
+      return v.toLocaleString('en-US', { maximumFractionDigits: v >= 1000 ? 0 : 4 });
+    }
+    function slug(syms) {
+      return (syms || []).map(function (x) { return String(x || '').toLowerCase().replace(/[^a-z0-9]/g, ''); })
+        .filter(Boolean).join('-').slice(0, 60).replace(/-+$/, '') || 'pool';
+    }
+    C.positions(a).then(function (res) {
+      if (addr() !== a) return;
+      var rows = res.rows || [];
+      if (!rows.length) { empty(res.failed ? 'Could not read your positions — try again in a minute.' : 'No liquidity positions'); setCount(res.failed ? '—' : 0); return; }
+      return Promise.all(rows.map(function (p) {
+        return Promise.all(p.ids.map(function (t) { return C.tokenMeta(t).catch(function () { return null; }); })).then(function (ms) {
+          p.mine = p.ids.map(function (t, k) { var m = ms[k]; return m && m.d != null ? C.units(p.amounts[k], m.d) * p.fraction : null; });
+          return p;
+        });
+      })).then(function () {
+        if (addr() !== a) return;
+        var mk = (window.__lxnData && window.__lxnData.held) || [];
+        body.innerHTML = '';
+        rows.forEach(function (p) {
+          var tr = tpl.cloneNode(true), td = tr.children;
+          var icos = tr.querySelectorAll('.lp-ico');
+          p.ids.slice(0, 2).forEach(function (t, i) {
+            var ic = icos[i];
+            if (!ic) return;
+            ic.innerHTML = '';
+            ic.setAttribute('data-logoed', '1');
+            var held = mk.filter(function (h) { return h && h.id === t; })[0];
+            // An <img> src, so the site's own /assets/ path is fine too (LUMOS's curated logo is one).
+            var own = held && /^\/assets\/[\w\/.-]+$/.test(String(held.logo || '')) ? held.logo : '';
+            var src = t === WNEAR ? NEAR_LOGO : (own || (held && cssUrl(held.logo)) || cssUrl((C.ICONS || {})[t]) || '');
+            if (!src) { ic.textContent = String(p.syms[i] || '?').charAt(0).toUpperCase(); ic.style.background = hue(p.syms[i]); return; }
+            var im = document.createElement('img');
+            im.alt = '';
+            im.src = src;
+            im.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;border-radius:50%';
+            ic.appendChild(im);
+          });
+          var nm = tr.querySelector('.lp-nm');
+          if (nm) plain(nm, p.syms.join(' / '));
+          var sb = tr.querySelector('.lp-sb');
+          if (sb) sb.textContent = 'Pool #' + p.id + (p.farm ? ' · farming' : '') + ' · Rhea';
+          if (td[1]) {
+            var s1 = td[1].querySelector('.p1'), s2 = td[1].querySelector('.p2');
+            if (s1) s1.textContent = p.share > 0 && p.share < 0.01 ? '<0.01%' : p.share.toFixed(2) + '%';
+            if (s2) s2.textContent = p.usd != null ? '≈ $' + p.usd.toLocaleString('en-US', { maximumFractionDigits: 2 }) : '';
+          }
+          if (td[2]) { td[2].textContent = '—'; td[2].title = 'Rhea does not publish a per-position APR'; }
+          if (td[3]) {
+            var q1 = td[3].querySelector('.p1'), q2 = td[3].querySelector('.p2');
+            if (q1) {
+              q1.textContent = fmtAmt(p.mine[0]) + ' ';
+              var un = el('span', null, p.syms[0]);
+              un.style.cssText = 'color:var(--text-soft);font-size:14px';
+              un.setAttribute('data-logoed', '1');
+              q1.appendChild(un);
+            }
+            if (q2) q2.textContent = p.mine.length > 1 ? fmtAmt(p.mine[1]) + ' ' + p.syms[1] : '';
+          }
+          if (td[4]) {
+            var r1 = td[4].querySelector('.p1'), r2 = td[4].querySelector('.p2');
+            if (r1) { r1.textContent = '—'; r1.style.color = ''; }
+            if (r2) r2.textContent = 'fees accrue into the pool';
+          }
+          var href = '/pools/near/' + slug(p.syms) + '/' + encodeURIComponent(p.id);
+          var btns = tr.querySelectorAll('.qa-row-btn');
+          if (btns[0]) { btns[0].innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Add'; btns[0].setAttribute('data-lxgo', href); }
+          if (btns[1]) { btns[1].innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12"/></svg> Remove'; btns[1].setAttribute('data-lxgo', href + '?act=withdraw'); }
+          if (btns[2]) {
+            btns[2].setAttribute('data-lxpmenu', String(p.id));
+            btns[2].setAttribute('data-lxphref', href);
+            btns[2].removeAttribute('data-lxexp');
+            btns[2].title = '';
+            btns[2].setAttribute('aria-label', 'Pool actions');
+          }
+          body.appendChild(tr);
+        });
+        setCount(rows.length);
+      });
+    }).catch(function () {
+      if (addr() !== a) return;
+      empty('Could not read your positions — try again in a minute.');
+      setCount('—');
+    });
   }
   // ---- the hero chart ------------------------------------------------------------------------------
   //
