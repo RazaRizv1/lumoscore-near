@@ -170,9 +170,31 @@ function offRow(p, all, meta) {
   return { id: p.id, kind: p.kind, tokens, fee: p.fee == null ? null : p.fee / 100,
     liq: liqUsd != null && nearUsd > 0 ? liqUsd / nearUsd : null, vol: null, fees: null, apr: null, trades: null, listed: false };
 }
+// A pool Rhea's top list does not carry -- a new or tiny one (RAZA 2026-11-04: LUMOS/wNEAR 9001, two minutes
+// old and $2.27 deep, read "Pool not found") -- is read from the chain itself, which is the authority on whether
+// a pool exists. Only a pool the CONTRACT says does not exist is "not found".
+async function chainPool(id) {
+  for (const u of RPCS) {
+    try {
+      const ctl = new AbortController(); const tm = setTimeout(() => ctl.abort(), 5000);
+      const r = await fetch(u, { method: 'POST', signal: ctl.signal, headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'query', params: { request_type: 'call_function', finality: 'final',
+          account_id: 'v2.ref-finance.near', method_name: 'get_pool', args_base64: btoa(JSON.stringify({ pool_id: Number(id) })) } }) });
+      clearTimeout(tm);
+      const j = await r.json();
+      if (j && j.result && j.result.error && /E85|invalid pool id/i.test(String(j.result.error))) return null;
+      if (!j || !j.result || !j.result.result) continue;
+      const p = JSON.parse(new TextDecoder().decode(new Uint8Array(j.result.result)));
+      if (!p || !Array.isArray(p.token_account_ids)) continue;
+      return { id: String(id), kind: String(p.pool_kind || ''), ids: p.token_account_ids, syms: [], am: p.amounts || [], fee: num(p.total_fee) };
+    } catch (e) {}
+  }
+  throw new Error('pool read failed');
+}
 async function offList(context, body, id) {
   const all = await allPools(context);
-  const p = all.pools.find((x) => x.id === id);
+  let p = all.pools.find((x) => x.id === id);
+  if (!p) p = await chainPool(id);
   if (!p) return null;
   const meta = {};
   await Promise.all(p.ids.map(async (t) => { if (!META[t]) meta[t] = await ftMeta(t); }));
