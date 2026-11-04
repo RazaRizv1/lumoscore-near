@@ -10,4 +10,4 @@
 //
 // Rebuild with `node _tools/rebuild.js` after changing it. Check the result on the token page before shipping:
 // the discount pieces were Stellar's and have only been seen running on NEAR with the tier switched off.
-module.exports = { NEAR_LUMOS: '' };
+module.exports = { NEAR_LUMOS: 'lumos.lumoscore.near' };   // minted 2026-11-04, verified on chain
