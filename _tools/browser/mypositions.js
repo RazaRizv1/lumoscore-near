@@ -223,7 +223,12 @@
             return m && m.d != null ? C.units(p.amounts[k], m.d) * p.fraction : null;
           });
           p.href = poolHref(p.id, p.syms);
-          return p;
+          // A token the market list does not carry (a pool's new token: LUMOS on 2026-11-04) shows the icon its
+          // own metadata publishes.
+          return Promise.all(p.ids.slice(0, 2).map(function (t) {
+            if (t === 'wrap.near' || logos[t]) return null;
+            return C.ftMetadata(t).then(function (m) { if (m && m.icon) logos[t] = String(m.icon); }, function () {});
+          })).then(function () { return p; });
         });
       })).then(function (pos) {
         if (mySeq !== seq) return;
