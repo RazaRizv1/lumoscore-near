@@ -368,20 +368,57 @@ async function prices(url, env) {
 // a pool's holders. Rhea's contract cannot: shares sit in a lookup map that answers one account at a time. So:
 //   candidates  Rhea's LP list (a February 2026 snapshot) + every account our index saw deposit since 2026-10-29
 //   staked      Rhea's farm list for the pool: LP shares staked there leave get_pool_shares, so these count as they are
-//   verified    get_pool_shares for each candidate, the chain's answer, when a pool has at most LP_VERIFY of them;
-//               a bigger pool keeps the candidate count, marked approximate (a = 1), since no free RPC budget reads it
-// A second cron (*/2) runs ONLY this, in its own invocation with its own 50-subrequest budget, so it can never starve
-// the block scan. A pool is claimed (at = now) BEFORE it is read: one that kills the run waits a cycle, not forever.
+//   verified    get_pool_shares for every candidate, the chain's answer. A pool of at most LP_VERIFY is read in one
+//               run. A bigger one is read in batches across runs (RAZA 2026-11-06: "Yes, check them all"): its list is
+//               parked in lpv with a cursor, one row written per run, so USDC/wNEAR's ~4,000 accounts cost hours and
+//               a handful of database writes, and the job carries on after a failed run. a = 1 only while a pool has
+//               never finished, or when too many reads failed.
+// view_state over Rhea's share keys would list holders outright; free RPCs refuse it (TOO_LARGE_CONTRACT_STATE), so a
+// holder who joined between the February list and 2026-10-29 and never staked stays invisible: these are VERIFIED KNOWN
+// holders, which is what the page's plain number means.
+// Two more crons (*/2 and its odd minutes) run ONLY this, in their own invocations with their own 50-subrequest
+// budget, so it can never starve the block scan. A pool is claimed (at = now) BEFORE it is read: one that kills the run
+// waits a cycle, not forever.
 const LP_DS = 'https://api.data-service.ref.finance';
-const LP_VERIFY = 36, LP_BUDGET = 44, LP_EVERY_MS = 6 * 3600000, LP_WATCH_MAX = 3000;
+const LP_VERIFY = 34, LP_BUDGET = 38, LP_EVERY_MS = 6 * 3600000, LP_BIG_EVERY_MS = 3 * 86400000, LP_WATCH_MAX = 3000;
 const LP_NOT = new Set([REF, 'boostfarm.ref-labs.near']);
 async function dsGet(path) {
   const r = await fetch(LP_DS + path, { headers: Object.assign({ accept: 'application/json' }, UA) });
   if (!r.ok) throw new Error('ds ' + r.status);
   return r.json();
 }
+// One account's shares: true / false, or null when it could not be asked.
+async function holds(id, a) {
+  try {
+    const r = await rpc('query', { request_type: 'call_function', finality: 'final', account_id: REF, method_name: 'get_pool_shares',
+      args_base64: btoa(JSON.stringify({ pool_id: id, account_id: a })) });
+    return BigInt(String(JSON.parse(new TextDecoder().decode(new Uint8Array((r && r.result) || []))) || '0')) > 0n;
+  } catch (e) { return null; }
+}
+// The next batch of the big pool in progress. Finishes it, or moves its cursor: one row written either way.
+async function lpBatch(db, v) {
+  const list = JSON.parse(v.list), part = list.slice(v.pos, v.pos + LP_BUDGET);
+  let run = v.run, fail = v.fail;
+  for (let i = 0; i < part.length; i += 6) {
+    const got = await Promise.all(part.slice(i, i + 6).map((a) => holds(v.pool, a)));
+    for (const g of got) { if (g === null) fail++; else if (g) run++; }
+  }
+  const pos = v.pos + part.length;
+  if (pos < list.length) {
+    await db.prepare('UPDATE lpv SET pos = ?1, run = ?2, fail = ?3 WHERE pool = ?4').bind(pos, run, fail, v.pool).run();
+    return { big: v.pool, pos, of: list.length };
+  }
+  const st = [db.prepare('DELETE FROM lpv WHERE pool = ?1').bind(v.pool)];
+  // Mostly unread is not an answer: the old figure stands, and the pool comes round again at its next turn.
+  if (fail * 3 <= list.length) st.push(db.prepare('UPDATE lpn SET n = ?1, a = ?2, at = ?3 WHERE pool = ?4')
+    .bind(run + v.st, fail ? 1 : 0, Date.now() + LP_BIG_EVERY_MS - LP_EVERY_MS, v.pool));
+  await db.batch(st);
+  return { big: v.pool, finished: run + v.st, fail };
+}
 async function lpJob(env) {
   const db = env.DB, now = Date.now();
+  const open = await db.prepare('SELECT pool, list, pos, run, st, fail FROM lpv LIMIT 1').first();
+  if (open) return lpBatch(db, open);
   let spent = 0, done = 0;
   const due = await db.prepare('SELECT pool FROM lpn WHERE at < ?1 ORDER BY at LIMIT 12').bind(now - LP_EVERY_MS).all();
   for (const row of due.results || []) {
@@ -402,19 +439,19 @@ async function lpJob(env) {
     for (const x of adds.results || []) { const a = String((x && x.who) || ''); if (a && !LP_NOT.has(a)) cand.add(a); }
     let n = staked.size, approx = 0;
     const toRead = [...cand].filter((a) => !staked.has(a));
-    if (toRead.length > LP_VERIFY) { n += toRead.length; approx = 1; }
-    else {
+    if (toRead.length > LP_VERIFY) {
+      // Parked for the batches; a pool never counted keeps the list's size, marked approximate, until they finish.
+      await db.batch([
+        db.prepare('INSERT OR REPLACE INTO lpv (pool, list, pos, run, st, fail) VALUES (?1, ?2, 0, 0, ?3, 0)').bind(id, JSON.stringify(toRead), staked.size),
+        db.prepare('UPDATE lpn SET n = COALESCE(n, ?1), a = CASE WHEN n IS NULL THEN 1 ELSE a END WHERE pool = ?2').bind(n + toRead.length, id),
+      ]);
+      return { lp: done, parked: id, of: toRead.length };
+    }
+    {
       if (spent + toRead.length > LP_BUDGET) { await db.prepare('UPDATE lpn SET at = 0 WHERE pool = ?1').bind(id).run(); break; }
       let failed = 0;
       for (let i = 0; i < toRead.length; i += 6) {
-        await Promise.all(toRead.slice(i, i + 6).map(async (a) => {
-          try {
-            const r = await rpc('query', { request_type: 'call_function', finality: 'final', account_id: REF, method_name: 'get_pool_shares',
-              args_base64: btoa(JSON.stringify({ pool_id: id, account_id: a })) });
-            const v = JSON.parse(new TextDecoder().decode(new Uint8Array((r && r.result) || [])));
-            if (BigInt(String(v || '0')) > 0n) n++;
-          } catch (e) { failed++; }
-        }));
+        for (const g of await Promise.all(toRead.slice(i, i + 6).map((a) => holds(id, a)))) { if (g === null) failed++; else if (g) n++; }
       }
       spent += toRead.length;
       if (failed * 3 > toRead.length) continue;          // mostly unread: not an answer
@@ -557,7 +594,7 @@ async function who(url, env) {
 
 export default {
   async scheduled(event, env, ctx) {
-    if (event.cron === '*/2 * * * *') {                   // participants only: its own invocation, its own budget
+    if (event.cron !== '* * * * *') {                     // participants only: its own invocation, its own budget
       ctx.waitUntil(lpJob(env).then((r) => console.log('lps', JSON.stringify(r)), (e) => console.error('lp job failed', e && e.message)));
       ctx.waitUntil(netJob(env).then((r) => console.log('net', JSON.stringify(r)), (e) => console.error('net job failed', e && e.message)));
       return;

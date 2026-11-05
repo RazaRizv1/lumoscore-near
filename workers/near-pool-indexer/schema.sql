@@ -23,3 +23,5 @@ CREATE TABLE IF NOT EXISTS pxwatch (t TEXT PRIMARY KEY, seen INTEGER NOT NULL);
 -- How many accounts hold each pool (lpJob). n NULL = not read yet; a = 1 = approximate; at = when last claimed.
 CREATE TABLE IF NOT EXISTS lpn (pool INTEGER PRIMARY KEY, n INTEGER, a INTEGER NOT NULL DEFAULT 0, at INTEGER NOT NULL DEFAULT 0);
 CREATE INDEX IF NOT EXISTS lpn_at ON lpn (at);
+-- A big pool's holder check in progress: its candidate list, the cursor, the running count (lpJob, lpBatch).
+CREATE TABLE IF NOT EXISTS lpv (pool INTEGER PRIMARY KEY, list TEXT NOT NULL, pos INTEGER NOT NULL, run INTEGER NOT NULL, st INTEGER NOT NULL, fail INTEGER NOT NULL);

@@ -10,7 +10,7 @@ workers_dev = true
 # Every minute. Reads NEAR Lake (S3, requester pays); needs the secrets AWS_ACCESS_KEY_ID and
 # AWS_SECRET_ACCESS_KEY (wrangler secret put ...). Without them each run stops at once and logs why.
 [triggers]
-crons = ["* * * * *", "*/2 * * * *"]   # */2: participant counts only (src/index.js lpJob)
+crons = ["* * * * *", "*/2 * * * *", "1-59/2 * * * *"]   # the last two: participant counts only (src/index.js lpJob), every minute between them
 
 [[d1_databases]]
 binding = "DB"
