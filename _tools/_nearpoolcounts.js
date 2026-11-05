@@ -112,6 +112,28 @@ async function all(account, method, total) {
     files++;
   }
   console.log('token pool lists: ' + files + ' file(s) -> assets/tokenpools/');
+  // EVERY LIVE CLASSIC POOL ON NEAR, for Pools (RAZA 2026-11-06: "its supposed to show all the pools of near network",
+  // as Stellar lists 11,227). Rows: [id, kind, fee bps, liquidity in NEAR or null, [[token, symbol, amount]...]].
+  // A liquidity figure is only trusted from a side we can price honestly: wNEAR, or a curated token. An unknown token's
+  // quoted price is anyone's to set, and those are what made Rhea's own all-pools total read 1.9e27 dollars.
+  const curated = new Set(tokens.map((t) => t.i));
+  const every = [];
+  classic.forEach((p, id) => {
+    const ids = p.token_account_ids || [], am = p.amounts || [];
+    if (!ids.length || !am.length || !am.every((a) => /^[0-9]+$/.test(String(a)) && String(a) !== '0')) return;
+    let best = null;
+    ids.forEach((x, k) => {
+      const d = decOf(x), pr = x === 'wrap.near' ? nearUsd : Number((px[x] || {}).price);
+      if (d == null || !(pr > 0) || (x !== 'wrap.near' && !curated.has(x))) return;
+      const v = Number(am[k]) / Math.pow(10, d) * pr / nearUsd * ids.length;
+      if (best == null || v < best) best = v;
+    });
+    every.push([id, String(p.pool_kind || ''), Number(p.total_fee) || 0, best == null ? null : +best.toPrecision(5),
+      ids.map((x, k) => { const d = decOf(x); return [x, symOf(x), d == null ? null : +(Number(am[k]) / Math.pow(10, d)).toPrecision(6)]; })]);
+  });
+  every.sort((a, b) => (b[3] || 0) - (a[3] || 0));
+  fs.writeFileSync(path.join(__dirname, '..', 'assets', 'allpools.json'), JSON.stringify(every));
+  console.log('all live pools: ' + every.length + ' -> assets/allpools.json');
   fs.writeFileSync(OUT, JSON.stringify({ generated: new Date().toISOString(), classic: classic.length, dcl: dcl.length, counts: out }, null, 1) + '\n');
   console.log('pools read: ' + classic.length + ' classic + ' + dcl.length + ' DCL; ' + Object.keys(out).length + ' of ' + tokens.length + ' curated token(s) counted -> ' + path.basename(OUT));
   tokens.slice(0, 12).forEach((t) => { const c = out[t.i] || { n: 0, live: 0 }; console.log('  ' + t.s.padEnd(12) + String(c.live).padStart(5) + ' live  ' + String(c.n).padStart(5) + ' total'); });

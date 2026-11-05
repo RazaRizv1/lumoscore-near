@@ -1,11 +1,11 @@
 {
- "generated": "2026-11-05T01:06:18.841Z",
+ "generated": "2026-11-05T23:37:36.050Z",
  "classic": 9006,
- "dcl": 6429,
+ "dcl": 6455,
  "counts": {
   "wrap.near": {
-   "n": 10601,
-   "live": 5374
+   "n": 10623,
+   "live": 5391
   },
   "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1": {
    "n": 556,
@@ -56,8 +56,8 @@
    "live": 12
   },
   "hoot-8ecf65.launchpad.justhoot.near": {
-   "n": 31,
-   "live": 23
+   "n": 32,
+   "live": 24
   },
   "aaaaaa20d9e0e2461697782ef11675f668207961.factory.bridge.near": {
    "n": 328,

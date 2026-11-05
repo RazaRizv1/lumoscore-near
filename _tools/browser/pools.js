@@ -376,7 +376,6 @@
     wrap.appendChild(icons);
     var nm = el('div');
     nm.appendChild(el('div', 'pair-name', pairName(p)));
-    if (p.listed === false) nm.appendChild(uncurated());
     wrap.appendChild(nm);
     // NO FEE BADGE. This layer used to append the pool's trading fee ("0.205%") beside the pair.
     // lumoscore.com does not, and it was an addition of mine rather than anything the design asked
@@ -450,7 +449,6 @@
 
     var info = el('div', 'pc-info');
     info.appendChild(el('div', 'pc-name', pairName(p)));
-    if (p.listed === false) info.appendChild(uncurated());
     // THE FEE BADGE WAS REMOVED FROM THE TABLE AND LEFT ON THE CARD, so the phone kept showing
     // "0.205% fee tier" after RAZA asked for it to go — "we dont have it on stellar so why did you
     // add it on XRPL". Checked against lumoscore.com's own phone build: its pool cards carry no fee
@@ -489,13 +487,6 @@
     return null;
   }
 
-  // A pool found by searching ALL of Rhea (see localPools): its tokens are not ones LumosCore vouches for.
-  function uncurated() {
-    var t = el('div', 'lx-uncur', 'Not curated · check the token contracts');
-    t.setAttribute('data-logoed', '1');
-    t.style.cssText = 'font-size:11.5px;font-weight:600;color:var(--warning,#f59e0b);margin-top:2px;white-space:nowrap';
-    return t;
-  }
   function noteHost(h, text) {
     if (h.kind === 'table') { note(h.node, text); return; }
     h.node.innerHTML = '';
@@ -899,7 +890,7 @@
     setPageInfo(from + 1, to, total);
     buildPager(h, d, pages);
     if (!paged) wirePhoneGrow(h);
-    fillParticipants();
+    fillParticipants(h, d, rows.slice(from, to));
   }
 
   // Appends the next chunk when the reader nears the end of the list. APPENDS rather than re-renders:
@@ -941,7 +932,20 @@
   // NO PARTICIPANT SWEEP ON NEAR. The XRPL build counted each visible pool's LP-token holders here; on NEAR
   // the counts arrive with the rows (lps), so nothing is left to fill in. Kept as a no-op so the render paths
   // that call it stay identical to the XRPL file.
-  function fillParticipants() {}
+  // The rows on screen that came from the baked list carry no count: asked of the indexer a page at a time, which also
+  // queues them with its holder job. Each row is asked once; a pool not reached yet stays an em dash.
+  function fillParticipants(h, d, shown) {
+    var want = shown.filter(function (r) { return r.lps === undefined && !r.lpAsked; });
+    if (!want.length) return;
+    want.forEach(function (r) { r.lpAsked = 1; });
+    fetch('https://near-pool-indexer.usa282.workers.dev/lps?ids=' + want.map(function (r) { return r.id; }).join(','))
+      .then(function (r) { return r.json(); })
+      .then(function (x) {
+        var hit = false;
+        want.forEach(function (r) { var v = x && x.ok && x.c[r.id]; if (v) { r.lps = v[0]; r.lpa = v[1]; hit = true; } });
+        if (hit && VIEW === d) renderPage(h, d, pageNo);
+      }).catch(function () {});
+  }
 
   // THE HEADINGS lumoscore.com USES, read off its live table (RAZA 2026-09-15):
   //     #   Pair   Liquidity ↓   VOL (TODAY)   FEES (TODAY)   Participants
@@ -1164,8 +1168,39 @@
         paintOverview(d);
         paintHeroStats(d);
         attribution(d);
+        everyPool(h, d, tabCount);
       })
       .catch(function () { noteHost(h, 'Pool data is unavailable right now.'); });
+  }
+
+  // EVERY LIVE POOL ON NEAR (RAZA 2026-11-06: "its supposed to show all the pools of near network"). The curated rows
+  // paint first with live figures; the rest arrive from the whole-chain list baked at build (_tools/_nearpoolcounts.js)
+  // and join behind them, which keeps a thousand small pools from holding the page. Their reserves are as of the build,
+  // and volume is a dash: the live sources only carry the curated pools. The pool page itself still warns on a token
+  // LumosCore does not vouch for; a list of thousands repeating that warning says nothing.
+  function everyPool(h, d, tabCount) {
+    fetch('/assets/allpools.json').then(function (r) { return r.ok ? r.json() : null; }).then(function (list) {
+      if (!list || !list.length || window.__lxnPoolsData !== d) return;
+      var seen = {}, logos = {}, add = [], sum = 0;
+      d.rows.forEach(function (r) {
+        seen[r.id] = 1;
+        (r.tokens || []).forEach(function (t) { if (t.logo) logos[t.i] = t.logo; });
+      });
+      list.forEach(function (b) {
+        if (seen[b[0]]) return;
+        if (b[3] > 0) sum += b[3];
+        add.push({ id: b[0], kind: b[1], fee: b[2] / 100, liq: b[3], vol: null, fees: null, apr: null, trades: null,
+          tokens: b[4].map(function (t) { return { i: t[0], s: t[1], v: t[2], logo: logos[t[0]] || '' }; }) });
+      });
+      if (!add.length) return;
+      var keep = pageNo;
+      d.rows = d.rows.concat(add);
+      if (d.summary) { d.summary.liquidity = (d.summary.liquidity || 0) + sum; d.summary.pools = d.rows.length; }
+      if (tabCount) tabCount.textContent = count(d.rows.length);
+      paintSummary(d.summary);
+      paintOverview(d);
+      if (VIEW === d) renderPage(h, d, keep);
+    }).catch(function () {});
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', load);

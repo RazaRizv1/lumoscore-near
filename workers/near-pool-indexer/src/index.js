@@ -380,7 +380,7 @@ async function prices(url, env) {
 // budget, so it can never starve the block scan. A pool is claimed (at = now) BEFORE it is read: one that kills the run
 // waits a cycle, not forever.
 const LP_DS = 'https://api.data-service.ref.finance';
-const LP_VERIFY = 34, LP_BUDGET = 38, LP_EVERY_MS = 6 * 3600000, LP_BIG_EVERY_MS = 3 * 86400000, LP_WATCH_MAX = 3000;
+const LP_VERIFY = 20, LP_BUDGET = 20, LP_EVERY_MS = 6 * 3600000, LP_BIG_EVERY_MS = 3 * 86400000, LP_WATCH_MAX = 3000;
 const LP_NOT = new Set([REF, 'boostfarm.ref-labs.near']);
 async function dsGet(path) {
   const r = await fetch(LP_DS + path, { headers: Object.assign({ accept: 'application/json' }, UA) });
