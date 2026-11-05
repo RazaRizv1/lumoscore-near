@@ -32,6 +32,21 @@
     if (n > 0 && n < 1e-6) return n.toPrecision(3);
     return Number(n).toLocaleString('en-US', { maximumFractionDigits: d == null ? 6 : d });
   }
+  // STELLAR'S FIGURES IN THE SWAP BOX (RAZA 2026-11-06: "in you receive, we dont show decimal and values after that"):
+  // its xlmAmt(), whole numbers with commas from 1,000 up, four places below that. The rate is six significant figures
+  // as there, and a rate in the millions is shortened so a long symbol like BLACKDRAGON keeps the row on one line.
+  function viewAmt(x) {
+    x = +x || 0;
+    if (x >= 1000) return Math.round(x).toLocaleString('en-US');
+    if (x >= 1) return String(+x.toFixed(4));
+    return x > 0 ? fmt(+x.toPrecision(4), 10) : '0';
+  }
+  function viewRate(r) {
+    if (r >= 1e12) return (r / 1e12).toFixed(2) + 'T';
+    if (r >= 1e9) return (r / 1e9).toFixed(2) + 'B';
+    if (r >= 1e6) return (r / 1e6).toFixed(2) + 'M';
+    return fmt(+r.toPrecision(6), 10);
+  }
   function plainAmt(raw, dec) {                     // exact, trimmed to 6 decimals for an input box
     var s = S().fromUnits(raw, dec), p = s.split('.');
     return p[1] ? (p[0] + '.' + p[1].slice(0, 6)).replace(/\.?0+$/, '') : s;
@@ -192,9 +207,9 @@
     q = qq; q.ok = 1; q.side = side(p);
     var out = S().toNum(qq.out, gm.dec), amt = S().toNum(qq.amount, pm.dec);
     var recv = input(f[1]);
-    if (recv && document.activeElement !== recv) recv.value = plainAmt(qq.out, gm.dec);
+    if (recv && document.activeElement !== recv) recv.value = viewAmt(out);
     mark(frowMono(f[1]), usdTxt(p, usdOf(s.get, out)));
-    sumRow(p, 'rate', '1 ' + pm.code + ' = ' + fmt(out / amt, 6) + ' ' + gm.code);
+    sumRow(p, 'rate', '1 ' + pm.code + ' = ' + viewRate(out / amt) + ' ' + gm.code);
     // Stellar's sign convention: a buy moves the token's price up (+, green), a sell down (-, red).
     var buy = s.pay === 'near', imp = qq.impact, txt = '—', tone = '';
     if (imp != null) {
@@ -202,7 +217,7 @@
       tone = (imp < 0.01 || buy) ? 'var(--green,#22c55e)' : 'var(--red,#ff5b5b)';
     }
     sumRow(p, 'price impact', txt, tone);
-    sumRow(p, 'min received', fmt(S().toNum(qq.min, gm.dec), 6) + ' ' + gm.code);
+    sumRow(p, 'min received', viewAmt(S().toNum(qq.min, gm.dec)) + ' ' + gm.code);
     payUsd(p, usdOf(s.pay, amt));
     setCta(p);
   }

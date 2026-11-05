@@ -44,6 +44,8 @@ const PAIRS = [
   // Screen-reader headings (visually hidden, read aloud and indexed).
   ['<h1 class="lx-srh1">Your Stellar wallet', '<h1 class="lx-srh1">Your NEAR wallet'],
   ['<h1 class="lx-srh1">Stellar liquidity pool', '<h1 class="lx-srh1">NEAR liquidity pool'],
+  // ONE LINE, as Stellar's other fee banner (RAZA 2026-11-06: "the 250K message below. on Stellar we have it in one line").
+  ['</b> — 50% Discount</span>', '</b> — 50% off</span>'],
   // LIMIT ORDERS ARE FREE ON NEAR AGAIN (RAZA 2026-11-04: "lets remove fees on limit orders just like on Stellar";
   // browser/neardcl.js LIMIT_FEE_BPS = 0). From 2026-11-01 these three Stellar sentences were rewritten to say a NEAR
   // order pays the fee; the containers still carry that text, so these rules turn it back into Stellar's own words.

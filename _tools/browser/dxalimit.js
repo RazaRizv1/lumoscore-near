@@ -281,7 +281,9 @@
     if (phone(p)) return;
     var bk = window.__lxnBook;
     var host = $('.lx-oc', p);
-    if (!bk || !pool || (!(bk.asks || []).length && !(bk.bids || []).length)) { if (host) host.style.display = 'none'; return; }
+    // The book, not a pool, is what this reads (RAZA 2026-11-06: "its not carrying this section like on Stellar"): a
+    // token with no order-book pool still has its classic pool's curve (dexasset.js curveBook).
+    if (!bk || (!(bk.asks || []).length && !(bk.bids || []).length)) { if (host) host.style.display = 'none'; return; }
     if (!host) {
       host = document.createElement('div');
       host.className = 'lx-oc';
@@ -300,7 +302,16 @@
     var awayTxt = away == null ? '—' : (Math.abs(away) < 0.01 ? 'at the ask'
       : (Math.abs(away).toFixed(2) + '% ' + (away < 0 ? 'below ' : 'above ') + 'the ask'));
     var fills = !!(pr > 0 && ba) && s === 'buy' && pr >= ba;
-    var six = function (v) { return v ? String(+(+v).toPrecision(6)) : '—'; };
+    // Six figures, and a tiny price in the page's own 0.0₈2011 form rather than 2.00059e-9 (BLACKDRAGON, 2026-11-06).
+    var six = function (v) {
+      v = +v;
+      if (!v) return '—';
+      if (v >= 1e-5) return String(+v.toPrecision(6));
+      var t = v.toFixed(30).split('.')[1], z = 0;
+      while (t.charAt(z) === '0') z++;
+      var sub = String(z).split('').map(function (c) { return '₀₁₂₃₄₅₆₇₈₉'.charAt(+c); }).join('');
+      return '0.0' + sub + t.slice(z, z + 4).replace(/0+$/, '');
+    };
     var esc = function (t) { return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;'); };
     var lab, val, cls;
     if (!(pr > 0)) { lab = 'Ahead of you'; val = '—'; cls = ''; }
@@ -396,7 +407,8 @@
   // cleared: a price of theirs is theirs. Refilled on a Buy/Sell switch while they have not typed one.
   function prefillPrice(p) {
     var f = fields(p), pi = input(f[0]), d = window.__lxnAssetData;
-    if (!pi || p.__lxnPxTyped || String(pi.value || '').trim() || !pool) return;
+    // Any token with a price, pool or not: Order Context reads this field, and it shows without an order-book pool too.
+    if (!pi || p.__lxnPxTyped || String(pi.value || '').trim() || pool === undefined) return;
     var px = d && d.price > 0 ? +d.price : 0;
     if (!(px > 0)) return;
     pi.value = plainIn(+px.toPrecision(8));
