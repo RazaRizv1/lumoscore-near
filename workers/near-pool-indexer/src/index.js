@@ -445,6 +445,80 @@ async function lps(url, env) {
   return json({ ok: true, c }, 120);
 }
 
+// ---- the dashboard's network figures ------------------------------------------------------------------------
+// RAZA 2026-11-05: "Why are network stats taking so long to load". NearBlocks' v1/charts, the only source of NEAR's
+// account total, answers Cloudflare's shared IPs with 429, so a Pages Function reading it per cache miss came back
+// empty and blanked Assets, Pools and Accounts together. Read here instead, off any page's path: the */2 cron retries
+// until NearBlocks answers, and the last good figures live in D1 (global, unlike the per-colo edge cache), so a
+// refusal only leaves them a little older. Each part is kept on its own: a failed one never blanks the others.
+// charts is 1.5 MB, read with indexOf: JSON.parse of it is over this plan's 10 ms CPU.
+const NET_EVERY_MS = 3 * 3600000;
+function sumField(t, key) {
+  const A = '"' + key + '":"';
+  let n = 0, i = 0, rows = 0;
+  for (;;) {
+    i = t.indexOf(A, i);
+    if (i < 0) break;
+    i += A.length;
+    const v = parseInt(t.slice(i, t.indexOf('"', i)), 10);
+    if (isFinite(v)) { n += v; rows++; }
+  }
+  return { n, rows };
+}
+function lastField(t, key) {
+  const A = '"' + key + '":"';
+  const i = t.lastIndexOf(A);
+  if (i < 0) return null;
+  const v = parseInt(t.slice(i + A.length, t.indexOf('"', i + A.length)), 10);
+  return isFinite(v) ? v : null;
+}
+async function viewJson(account, method) {
+  const r = await rpc('query', { request_type: 'call_function', finality: 'final', account_id: account, method_name: method, args_base64: 'e30=' });
+  return JSON.parse(new TextDecoder().decode(new Uint8Array((r && r.result) || [])));
+}
+async function netJob(env) {
+  const db = env.DB, now = Date.now();
+  const row = await db.prepare("SELECT v FROM meta WHERE k = 'netstats'").first();
+  const cur = row ? JSON.parse(row.v) : {};
+  if (cur.atA && cur.atF && cur.atP && now - Math.min(cur.atA, cur.atF, cur.atP) < NET_EVERY_MS) return { net: 'fresh' };
+  const next = Object.assign({}, cur);
+  const A = { headers: Object.assign({ accept: 'application/json' }, UA) };
+  if (!(next.atP && now - next.atP < NET_EVERY_MS)) {
+    try {
+      const [pc, dm] = await Promise.all([viewJson(REF, 'get_number_of_pools'), viewJson('dclv2.ref-labs.near', 'get_metadata')]);
+      const a = Number(pc), b = Number((dm || {}).pool_count);
+      if (a > 0 && b > 0) Object.assign(next, { poolsClassic: a, poolsDcl: b, pools: a + b, atP: now });
+    } catch (e) {}
+  }
+  if (!(next.atF && now - next.atF < NET_EVERY_MS)) {
+    try {
+      const r = await fetch('https://api.nearblocks.io/v1/fts/count', A);
+      const c = r.ok ? Number((((await r.json()).tokens || [])[0] || {}).count) : 0;
+      if (c > 0) Object.assign(next, { assets: c, atF: now });
+    } catch (e) {}
+  }
+  if (!(next.atA && now - next.atA < NET_EVERY_MS)) {
+    try {
+      const r = await fetch('https://api.nearblocks.io/v1/charts', A);
+      if (r.ok) {
+        const t = await r.text(), made = sumField(t, 'new_accounts'), gone = sumField(t, 'deleted_accounts');
+        // A history that stops short is a truncated body or a changed shape, not a small network.
+        if (made.rows >= 2000 && made.n > 1e8) {
+          const d = t.lastIndexOf('"date":"');
+          Object.assign(next, { accounts: made.n - gone.n, active: lastField(t, 'active_accounts'), day: d < 0 ? null : t.slice(d + 8, d + 18), atA: now });
+        }
+      }
+    } catch (e) {}
+  }
+  await setMeta(db, 'netstats', JSON.stringify(next)).run();
+  return { net: 'read', accounts: !!next.atA, assets: !!next.atF, pools: !!next.atP };
+}
+// GET /netstats -> the stored figures, each part with the time it was read.
+async function netstats(env) {
+  const row = await env.DB.prepare("SELECT v FROM meta WHERE k = 'netstats'").first();
+  return json(Object.assign({ ok: !!row }, row ? JSON.parse(row.v) : {}), 60);
+}
+
 // ---- read --------------------------------------------------------------------------------------------
 function json(body, maxAge) {
   return new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json; charset=utf-8',
@@ -485,6 +559,7 @@ export default {
   async scheduled(event, env, ctx) {
     if (event.cron === '*/2 * * * *') {                   // participants only: its own invocation, its own budget
       ctx.waitUntil(lpJob(env).then((r) => console.log('lps', JSON.stringify(r)), (e) => console.error('lp job failed', e && e.message)));
+      ctx.waitUntil(netJob(env).then((r) => console.log('net', JSON.stringify(r)), (e) => console.error('net job failed', e && e.message)));
       return;
     }
 
@@ -499,6 +574,9 @@ export default {
     }
     if (url.pathname === '/who') {
       try { return await who(url, env); } catch (e) { return json({ ok: false, error: 'read failed' }, 0); }
+    }
+    if (url.pathname === '/netstats') {
+      try { return await netstats(env); } catch (e) { return json({ ok: false, error: 'read failed' }, 0); }
     }
     if (url.pathname === '/lps') {
       try { return await lps(url, env); } catch (e) { return json({ ok: false, error: 'read failed' }, 0); }

@@ -153,7 +153,8 @@
   // SVG data url commonly carries a raw # (read as a fragment, truncating the image) or a newline.
   function cssUrl(u) {
     u = String(u || '');
-    if (!/^data:image\//i.test(u) && !/^https:\/\//i.test(u)) return '';
+    // /assets/ too (RAZA 2026-11-05: Recent Activity drew letters for NEAR and LUMOS, whose logos are site paths).
+    if (!/^data:image\//i.test(u) && !/^https:\/\//i.test(u) && u.indexOf('/assets/') !== 0) return '';
     if (u.indexOf('"') >= 0 || u.indexOf('\\') >= 0 || u.length > 400000) return '';
     u = u.replace(/[\r\n\t]/g, '');
     if (/^data:image\/svg\+xml,/i.test(u)) u = u.replace(/#/g, '%23');
@@ -1557,6 +1558,22 @@
     for (var i = 0; i < h.length; i++) if (h[i].id === id && h[i].logo) return h[i].logo;
     return '';
   }
+  // STELLAR'S AMOUNTS (RAZA 2026-11-05: "instead of 100,000,000 you could have just written 100M"): its wallet's amt()
+  // in _walletdata.js, figure for figure: 1.00M, 1,000.0, 500.10, 0.005.
+  function orderAmt(n) {
+    n = +n || 0;
+    var a = Math.abs(n), num = function (v, dp) { return v.toLocaleString('en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp }); };
+    if (a >= 1e12) return (n / 1e12).toFixed(2) + 'T';
+    if (a >= 1e9) return (n / 1e9).toFixed(2) + 'B';
+    if (a >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+    if (a >= 1e3) return num(n, a >= 1e4 ? 0 : 1);
+    if (a >= 1) return num(n, 2);
+    if (a > 0) {
+      var d = Math.min(7, Math.max(2, 2 - Math.floor(Math.log(a) / Math.LN10))), t = n.toFixed(d);
+      return t.indexOf('.') >= 0 ? t.replace(/0+$/, '').replace(/[.]$/, '') : t;
+    }
+    return '0';
+  }
   function orderRow(tpl, x) {
     var row = tpl.cloneNode(true);
     // data-oid is what the design's gate (.order-row:not([data-oid]){display:none}) waits for, and what
@@ -1599,24 +1616,14 @@
     }
     var cols = row.querySelectorAll('.order-details .col');
     var vals = [
-      x.px != null ? fmt(x.px, 6) + ' ' + x.qsym : '—',
-      x.amt != null ? fmt(x.amt, 6) + ' ' + x.sym : '—',
-      x.tot != null ? fmt(x.tot, 6) + ' ' + x.qsym : '—'
+      x.px != null ? orderAmt(x.px) + ' ' + x.qsym : '—',
+      x.amt != null ? orderAmt(x.amt) + ' ' + x.sym : '—',
+      x.tot != null ? orderAmt(x.tot) + ' ' + x.qsym : '—'
     ];
     for (var i = 0; i < cols.length && i < 3; i++) { var v = cols[i].querySelector('.v'); if (v) plain(v, vals[i]); }
-    // DCL keeps the original size, so the design's fill bar is real here (XRPL had to drop it).
+    // No fill bar, as on Stellar (RAZA 2026-11-05: "remove filled section on near open orders").
     var prog = row.querySelector('.order-progress-wrap');
-    if (prog) {
-      var pct = (x.orig > 0 && x.filled != null) ? Math.min(100, x.filled / x.orig * 100) : null;
-      var pl = prog.querySelectorAll('.pl span');
-      if (pct == null) { if (prog.parentNode) prog.parentNode.removeChild(prog); }
-      else {
-        if (pl[0]) plain(pl[0], (pct > 0 && pct < 1 ? '<1' : Math.round(pct)) + '% filled');
-        if (pl[1]) plain(pl[1], fmt(x.filled, 4) + ' / ' + fmt(x.orig, 4) + ' ' + x.ssym);
-        var fill = prog.querySelector('.order-progress-fill');
-        if (fill) fill.style.width = pct.toFixed(1) + '%';
-      }
-    }
+    if (prog && prog.parentNode) prog.parentNode.removeChild(prog);
     var cb = row.querySelector('.order-cancel');
     if (cb) {
       // COLLECT is the same button (RAZA 2026-10-21): a fully filled order's proceeds wait in the contract
@@ -1899,7 +1906,7 @@
     return a;
   }
 
-  function tokOf(f) { return { code: f.s, logo: f.ic || (f.c === WNEAR ? NEAR_LOGO : '') }; }
+  function tokOf(f) { return { code: f.s, logo: f.ic || (f.c === WNEAR ? NEAR_LOGO : orderLogo(f.c)) }; }
 
   function paintActivity(me) {
     var block = $('.activity-block');
@@ -2071,7 +2078,7 @@
           var nm = tr.querySelector('.lp-nm');
           if (nm) plain(nm, p.syms.join(' / '));
           var sb = tr.querySelector('.lp-sb');
-          if (sb) sb.textContent = 'Pool #' + p.id + (p.farm ? ' · farming' : '') + ' · Rhea';
+          if (sb) sb.textContent = 'Pool #' + p.id + (p.farm ? ' · farming' : '');
           if (td[1]) {
             var s1 = td[1].querySelector('.p1'), s2 = td[1].querySelector('.p2');
             if (s1) s1.textContent = p.share > 0 && p.share < 0.01 ? '<0.01%' : p.share.toFixed(2) + '%';

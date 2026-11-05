@@ -6,7 +6,7 @@
   "scripts": {
     "rebuild": "node _tools/rebuild.js",
     "rebuild:base": "node _tools/rebuild.js --base",
-    "build": "node C:/LumosCore/_tools/shared_functions.js . && node _tools/bake_curated.js && node _tools/extract_site.js near && node _tools/sync_assets.js",
+    "build": "node C:/LumosCore/_tools/shared_functions.js . && node _tools/_nearnetbake.js && node _tools/bake_curated.js && node _tools/extract_site.js near && node _tools/sync_assets.js",
     "build:root": "node C:/LumosCore/_tools/shared_functions.js . && node _tools/extract_site.js near --root",
     "predeploy": "node C:/LumosCore/_tools/shared_functions.js . --check && node _tools/predeploy_check.js",
     "sync:functions": "node C:/LumosCore/_tools/shared_functions.js .",
