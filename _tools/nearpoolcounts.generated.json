@@ -1,18 +1,18 @@
 {
- "generated": "2026-10-31T01:47:26.635Z",
- "classic": 8992,
- "dcl": 6329,
+ "generated": "2026-11-05T01:06:18.841Z",
+ "classic": 9006,
+ "dcl": 6429,
  "counts": {
   "wrap.near": {
-   "n": 10509,
-   "live": 5300
+   "n": 10601,
+   "live": 5374
   },
   "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1": {
    "n": 556,
-   "live": 394
+   "live": 395
   },
   "usdt.tether-token.near": {
-   "n": 469,
+   "n": 470,
    "live": 325
   },
   "qtc.omft.near": {
@@ -44,8 +44,8 @@
    "live": 78
   },
   "nearly-993927.nearlytrade.near": {
-   "n": 169,
-   "live": 115
+   "n": 170,
+   "live": 116
   },
   "6b175474e89094c44da98b954eedeac495271d0f.factory.bridge.near": {
    "n": 184,
@@ -60,7 +60,7 @@
    "live": 23
   },
   "aaaaaa20d9e0e2461697782ef11675f668207961.factory.bridge.near": {
-   "n": 326,
+   "n": 328,
    "live": 22
   },
   "wth-0b2227.launchpad.justhoot.near": {
@@ -89,7 +89,7 @@
   },
   "lst.rhealab.near": {
    "n": 13,
-   "live": 7
+   "live": 6
   },
   "token.0xshitzu.near": {
    "n": 67,
@@ -152,8 +152,8 @@
    "live": 27
   },
   "gear.enleap.near": {
-   "n": 21,
-   "live": 14
+   "n": 24,
+   "live": 15
   },
   "yuvi-6c041e37.qlyphs.near": {
    "n": 9,
@@ -184,7 +184,7 @@
    "live": 4
   },
   "sol-0xd31e793eff8104551603bfac6e1222af303d4c5b.omdep.near": {
-   "n": 1,
+   "n": 3,
    "live": 1
   },
   "52a047ee205701895ee06a375492490ec9c597ce.factory.bridge.near": {

@@ -37,13 +37,14 @@ function blank(html) {
   // in view from the first paint until pools.js rebuilds it (seen on the first local check, 2026-10-21).
   // It ships hidden instead; buildPager() shows it once there is more than one real page, and the design's
   // tab script shows it again on the All Pools tab as it always did.
-  // The Total Liquidity caption says what the figure under it sums. "Across all pools" is not true here --
-  // the list is the curated-token pools, not every Rhea pool -- and pools.js writing the correction at
-  // runtime swapped one caption for another in view (measured: at 267ms). So it ships correct.
-  const CAP = '<div class="amm-snapshot-sub">Across all pools</div>';
-  if (out.indexOf(CAP) >= 0) {
+  // The Total Liquidity caption ships as pools.js writes it, because writing it only at runtime swapped one
+  // caption for another in view (measured: at 267ms). RAZA 2026-11-05: "Across all NEAR pools". The containers
+  // keep their last-run text, so the wording before that is matched as well as the design's own.
+  for (const was of ['Across all pools', 'Across the pools listed here']) {
+    const CAP = '<div class="amm-snapshot-sub">' + was + '</div>';
+    if (out.indexOf(CAP) < 0) continue;
     n += out.split(CAP).length - 1;
-    out = out.split(CAP).join('<div class="amm-snapshot-sub">Across the pools listed here</div>');
+    out = out.split(CAP).join('<div class="amm-snapshot-sub">Across all NEAR pools</div>');
   }
   const PG = '<div class="pagination" id="paginationAll">';
   if (out.indexOf(PG) >= 0) {

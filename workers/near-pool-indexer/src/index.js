@@ -42,6 +42,10 @@ const RUN_MS = 45000;                       // a cron every minute must be done 
 //     borsh account (Rhea's own account there is its fee share, which every swap moves, so it does not count);
 //   * any action in a pool of MORE THAN TWO tokens, whose swaps nothing else publishes.
 // That is a few blocks an hour, so the run is bounded by the free RPC (8 in parallel), not by neardata.
+// LUMOSCORE'S OWN POOLS are read whole, swaps included (RAZA 2026-11-05: "Its already been a day and lumos isnt showing
+// its chart"). GeckoTerminal and DexScreener do not know a pool this small, so these rows are the only record of its
+// trades; the Trade page draws its chart and Recent Exchanges from them. A handful of blocks a day.
+const OWN_POOLS = new Set([9001]);
 const UA = { 'user-agent': 'LumosCore NEAR pool indexer (+https://lumoscore.com)' };
 const pause = (ms) => new Promise((go) => setTimeout(go, ms));
 
@@ -206,7 +210,7 @@ async function scan(hs, shard, t0, t1, deadline) {
     try { st = await storageTouched(h); } catch (e) { note(e); return null; }
     if (!st.pools.length) return [];
     let want = st.lp;
-    if (!want) for (const p of st.pools) { if ((await tokenCount(p)) > 2) { want = true; break; } }
+    if (!want) for (const p of st.pools) { if (OWN_POOLS.has(+p) || (await tokenCount(p)) > 2) { want = true; break; } }
     if (!want) return [];
     hits++;
     // The outcomes are in this block's shard file: a pool's storage changes in the block whose chunk ran it.
@@ -359,6 +363,88 @@ async function prices(url, env) {
   return json({ ok: true, h, near, tok }, 300);
 }
 
+// ---- participants: how many accounts hold each pool --------------------------------------------------------
+// RAZA 2026-11-05: Stellar's pool tables show participants and LP holders; NEAR's showed APR and volume. Horizon lists
+// a pool's holders. Rhea's contract cannot: shares sit in a lookup map that answers one account at a time. So:
+//   candidates  Rhea's LP list (a February 2026 snapshot) + every account our index saw deposit since 2026-10-29
+//   staked      Rhea's farm list for the pool: LP shares staked there leave get_pool_shares, so these count as they are
+//   verified    get_pool_shares for each candidate, the chain's answer, when a pool has at most LP_VERIFY of them;
+//               a bigger pool keeps the candidate count, marked approximate (a = 1), since no free RPC budget reads it
+// A second cron (*/2) runs ONLY this, in its own invocation with its own 50-subrequest budget, so it can never starve
+// the block scan. A pool is claimed (at = now) BEFORE it is read: one that kills the run waits a cycle, not forever.
+const LP_DS = 'https://api.data-service.ref.finance';
+const LP_VERIFY = 36, LP_BUDGET = 44, LP_EVERY_MS = 6 * 3600000, LP_WATCH_MAX = 3000;
+const LP_NOT = new Set([REF, 'boostfarm.ref-labs.near']);
+async function dsGet(path) {
+  const r = await fetch(LP_DS + path, { headers: Object.assign({ accept: 'application/json' }, UA) });
+  if (!r.ok) throw new Error('ds ' + r.status);
+  return r.json();
+}
+async function lpJob(env) {
+  const db = env.DB, now = Date.now();
+  let spent = 0, done = 0;
+  const due = await db.prepare('SELECT pool FROM lpn WHERE at < ?1 ORDER BY at LIMIT 12').bind(now - LP_EVERY_MS).all();
+  for (const row of due.results || []) {
+    if (spent >= LP_BUDGET - 4) break;
+    const id = row.pool;
+    await db.prepare('UPDATE lpn SET at = ?1 WHERE pool = ?2').bind(now, id).run();
+    const seed = encodeURIComponent(REF + '@' + id);
+    const [lp, farm, adds] = await Promise.all([
+      dsGet('/api/pool/' + id + '/lp').catch(() => null),
+      dsGet('/api/seedv2/' + seed + '/accounts').catch(() => null),
+      db.prepare("SELECT DISTINCT who FROM txs WHERE pool = ?1 AND kind = 'add' LIMIT 500").bind(id).all(),
+    ]);
+    spent += 2;
+    if (!lp) continue;                                  // could not ask: the old figure stands, never a guessed zero
+    const staked = new Set(((farm && farm.accounts && farm.accounts.accounts) || []).map((x) => String((x && x.account) || '')).filter((a) => a && !LP_NOT.has(a)));
+    const cand = new Set();
+    for (const x of (lp.pool && lp.pool.shares) || []) { const a = String((x && x.account) || ''); if (a && !LP_NOT.has(a)) cand.add(a); }
+    for (const x of adds.results || []) { const a = String((x && x.who) || ''); if (a && !LP_NOT.has(a)) cand.add(a); }
+    let n = staked.size, approx = 0;
+    const toRead = [...cand].filter((a) => !staked.has(a));
+    if (toRead.length > LP_VERIFY) { n += toRead.length; approx = 1; }
+    else {
+      if (spent + toRead.length > LP_BUDGET) { await db.prepare('UPDATE lpn SET at = 0 WHERE pool = ?1').bind(id).run(); break; }
+      let failed = 0;
+      for (let i = 0; i < toRead.length; i += 6) {
+        await Promise.all(toRead.slice(i, i + 6).map(async (a) => {
+          try {
+            const r = await rpc('query', { request_type: 'call_function', finality: 'final', account_id: REF, method_name: 'get_pool_shares',
+              args_base64: btoa(JSON.stringify({ pool_id: id, account_id: a })) });
+            const v = JSON.parse(new TextDecoder().decode(new Uint8Array((r && r.result) || [])));
+            if (BigInt(String(v || '0')) > 0n) n++;
+          } catch (e) { failed++; }
+        }));
+      }
+      spent += toRead.length;
+      if (failed * 3 > toRead.length) continue;          // mostly unread: not an answer
+      if (failed) approx = 1;
+    }
+    await db.prepare('UPDATE lpn SET n = ?1, a = ?2, at = ?3 WHERE pool = ?4').bind(n, approx, Date.now(), id).run();
+    done++;
+  }
+  return { lp: done, spent };
+}
+// GET /lps?ids=1,2,3 -> { ok, c: { id: [count, approximate] } }. Asking registers the pool for the job, as /prices does.
+async function lps(url, env) {
+  const ids = [...new Set(String(url.searchParams.get('ids') || '').split(',').filter((x) => /^[0-9]{1,7}$/.test(x)))].slice(0, 600).map(Number);
+  if (!ids.length) return json({ ok: false, error: 'no ids' }, 0);
+  const db = env.DB, c = {}, have = new Set();
+  for (let i = 0; i < ids.length; i += 90) {
+    const part = ids.slice(i, i + 90);
+    const r = await db.prepare('SELECT pool, n, a FROM lpn WHERE pool IN (' + part.map((_, k) => '?' + (k + 1)).join(',') + ')').bind(...part).all();
+    for (const x of r.results || []) { have.add(x.pool); if (x.n != null) c[x.pool] = [x.n, x.a]; }
+  }
+  const add = ids.filter((id) => !have.has(id));
+  if (add.length) {
+    const t = await db.prepare('SELECT COUNT(*) AS n FROM lpn').first();
+    const room = Math.max(0, LP_WATCH_MAX - ((t && t.n) || 0));
+    const st = add.slice(0, room).map((id) => db.prepare('INSERT OR IGNORE INTO lpn (pool, n, a, at) VALUES (?1, NULL, 0, 0)').bind(id));
+    if (st.length) await db.batch(st);
+  }
+  return json({ ok: true, c }, 120);
+}
+
 // ---- read --------------------------------------------------------------------------------------------
 function json(body, maxAge) {
   return new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json; charset=utf-8',
@@ -397,6 +483,11 @@ async function who(url, env) {
 
 export default {
   async scheduled(event, env, ctx) {
+    if (event.cron === '*/2 * * * *') {                   // participants only: its own invocation, its own budget
+      ctx.waitUntil(lpJob(env).then((r) => console.log('lps', JSON.stringify(r)), (e) => console.error('lp job failed', e && e.message)));
+      return;
+    }
+
     ctx.waitUntil(snapPrices(env).then((r) => console.log('prices', JSON.stringify(r)), (e) => console.error('price snapshot failed', e && e.message)));
     ctx.waitUntil(run(env).then((r) => console.log('indexed', JSON.stringify(r)), (e) => console.error('index run failed', e && e.message)));
   },
@@ -408,6 +499,9 @@ export default {
     }
     if (url.pathname === '/who') {
       try { return await who(url, env); } catch (e) { return json({ ok: false, error: 'read failed' }, 0); }
+    }
+    if (url.pathname === '/lps') {
+      try { return await lps(url, env); } catch (e) { return json({ ok: false, error: 'read failed' }, 0); }
     }
     if (url.pathname === '/prices') {
       try { return await prices(url, env); } catch (e) { return json({ ok: false, error: 'read failed' }, 0); }

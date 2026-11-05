@@ -66,6 +66,8 @@
   var DCL = 'dclv2.ref-labs.near', DCL_FEES = [100, 400, 2000, 10000];
   var WNEAR = 'wrap.near';
   var USDC = '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1';
+  var USDT = 'usdt.tether-token.near';
+  var HUBS = [WNEAR, USDC, USDT];                     // the token two-hop routes pass through
   var RPC = 'https://free.rpc.fastnear.com';
   var TGAS = '000000000000';
   var MAX_TX_GAS = 300;                               // TGas per transaction
@@ -225,13 +227,14 @@
     return callView(DCL, 'quote', { pool_ids: [poolId], input_token: tin, output_token: tout, input_amount: String(amt), tag: null })
       .then(function (r) { return String((r && r.amount) || '0'); });
   }
-  function hopReturn(h, amt) { return h.pool.dcl ? dclReturn(h.pool.id, h.tin, h.tout, amt) : getReturn(h.pool.id, h.tin, h.tout, amt); }
+  function legReturn(p, tin, tout, amt) { return p.dcl ? dclReturn(p.id, tin, tout, amt) : getReturn(p.id, tin, tout, amt); }
+  function hopReturn(h, amt) { return legReturn(h.pool, h.tin, h.tout, amt); }
   // The best of several pools for one leg. More in always gives more out, so choosing the best pool per
   // leg greedily is also the best two-leg route.
   function bestLeg(cands, tin, tout, amt) {
     if (!cands.length) return Promise.resolve(null);
     return Promise.all(cands.map(function (p) {
-      return getReturn(p.id, tin, tout, amt).then(function (o) { return { pool: p, out: o }; }, function () { return null; });
+      return legReturn(p, tin, tout, amt).then(function (o) { return { pool: p, out: o }; }, function () { return null; });
     })).then(function (rs) {
       var best = null;
       rs.forEach(function (x) { if (x && big(x.out) > BigInt(0) && (!best || big(x.out) > big(best.out))) best = x; });
@@ -239,8 +242,79 @@
     });
   }
 
-  // Routes: every direct pool, and two hops through wNEAR or USDC. Quoted with get_return on Rhea itself,
-  // and the route with the most output wins. Returns { hops:[{pool,tin,tout,out}], out } or null.
+  // THE DCL POOLS OF A PAIR THAT CAN TRADE, from get_pool on each tier. A definite answer is kept for the page
+  // session, so a keystroke's re-quote asks only the pools that exist; a failed read is not an answer.
+  var DCLP = {};
+  function dclPools(x, y) {
+    var k = [x, y].sort().join('|');
+    if (DCLP[k]) return DCLP[k];
+    var p = Promise.all(DCL_FEES.map(function (fee) {
+      return callView(DCL, 'get_pool', { pool_id: k + '|' + fee });
+    })).then(function (rs) {
+      var out = [];
+      rs.forEach(function (r) {
+        if (!r || r.state !== 'Running') return;
+        if (big(r.liquidity) > BigInt(0) || big(r.total_order_x) > BigInt(0) || big(r.total_order_y) > BigInt(0)) out.push({ id: r.pool_id, dcl: 1 });
+      });
+      return out;
+    });
+    DCLP[k] = p;
+    p.catch(function () { if (DCLP[k] === p) delete DCLP[k]; });
+    return p;
+  }
+
+  // THE TWO-HOP ROUTE WHEN THE LEGS LIVE ON DIFFERENT CONTRACTS (RAZA 2026-11-05: AURORA -> QTC read "No route between
+  // AURORA and QTC on NEAR right now"). AURORA's market is a classic pool (5469, AURORA/wNEAR, $60K) and QTC has no
+  // classic pool at all, only DCL (QTC/wNEAR 1%, QTC/USDC 0.2%), so poolsBetween found no second leg and DCL was only
+  // ever tried as one direct hop. This is the fallback when nothing above found a route, so a pair that already
+  // trades keeps its route and its RPC cost. Both legs on DCL is one transaction ("Swap" takes a list of pool_ids;
+  // its quote view gave the same figure chained as hop by hop, 2026-11-05). A classic leg and a DCL leg CANNOT be one
+  // transaction: those are two contracts with two message formats, so the route is two swaps in a row (route.split),
+  // the first ending in the hub token in the user's own wallet. It is not atomic: the second can fail, leaving the
+  // hub token there, which is why an atomic route wins unless a split gives more than 1% more, why the screens say
+  // so before signing, and why the second leg is quoted for, and sells, the FLOOR of the first (the 0.5% slippage):
+  // it has to name an exact amount at signing, and the floor is the one amount the first leg guarantees.
+  function viaHub(rows, a, m, b, amtRaw, asked) {
+    function miss() { asked.failed = 1; return []; }           // a pool list we could not read is not "none"
+    return Promise.all([dclPools(a, m).catch(miss), dclPools(m, b).catch(miss)]).then(function (d) {
+      var l1 = poolsBetween(rows, a, m, 2).concat(d[0]), l2 = poolsBetween(rows, m, b, 2).concat(d[1]);
+      if (!l1.length || !l2.length) return null;
+      return bestLeg(l1, a, m, amtRaw).then(function (x1) {
+        if (!x1) return null;
+        var kin = l2.filter(function (p) { return !p.dcl === !x1.pool.dcl; }), oth = l2.filter(function (p) { return !p.dcl !== !x1.pool.dcl; });
+        var floor = minOut(x1.out);
+        return Promise.all([bestLeg(kin, m, b, x1.out), bestLeg(oth, m, b, floor)]).then(function (x) {
+          var x2 = x[0], split = false;
+          if (x[1] && (!x2 || big(x[1].out) * BigInt(100) > big(x2.out) * BigInt(101))) { x2 = x[1]; split = true; }
+          if (!x2) return null;
+          var r = { hops: [{ pool: x1.pool, tin: a, tout: m, out: x1.out }, { pool: x2.pool, tin: m, tout: b, out: x2.out }], out: x2.out };
+          if (split) r.split = { hub: m, code: (META[m] && META[m].code) || (m === USDC ? 'USDC' : 'USDt'), amount: floor };
+          return r;
+        });
+      });
+    });
+  }
+  // One hub at a time, so the first pass over a pair's get_pool reads never bursts the free RPC.
+  function hubRoute(rows, a, b, amtRaw) {
+    var whole = null, split = null, chain = Promise.resolve(), asked = {};
+    HUBS.forEach(function (m) {
+      if (m === a || m === b) return;
+      chain = chain.then(function () { return viaHub(rows, a, m, b, amtRaw, asked); }).then(function (r) {
+        if (!r) return;
+        if (r.split) { if (!split || big(r.out) > big(split.out)) split = r; }
+        else if (!whole || big(r.out) > big(whole.out)) whole = r;
+      });
+    });
+    return chain.then(function () {
+      if (whole && split && big(split.out) * BigInt(100) > big(whole.out) * BigInt(101)) return split;
+      // "No route" only from pools that answered: a busy RPC says so instead.
+      if (!whole && !split && asked.failed) throw new Error('NEAR is busy right now. Try again in a moment.');
+      return whole || split;
+    });
+  }
+
+  // Routes: every direct pool, and two hops through wNEAR, USDC or USDt. Quoted with get_return on Rhea itself,
+  // and the route with the most output wins. Returns { hops:[{pool,tin,tout,out}], out, split? } or null.
   function route(fromId, toId, amtRaw) {
     var a = contractOf(fromId), b = contractOf(toId);
     if (a === b) return Promise.resolve(null);
@@ -260,7 +334,7 @@
         rs.forEach(function (x) { if (x && big(x.out) > BigInt(0) && (!best || big(x.out) > big(best.out))) best = x; });
         return best ? { hops: [{ pool: best.pool, tin: a, tout: b, out: best.out }], out: best.out } : null;
       });
-      [WNEAR, USDC].forEach(function (m) {
+      HUBS.forEach(function (m) {
         if (m === a || m === b) return;
         var l1 = poolsBetween(rows, a, m, 2), l2 = poolsBetween(rows, m, b, 2);
         if (!l1.length || !l2.length) return;
@@ -277,14 +351,15 @@
         var best = null, d = rs[1];
         rs[0].forEach(function (r) { if (r && (!best || big(r.out) > big(best.out))) best = r; });
         if (d && (!best || big(d.out) * BigInt(100) > big(best.out) * BigInt(101))) best = d;
-        return best;
+        return best || hubRoute(rows, a, b, amtRaw);
       });
     });
   }
-  // The same pools, re-asked hop by hop (spot price and the final refresh use this).
-  function along(hops, amtRaw) {
+  // The same pools, re-asked hop by hop (spot price and the final refresh use this). A split route's second leg
+  // sells the floor of the first, as it will on chain.
+  function along(hops, amtRaw, split) {
     var p = Promise.resolve(String(amtRaw));
-    hops.forEach(function (h) { p = p.then(function (amt) { return hopReturn(h, amt); }); });
+    hops.forEach(function (h, i) { p = p.then(function (amt) { return hopReturn(h, split && i ? minOut(amt) : amt); }); });
     return p;
   }
 
@@ -295,11 +370,11 @@
     var net = (big(amountRaw) - big(fee)).toString();
     if (big(net) <= BigInt(0)) return Promise.reject(new Error('That amount is too small to swap.'));
     return route(fromId, toId, net).then(function (r) {
-      if (!r) { var e = new Error('No route between those two tokens on Rhea right now.'); e.noroute = 1; throw e; }
+      if (!r) { var e = new Error('No route between those two tokens on NEAR right now.'); e.noroute = 1; throw e; }
       var tiny = big(net) / BigInt(1000);
       if (tiny < BigInt(1)) tiny = BigInt(1);
       function spotAt(t, n) {
-        return along(r.hops, t.toString()).then(function (o) {
+        return along(r.hops, t.toString(), !!r.split).then(function (o) {
           // Too few output units to be a price: ask again ten times larger, up to a hundredth of the trade.
           if (big(o) < BigInt(100000) && n < 2 && t * BigInt(10) <= big(net) / BigInt(100)) return spotAt(t * BigInt(10), n + 1);
           return { amt: t.toString(), out: o };
@@ -314,7 +389,7 @@
         }
         return {
           from: fromId, to: toId, amount: String(amountRaw), fee: fee, net: net,
-          out: r.out, min: minOut(r.out), slipBps: SLIP_BPS, hops: r.hops, impact: impact, at: Date.now()
+          out: r.out, min: minOut(r.out), slipBps: SLIP_BPS, hops: r.hops, split: r.split || null, impact: impact, at: Date.now()
         };
       });
     });
@@ -390,22 +465,30 @@
     var acct = feeAccount();
     var inC = contractOf(q.from), outC = contractOf(q.to);
     var outNative = q.to === 'near';
+    var sp = q.split || null;                        // two swaps in a row: see viaHub
     return Promise.all([
       balance(me, 'near'),
       feeReady(q.from),
       outNative ? Promise.resolve(true) : storageOf(outC, me),
       q.from === 'near' ? storageOf(WNEAR, me) : Promise.resolve(true),
-      q.from === 'near' ? balance(me, WNEAR).catch(function () { return null; }) : Promise.resolve(null)
+      q.from === 'near' ? balance(me, WNEAR).catch(function () { return null; }) : Promise.resolve(null),
+      sp ? storageOf(sp.hub, me) : Promise.resolve(true),
+      sp ? balance(me, sp.hub).catch(function () { return null; }) : Promise.resolve(null)
     ]).then(function (r0) {
       var nearHave = r0[0], r = r0.slice(1);
       var wnearBefore = r[3];
       if (r[0] !== true) throw new Error(r[0] === false ? 'Swaps from this token are not enabled yet.' : 'Could not check the fee setup — try again.');
-      var needOut = !r[1], needWrap = !r[2];
-      return Promise.all([needOut ? storageMin(outC) : null, needWrap ? storageMin(WNEAR) : null]).then(function (m) {
+      var needOut = !r[1], needWrap = !r[2], needHub = !r[4], hubBefore = r[5];
+      return Promise.all([needOut ? storageMin(outC) : null, needWrap ? storageMin(WNEAR) : null, needHub ? storageMin(sp.hub) : null]).then(function (m) {
         var txs = [];
         if (needOut) {
           txs.push({ signerId: me, receiverId: outC, actions: [{ type: 'FunctionCall', params: {
             methodName: 'storage_deposit', args: { account_id: me, registration_only: true }, gas: '30' + TGAS, deposit: m[0] } }] });
+        }
+        // A split route's first swap pays the hub token out to the user, who must be registered on it like any output.
+        if (needHub) {
+          txs.push({ signerId: me, receiverId: sp.hub, actions: [{ type: 'FunctionCall', params: {
+            methodName: 'storage_deposit', args: { account_id: me, registration_only: true }, gas: '30' + TGAS, deposit: m[2] } }] });
         }
         // WRAPPING IS ITS OWN TRANSACTION, as Rhea's own app does it (RAZA 2026-10-30: HOT refused the swap three
         // times with "User rejected the request" after he approved; nothing reached the chain). Every step of the
@@ -424,16 +507,17 @@
         }
         var actions = [], used = 0;
         var rt = router();
-        var acts = q.hops.map(function (h, i) {
+        // The swap this transaction makes: the whole route, or a split route's first leg, ending in the hub token.
+        var first = sp ? [q.hops[0]] : q.hops, firstOut = sp ? sp.hub : outC, firstMin = sp ? sp.amount : q.min, firstSkip = sp ? true : !outNative;
+        var acts = first.every(function (h) { return h.pool.dcl; }) ? [] : first.map(function (h, i) {
           var a = { pool_id: +h.pool.id, token_in: h.tin, token_out: h.tout };
           // Through the router the first hop names no amount: Rhea then swaps exactly what the router
           // forwards, so a rounding difference can never leave part of it unused (which would read as a refund).
           if (i === 0 && !rt) a.amount_in = q.net;
-          a.min_amount_out = i === q.hops.length - 1 ? q.min : '0';
+          a.min_amount_out = i === first.length - 1 ? firstMin : '0';
           return a;
         });
-        var dclHop = q.hops.length === 1 && q.hops[0].pool.dcl ? q.hops[0] : null;
-        if (dclHop) {
+        if (!acts.length) {
           // A DCL SWAP: the fee transfer and then ft_transfer_call to DCL, the shape the classic swap takes
           // without a router (the router speaks Rhea's classic actions only). The message is DCL's own, as
           // Rhea's app sends it on chain: {"Swap":{pool_ids, output_token, min_output_amount, skip_unwrap_near}}.
@@ -441,44 +525,56 @@
             args: { receiver_id: acct, amount: q.fee, memo: 'LumosCore platform fee ' + (feeBps() / 100) + '%' }, gas: '30' + TGAS, deposit: '1' } });
           used += 30;
           actions.push({ type: 'FunctionCall', params: { methodName: 'ft_transfer_call',
-            args: { receiver_id: DCL, amount: q.net, msg: JSON.stringify({ Swap: { pool_ids: [dclHop.pool.id], output_token: outC,
-              min_output_amount: q.min, skip_unwrap_near: !outNative } }) },
+            args: { receiver_id: DCL, amount: q.net, msg: JSON.stringify({ Swap: { pool_ids: first.map(function (h) { return h.pool.id; }), output_token: firstOut,
+              min_output_amount: firstMin, skip_unwrap_near: firstSkip } }) },
             gas: String(Math.min(SWAP_GAS, MAX_TX_GAS - used)) + TGAS, deposit: '1' } });
         } else if (rt) {
           // ONE action: the gross amount to the router, which takes the fee only if the swap fills.
           actions.push({ type: 'FunctionCall', params: { methodName: 'ft_transfer_call',
-            args: { receiver_id: rt, amount: q.amount, msg: JSON.stringify({ fee_bps: feeBps(), actions: acts, skip_unwrap_near: !outNative }) },
+            args: { receiver_id: rt, amount: q.amount, msg: JSON.stringify({ fee_bps: feeBps(), actions: acts, skip_unwrap_near: firstSkip }) },
             gas: String(Math.min(SWAP_GAS, MAX_TX_GAS - used)) + TGAS, deposit: '1' } });
         } else {
           actions.push({ type: 'FunctionCall', params: { methodName: 'ft_transfer',
             args: { receiver_id: acct, amount: q.fee, memo: 'LumosCore platform fee ' + (feeBps() / 100) + '%' }, gas: '30' + TGAS, deposit: '1' } });
           used += 30;
-          var msg = { force: 0, actions: acts, skip_unwrap_near: !outNative };
+          var msg = { force: 0, actions: acts, skip_unwrap_near: firstSkip };
           actions.push({ type: 'FunctionCall', params: { methodName: 'ft_transfer_call',
             args: { receiver_id: REF, amount: q.net, msg: JSON.stringify(msg) },
             gas: String(Math.min(SWAP_GAS, MAX_TX_GAS - used)) + TGAS, deposit: '1' } });
         }
         txs.push({ signerId: me, receiverId: inC, actions: actions });
+        // A split route's second swap: the hub token the first left in the wallet, on the other contract. Its
+        // own transaction, as wrapping is: HOT checks each one against the balances as they stand when it reaches it.
+        if (sp) {
+          var h2 = q.hops[1];
+          txs.push({ signerId: me, receiverId: sp.hub, actions: [{ type: 'FunctionCall', params: { methodName: 'ft_transfer_call',
+            args: { receiver_id: h2.pool.dcl ? DCL : REF, amount: sp.amount, msg: JSON.stringify(h2.pool.dcl
+              ? { Swap: { pool_ids: [h2.pool.id], output_token: outC, min_output_amount: q.min, skip_unwrap_near: !outNative } }
+              : { force: 0, actions: [{ pool_id: +h2.pool.id, token_in: h2.tin, token_out: h2.tout, amount_in: sp.amount, min_amount_out: q.min }], skip_unwrap_near: !outNative }) },
+            gas: SWAP_GAS + TGAS, deposit: '1' } }] });
+        }
         var dep = BigInt(0);
         if (needOut) dep += big(m[0]);
         if (needWrap) dep += big(m[1]);
+        if (needHub) dep += big(m[2]);
         // The gas reserve, checked here so every swap screen gets the same answer before anything is signed.
         var needNear = dep + (q.from === 'near' ? big(q.amount) : BigInt(0)) + big(SWAP_KEEP);
         if (big(nearHave) < needNear) {
-          throw new Error('Keep at least 0.2 NEAR in your wallet for gas: NEAR sets the gas aside before a swap runs and refunds what is not used (Rhea asks the same). '
+          throw new Error('Keep at least 0.2 NEAR in your wallet for gas: NEAR sets the gas aside before a swap runs and refunds what is not used. '
             + 'You have ' + fromUnits(nearHave, 24).replace(/(\.\d{4})\d+$/, '$1') + ' NEAR.');
         }
         return { txs: txs, steps: txs.length, needOut: needOut, needWrap: needWrap, storage: dep.toString(),
-          wrapped: q.from === 'near', wnearBefore: wnearBefore, me: me };
+          wrapped: q.from === 'near', wnearBefore: wnearBefore, me: me, split: sp, hubBefore: hubBefore };
       });
     });
   }
 
   // Sign through NEAR Connect. One transaction -> signAndSendTransaction; registration + swap ->
   // signAndSendTransactions (all five pinned launch wallets list it in their manifest features).
-  var LASTSIGN = null;
+  var LASTSIGN = null, LASTBUILT = null;
   function sign(b) {
     LASTSIGN = { me: b && b.txs && b.txs[0] && b.txs[0].signerId, b: b };
+    LASTBUILT = b;
     if (!window.lxn || typeof window.lxn.wallet !== 'function') return Promise.reject(new Error('Connect a NEAR wallet first.'));
     return window.lxn.wallet().then(function (w) {
       if (!w) throw new Error('No NEAR wallet is connected.');
@@ -514,8 +610,17 @@
     var wrapCheck = (L && L.b && L.b.wrapped && L.b.wnearBefore != null)
       ? balance(L.me, WNEAR).then(function (now) { return big(now) > big(L.b.wnearBefore) ? (big(now) - big(L.b.wnearBefore)).toString() : null; }, function () { return null; })
       : Promise.resolve(null);
-    return Promise.all([check, wrapCheck]).then(function (rr) {
-      var registered = rr[0], wrappedRaw = rr[1];
+    // Did a split route's first swap land without its second? Then the person now holds the hub token, and must be told.
+    var hubCheck = (L && L.b && L.b.split && L.b.hubBefore != null)
+      ? balance(L.me, L.b.split.hub).then(function (now) { return big(now) > big(L.b.hubBefore) ? (big(now) - big(L.b.hubBefore)).toString() : null; }, function () { return null; })
+      : Promise.resolve(null);
+    return Promise.all([check, wrapCheck, hubCheck]).then(function (rr) {
+      var registered = rr[0], wrappedRaw = rr[1], hubRaw = rr[2];
+      if (hubRaw) {
+        var hc = L.b.split.code, hd = (META[L.b.split.hub] && META[L.b.split.hub].dec) || (L.b.split.hub === WNEAR ? 24 : 6);
+        return 'Only the first step went through: you now hold ' + fromUnits(hubRaw, hd).replace(/([.][0-9]{6})[0-9]+$/, '$1') + ' ' + hc
+          + ' in your wallet. The second step did not. Swap that ' + hc + ' from your wallet to finish.';
+      }
       if (wrappedRaw) {
         return 'Your ' + fromUnits(wrappedRaw, 24).replace(/(\.\d{6})\d+$/, '$1') + ' NEAR was wrapped into wNEAR (it shows in your wallet as wNEAR), '
           + 'but the swap itself did not go through. Nothing is lost: wNEAR is NEAR one-to-one. The wallet said: "'
@@ -526,11 +631,39 @@
         return 'Only the first step went through: your account is now registered for ' + code + ' (a one-time deposit). '
           + 'The swap itself did not go through — check your wallet activity, then press Swap again to finish it.';
       }
-      // THE WALLET'S OWN WORDS, ALWAYS (RAZA's second HOT attempt, 2026-10-30: approved, nothing reached the
-      // chain, and the page said "not approved" -- HOT's error carried one of those words for a refusal of its
-      // own). Which it was is only in that text, so it is shown rather than paraphrased.
+      // THE WALLET'S OWN WORDS, BUT ONLY WHEN THEY SAY SOMETHING (RAZA 2026-11-03: "i want the error message to
+      // be 'Cancelled by the user.' instead of whatever BS it currently says" -- the same wording now used on
+      // Stellar and XRPL).
+      //
+      // This is deliberately NOT a plain rename, and the reasoning it replaces is why. HOT answered a GAS
+      // SHORTFALL with "User rejected the request" (RAZA's second attempt, 2026-10-30): balance 0.147 NEAR,
+      // Rhea needs 0.2 on hand, and nobody rejected anything. "Cancelled by the user." would state as fact
+      // something that was false, and bury the one thing that would have explained it. Two checks stand
+      // between the wallet's refusal and that sentence:
+      //
+      //   1. ASK THE CHAIN, NOT THE ERROR. build() already refuses under SWAP_KEEP before anything is signed,
+      //      but HOT applies a threshold of its own and a balance can move between build and signature, so the
+      //      balance is read again HERE. Below the gas floor, the shortfall is named and the person is not.
+      //   2. READ THE WORDS. A bare "User rejected the request" carries nothing beyond the refusal itself, so
+      //      wording it plainly loses no information. A message that ALSO mentions gas, balance, storage or a
+      //      fee is carrying the evidence, and that is shown verbatim exactly as before.
       var words = m ? m.replace(/\s+/g, ' ').slice(0, 180).replace(/\.$/, '') : '';
-      if (/reject|denied|cancel|declin/i.test(m)) return 'Nothing was swapped. The wallet said: "' + words + '".';
+      if (/reject|denied|cancel|declin/i.test(m)) {
+        var tells = /gas|balance|insufficient|not enough|storage|deposit|fund|fee|0\.2/i.test(m);
+        var who = (L && L.me) || '';
+        var ask = who
+          ? balance(who, 'near').then(function (raw) { return big(raw) < big(SWAP_KEEP) ? raw : null; },
+                                      function () { return null; })
+          : Promise.resolve(null);
+        return ask.then(function (short) {
+          if (short != null) {
+            return 'The swap was not sent: your wallet is down to ' + fromUnits(short, 24).replace(/(\.\d{4})\d+$/, '$1')
+              + ' NEAR, and a swap needs 0.2 NEAR on hand for gas. NEAR sets the gas aside before the swap runs '
+              + 'and refunds what it does not use. Top up and try again.';
+          }
+          return tells ? ('Nothing was swapped. The wallet said: "' + words + '".') : 'Cancelled by the user.';
+        });
+      }
       return (words ? 'The wallet stopped: "' + words + '". ' : 'The swap could not be completed. ')
         + 'Check your wallet activity before trying again.';
     });
@@ -538,8 +671,7 @@
 
   // What happened, from the swap transaction's outcome (the last one). ft_transfer_call returns the amount
   // the receiver USED: "0" means Rhea refused the swap and the input came back (the fee did not).
-  function verdict(results) {
-    var r = results && results[results.length - 1];
+  function verdictOf(r) {
     var st = r && r.status;
     if (!st || typeof st !== 'object') return { ok: null };
     if (st.Failure) return { ok: false, why: 'failed' };
@@ -550,6 +682,17 @@
       return { ok: true, used: used };
     }
     return { ok: null };
+  }
+  // A split route is two swaps, so the last outcome alone is not the answer, and "refunded" would be untrue: what came
+  // back from the second swap is the hub token, not what the person paid. stranded says the first landed and the
+  // second did not; a screen that does not know the word still prints its safe "failed" line.
+  function verdict(results) {
+    var n = results ? results.length : 0, v = verdictOf(n ? results[n - 1] : null);
+    if (!(LASTBUILT && LASTBUILT.split) || n < 2) return v;
+    var first = verdictOf(results[n - 2]);
+    if (first.ok === false) return { ok: false, why: 'failed' };
+    if (v.ok === false) return { ok: false, why: 'failed', stranded: LASTBUILT.split.code };
+    return v;
   }
   function txHash(results) {
     var r = results && results[results.length - 1];

@@ -35,7 +35,7 @@ const KEEP = 86400;
 const WNEAR = 'wrap.near';
 const RPC = 'https://free.rpc.fastnear.com';
 const PAIRS = 'https://api.dexscreener.com/token-pairs/v1/near/';
-const VER = 'v6';   // v2: web, x, desc; v3: curated logo first (2026-10-29); v5: own pools; v6: their count (2026-11-04)
+const VER = 'v7';   // v2: web, x, desc; v3: curated logo first (2026-10-29); v5: own pools; v6: their count (2026-11-04); v7: 30 pools (2026-11-05)
 
 // NEAR account-id rules (nomicon): 2-64 chars, lowercase alphanumerics separated by single - _ or .,
 // no leading/trailing separator. Implicit accounts (64 hex) and eth-implicit (0x + 40 hex) satisfy
@@ -214,7 +214,7 @@ async function build(id, context) {
   // Pools, largest first. Logos travel once in a map rather than repeated per pool.
   const logos = {};
   const pools = own.slice().sort((a, b) => (+((b.liquidity || {}).usd) || 0) - (+((a.liquidity || {}).usd) || 0))
-    .slice(0, 25).map((p) => {
+    .slice(0, 30).map((p) => {
       const b = p.baseToken || {}, q = p.quoteToken || {};
       for (const t of [b, q]) {
         const a = String(t.address || '');

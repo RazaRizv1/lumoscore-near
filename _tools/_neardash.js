@@ -107,11 +107,10 @@ const TEXT = [
   ['Launch tokens directly on NEAR.', 'Launch tokens directly on the NEAR DEX.'],
   ['Launch tokens on NEAR.', 'Launch tokens on the NEAR DEX.'],
   ['Trade pairs on Stellar DEX.', 'Trade pairs on NEAR.'],
-  // The desktop card's subtitle. TRUE ON STELLAR, NOT HERE: a NEAR limit order rests in a Rhea DCL
-  // pool and those are paired against NEAR, so "any pair" promised something the dialog this card now
-  // opens refuses for most pairs. The same sentence, honest about this ledger — the wrong-chain-copy
-  // case where identical words are correct on one fork and wrong on another.
-  ['Swap instantly, or place a limit order on any pair.', 'Swap instantly, or place a limit order against NEAR.'],
+  // The desktop card's subtitle: Stellar's own sentence, now true here (RAZA 2026-11-05: swaps route between any two
+  // tokens and a limit order rests in any pair's DCL pool, browser/qorders.js). A HEAL rule: containers still hold
+  // the wording this transform wrote before, and a fresh base already has the right text, so it is a no-op there.
+  ['Swap instantly, or place a limit order against NEAR.', 'Swap instantly, or place a limit order on any pair.'],
   // lx-dashqa: Custom Swap / Orders OPENS THE DIALOG, as the design wires it and as the XRPL fork
   // leaves it (_xrpldash.js has no custom-swap rule at all). Only the no-dialog FALLBACK is re-pointed.
   //

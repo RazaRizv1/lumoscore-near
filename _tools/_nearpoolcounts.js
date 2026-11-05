@@ -22,6 +22,13 @@ const RPCS = ['https://free.rpc.fastnear.com', 'https://near.drpc.org'];
 const CUR = path.join(__dirname, 'nearcurated.generated.json');
 const OUT = path.join(__dirname, 'nearpoolcounts.generated.json');
 const PAGE = 500;
+// EVERY POOL OF A TOKEN, for its Trade page (RAZA 2026-11-05: "browse all 394 pools for USDC"). The live pool list the
+// edge reads holds ~2,500 of Rhea's ~9,000 pools, so USDC read 52 where its count says 394. This whole-chain read is
+// the only list that has them all, so each token's live classic pools are written here, one small file per token,
+// and the page fetches only its own. Reserves are as of this run, which is enough for the small pools only this file
+// knows: the live list wins for every pool it carries. wNEAR is left out: it is every pool's other side.
+const POOLS_DIR = path.join(__dirname, '..', 'assets', 'tokenpools');
+const PRICES = 'https://indexer.ref.finance/list-token-price';
 
 async function view(account_id, method_name, args) {
   let last;
@@ -74,6 +81,37 @@ async function all(account, method, total) {
   }
   const out = {};
   for (const t of tokens) if (counts[t.i]) out[t.i] = counts[t.i];
+  const px = await fetch(PRICES).then((r) => r.json());
+  const nearUsd = Number((px['wrap.near'] || {}).price);
+  if (!(nearUsd > 0)) throw new Error('no NEAR price');
+  const symOf = (id) => { const c = tokens.find((t) => t.i === id); return String((c && c.s) || (px[id] && px[id].symbol) || id.split('.')[0].slice(0, 12)).slice(0, 16); };
+  const decOf = (id) => { const c = tokens.find((t) => t.i === id); const d = c && c.d != null ? c.d : (px[id] && px[id].decimal); return d == null ? null : +d; };
+  fs.mkdirSync(POOLS_DIR, { recursive: true });
+  let files = 0;
+  for (const t of tokens) {
+    if (t.i === 'wrap.near') continue;
+    const rows = [];
+    classic.forEach((p, id) => {
+      const ids = p.token_account_ids || [], am = p.amounts || [];
+      if (ids.indexOf(t.i) < 0 || !am.length || !am.every((a) => /^[0-9]+$/.test(String(a)) && String(a) !== '0')) return;
+      // Liquidity in NEAR: a wNEAR side doubled, else reserves x prices when every side is priced, else unknown (null).
+      const wi = ids.indexOf('wrap.near');
+      let liq = null;
+      if (ids.length === 2 && wi >= 0) liq = Number(am[wi]) / 1e24 * 2;
+      else {
+        let usd = 0;
+        ids.forEach((x, k) => { const d = decOf(x), pr = Number((px[x] || {}).price); usd = (usd == null || d == null || !(pr > 0)) ? null : usd + Number(am[k]) / Math.pow(10, d) * pr; });
+        if (usd != null) liq = usd / nearUsd;
+      }
+      // Scam tokens quote absurd prices: such a figure is unknown, not the biggest pool on the page.
+      if (liq != null && !(liq < 1e8)) liq = null;
+      rows.push([String(id), liq == null ? null : +liq.toPrecision(5), ids.map((x) => [x, symOf(x)])]);
+    });
+    rows.sort((a, b) => (b[1] || 0) - (a[1] || 0));
+    fs.writeFileSync(path.join(POOLS_DIR, t.i + '.json'), JSON.stringify(rows));
+    files++;
+  }
+  console.log('token pool lists: ' + files + ' file(s) -> assets/tokenpools/');
   fs.writeFileSync(OUT, JSON.stringify({ generated: new Date().toISOString(), classic: classic.length, dcl: dcl.length, counts: out }, null, 1) + '\n');
   console.log('pools read: ' + classic.length + ' classic + ' + dcl.length + ' DCL; ' + Object.keys(out).length + ' of ' + tokens.length + ' curated token(s) counted -> ' + path.basename(OUT));
   tokens.slice(0, 12).forEach((t) => { const c = out[t.i] || { n: 0, live: 0 }; console.log('  ' + t.s.padEnd(12) + String(c.live).padStart(5) + ' live  ' + String(c.n).padStart(5) + ' total'); });

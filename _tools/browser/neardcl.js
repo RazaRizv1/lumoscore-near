@@ -171,38 +171,46 @@
   // NEAR at its own price -- RHEA's four wNEAR pools hold orders and no liquidity at all.
   // A definite answer (pool or none) is kept for the page session; a failed read is NOT an answer and
   // rejects, and is asked again next time.
+  //
+  // ANY TWO TOKENS (RAZA 2026-11-05: "without requiring NEAR as a direct side of the pair"). A DCL pool can be any two
+  // tokens, and QTC/USDC is one, so quote names the other side (default wNEAR) and decQ its decimals. The pool then
+  // carries both (q, qd): the price, plan and book below are "quote per token", which is NEAR per token by default.
   var POOL = {};
-  function poolFor(token) {
-    if (!token || token === 'near' || token === WNEAR) return Promise.resolve(null);
-    if (POOL[token]) return POOL[token];
+  function poolFor(token, quote, decQ) {
+    var Q = (!quote || quote === 'near') ? WNEAR : quote;
+    if (!token || token === 'near' || token === Q) return Promise.resolve(null);
+    if (Q !== WNEAR && decQ == null) return Promise.reject(new Error('The quote token has no decimals.'));
+    var key = token + '|' + Q;
+    if (POOL[key]) return POOL[key];
     var p = Promise.all(FEES.map(function (f) {
-      return callView(DCL, 'get_pool', { pool_id: poolIdFor(token, WNEAR, f) });
+      return callView(DCL, 'get_pool', { pool_id: poolIdFor(token, Q, f) });
     })).then(function (rs) {
       var best = null, bestK = null;
       rs.forEach(function (r) {
         if (!r || r.state !== 'Running') return;
-        var nx = r.token_x === WNEAR, p = Math.pow(CONSTANT_D, +r.current_point);   // raw y per raw x
+        var nx = r.token_x === Q, p = Math.pow(CONSTANT_D, +r.current_point);       // raw y per raw x
         var ox = Number(r.total_order_x || 0), oy = Number(r.total_order_y || 0);
         var k = [big(r.liquidity), nx ? (ox + oy / p) : (oy + ox * p)];
         if (!best || k[0] > bestK[0] || (k[0] === bestK[0] && k[1] > bestK[1])) { best = r; bestK = k; }
       });
-      return best ? describe(best, token) : null;
+      return best ? describe(best, token, Q, Q === WNEAR ? 24 : +decQ) : null;
     });
-    POOL[token] = p;
-    p.catch(function () { if (POOL[token] === p) delete POOL[token]; });
+    POOL[key] = p;
+    p.catch(function () { if (POOL[key] === p) delete POOL[key]; });
     return p;
   }
-  function describe(r, token) {
+  function describe(r, token, q, qd) {
     var tokIsX = r.token_x === token;
     return {
       id: r.pool_id, x: r.token_x, y: r.token_y, fee: +r.fee, pd: +r.point_delta || feeToPointDelta(r.fee),
-      token: token, tokIsX: tokIsX, cur: +r.current_point, L: String(r.liquidity), Lx: String(r.liquidity_x || '0'), raw: r
+      token: token, q: q, qd: qd, tokIsX: tokIsX, cur: +r.current_point, L: String(r.liquidity), Lx: String(r.liquidity_x || '0'), raw: r
     };
   }
 
-  // Price of the TOKEN in NEAR (human) at a pool point (x/y space).
+  // Price of the TOKEN in the pool's quote, NEAR by default (human), at a pool point (x/y space).
   function tokenPriceAt(pool, decT, point) {
-    var pxy = pointToPrice(pool.tokIsX ? decT : 24, pool.tokIsX ? 24 : decT, point);   // x in y
+    var dq = pool.qd == null ? 24 : pool.qd;
+    var pxy = pointToPrice(pool.tokIsX ? decT : dq, pool.tokIsX ? dq : decT, point);   // x in y
     return pool.tokIsX ? pxy : 1 / pxy;
   }
 
@@ -210,19 +218,21 @@
   // The order the user typed, in the SDK's terms: point (the msg's), the snapped price it rests at, and
   // what is sold. side 'buy' sells NEAR (as wNEAR) for the token; 'sell' sells the token for wNEAR.
   // priceStr is NEAR per token, amountStr is the token amount; both human decimal strings.
+  // In a pool of two other tokens the pool's quote stands where NEAR stands here; nearRaw is then that quote's amount.
   function plan(pool, decT, side, priceStr, amountStr) {
     var P = Number(priceStr), A = Number(amountStr);
     if (!(P > 0) || !(A > 0)) return null;
+    var dq = pool.qd == null ? 24 : pool.qd, Q = pool.q || WNEAR;
     var amtRaw = toUnits(amountStr, decT), pxRaw = toUnits(priceStr, 24);
     if (!amtRaw || amtRaw === '0' || !pxRaw || pxRaw === '0') return null;
-    var nearRaw = (big(amtRaw) * big(pxRaw) / (BigInt(10) ** BigInt(decT))).toString();   // amount x price
+    var nearRaw = (big(amtRaw) * big(pxRaw) / (BigInt(10) ** BigInt(decT + 24 - dq))).toString();   // amount x price
     var sell, buy, sellRaw, point;
     if (side === 'sell') {
-      sell = pool.token; buy = WNEAR; sellRaw = amtRaw;
-      point = priceToPoint(decT, 24, amountStr, plain(A * P), pool.fee);
+      sell = pool.token; buy = Q; sellRaw = amtRaw;
+      point = priceToPoint(decT, dq, amountStr, plain(A * P), pool.fee);
     } else {
-      sell = WNEAR; buy = pool.token; sellRaw = nearRaw;
-      point = priceToPoint(24, decT, plain(A * P), amountStr, pool.fee);
+      sell = Q; buy = pool.token; sellRaw = nearRaw;
+      point = priceToPoint(dq, decT, plain(A * P), amountStr, pool.fee);
     }
     var msgPoint = splitPool(pool.id).x === sell ? point : -point;
     if (msgPoint === 0) msgPoint = 0;                                  // never "-0" in the JSON
@@ -310,7 +320,7 @@
     });
   }
   // A pool answer kept for the page session is dropped, so the next poolFor asks the chain again.
-  function forget(token) { delete POOL[token]; }
+  function forget(token, quote) { delete POOL[token + '|' + (quote || WNEAR)]; }
 
   // Is this account registered on the DCL contract? true / false, or rejects when it could not ask.
   function registered(me) { return storageOf(DCL, me).then(function (s) { return !!s; }); }
@@ -400,6 +410,13 @@
     var m = String((e && e.message) || e || '').replace(/\s+/g, ' ').slice(0, 180);
     try { console.warn('[LumosCore order] wallet error:', e); } catch (x) {}
     if (e && e.lxnMulti) return 'The wallet stopped: "' + (m || 'no reason given') + '". A setup step may already have gone through — check your wallet activity before trying again.';
+    // Same rule as nearswap.afterError (2026-11-03): a BARE refusal carries nothing beyond the refusal, so it
+    // is worded plainly; a message that also mentions gas, balance, storage or a fee is carrying the evidence
+    // and is shown verbatim. No balance probe here, unlike the swap path -- SWAP_KEEP is Rhea's figure and
+    // DCL's gas floor has never been established, and a number I have not verified is worse than no number.
+    if (/reject|denied|cancel|declin/i.test(m) && !/gas|balance|insufficient|not enough|storage|deposit|fund|fee/i.test(m)) {
+      return 'Cancelled by the user.';
+    }
     return 'Nothing was ' + verb + '. The wallet said: "' + (m || 'no reason given') + '".';
   }
   // The order transaction's outcome (the last one): ft_transfer_call returns what DCL USED.
@@ -463,7 +480,7 @@
     if (oa >= depthN) { var mo = -Infinity; orders.forEach(function (o) { if (o.tok && o.q > mo) mo = o.q; }); farAbove = Math.min(farAbove, mo); }
     if (ob >= depthN) { var mb = Infinity; orders.forEach(function (o) { if (o.near && o.q < mb) mb = o.q; }); farBelow = Math.max(farBelow, mb); }
 
-    var tenT = Math.pow(10, decT), tenN = 1e24;
+    var tenT = Math.pow(10, decT), tenN = Math.pow(10, pool.qd == null ? 24 : pool.qd);
     function px(q) { return Math.pow(CONSTANT_D, q) * tenT / tenN; }            // NEAR per token (human)
     // current point's split, in token / NEAR raw
     var curTok = pool.tokIsX ? Lx / Math.pow(S, c) : (L - Lx) * Math.pow(S, c);

@@ -69,7 +69,7 @@
       if (tone != null) { v.classList.remove('up', 'down'); v.style.color = tone; }
     });
   }
-  function say(p, text) {
+  function say(p, text, note) {
     var b = cta(p);
     if (!b || !b.parentNode) return;
     var n = $('.lxda-swaperr', p);
@@ -82,6 +82,7 @@
     }
     n.textContent = text || '';
     n.style.display = text ? '' : 'none';
+    n.style.color = text && note ? 'var(--text-soft,#8a8fa3)' : '';   // a plain note, not an error
   }
   function toast(text) {
     try { if (typeof window.lxToast === 'function') { window.lxToast(text); return; } } catch (e) {}
@@ -220,6 +221,8 @@
     S().quote(s.pay, s.get, raw).then(function (qq) {
       if (my !== seq) return;
       applyQuote(p, qq);
+      // Two swaps, not one (nearswap.js viaHub): said before the press, because the second can fail on its own.
+      if (qq.split && !(me() && have != null && short(p, raw, have))) say(p, splitNote(qq), true);
     }, function (e) {
       if (my !== seq) return;
       clearQuote(p);
@@ -261,6 +264,10 @@
         + ', and a NEAR swap keeps 0.2 NEAR back for network fees';
     }
     return '';
+  }
+
+  function splitNote(qq) {
+    return 'This pair swaps in two steps through ' + qq.split.code + ', two approvals. If the second step fails, you keep the ' + qq.split.code + '.';
   }
 
   // ---- signing ------------------------------------------------------------------------------------
@@ -307,7 +314,7 @@
     }).then(function (x) {
       var v = S().verdict(x.res), gm = meta(x.q.to), pm = meta(x.q.from);
       if (v.ok === false) {
-        stop(v.why === 'refunded'
+        stop(v.stranded ? 'Only the first step went through: the ' + v.stranded + ' is in your wallet, and the second step did not fill.' : v.why === 'refunded'
           ? (S().ROUTED
             ? 'The pool did not fill the swap (the price moved). All of your ' + pm.code + ' came back, the platform fee included.'
             : 'The pool did not fill the swap (the price moved). Your ' + pm.code + ' came back; the ' + (S().FEE_BPS / 100) + '% platform fee was kept.')

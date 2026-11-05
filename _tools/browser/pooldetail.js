@@ -14,8 +14,7 @@
 //   Pool Activity chart   no per-pool liquidity history; the plot stays behind the design's own gate
 //                         (never lx-chartready) with a one-line note.
 //   Pool Transactions     no per-pool activity feed; one empty row / note.
-//   Participants          Rhea publishes no LP-holder list; the stat cell shows APR instead.
-//   My Position           not read (see browser/mypositions.js); "Connect a wallet" or an em dash.
+//   My Position           not read until a wallet is set; "Connect your wallet to see your position" or an em dash.
 //   Deposit / Withdraw    no NEAR liquidity signing yet: the form is cleared and disabled with the design's
 //                         own lx-dwoff state and a "coming soon" label, written to data-lxorig/data-lxdis
 //                         so lx-gate cannot restore an enabled Stellar "Add Liquidity" on connect.
@@ -46,6 +45,13 @@
     // one. Same form the Trade-Asset page uses: 0.0₆3092.
     if (v < 1e-4) return subZero(v);
     return v.toPrecision(4);
+  }
+
+  // An exchange rate, four places as Stellar's header prints one ("5.9575 XLM"), so one rate never reads shorter
+  // than its neighbour because of a trailing zero.
+  function rateText(v) {
+    if (v == null || !isFinite(v)) return '—';
+    return v >= 1 && v < 1000 ? v.toFixed(4) : num(v, 2);
   }
 
   // 0.0₆3092 — the count of leading zeros written as a subscript, as lumoscore.com prints small prices.
@@ -200,7 +206,7 @@
     var svg = wrap && wrap.querySelector('svg');
     if (!svg) return;
     [].forEach.call(svg.querySelectorAll('path'), function (p) { p.setAttribute('d', ''); });
-    [].slice.call(svg.querySelectorAll('.lx-chvol')).forEach(function (r) { r.parentNode.removeChild(r); });
+    [].slice.call(svg.querySelectorAll('.lx-chvol, .lx-chcandle')).forEach(function (r) { r.parentNode.removeChild(r); });
     var hh = document.getElementById('tvlChart') || wrap;
     if (hh) hh.__lxnHov = null;
     var dot = svg.querySelector('circle');
@@ -362,23 +368,13 @@
     });
   }
 
-  var KIND = { SIMPLE_POOL: 'Classic pool', STABLE_SWAP: 'Stable pool', RATED_SWAP: 'Rated stable pool', DEGEN_SWAP: 'Degen pool' };
-  function pct(v) {
-    if (v == null || !isFinite(v)) return '—';
-    if (v > 0 && v < 0.01) return '<0.01%';
-    return v.toLocaleString('en-US', { maximumFractionDigits: 2, minimumFractionDigits: 2 }) + '%';
-  }
-  function feeText(f) { return f == null || !isFinite(f) ? '—' : (+f).toLocaleString('en-US', { maximumFractionDigits: 3 }) + '%'; }
-
   // ==== THE POOL'S LIVE HALF (RAZA 2026-10-30: "nothing on pools-pool page is being shown") ===============
   //
   // Phase 1 left five parts of this page as empty states. They are filled now, each from the one source that
   // has it, all asked by the page (GeckoTerminal refuses Cloudflare, as on the token page):
   //   24h stats     DexScreener (the endpoint) where it lists the pool, else GeckoTerminal's pool record --
   //                 which also says when a pool genuinely had no trades, so a dead pool reads 0, not "—".
-  //   Pool Activity GeckoTerminal OHLCV for this pool: the price of one side in the other, with volume under
-  //                 it, per range. NOT the pool's TVL over time, which nothing publishes for NEAR pools, so the
-  //                 design's "Pool TVL" choice is relabelled "Price" rather than drawn from a guess.
+  //   Pool Activity The line is the pool's TVL (see the note on rheaDaily); the candles are GeckoTerminal OHLCV.
   //   Transactions  GeckoTerminal's latest trades on this pool -- SWAPS. Deposits and withdrawals have no NEAR
   //                 source (Rhea's indexer stopped in Dec 2024), and their filters say so.
   //   My Position   Rhea itself: get_pool_shares and the pool's shares_total_supply, read when a wallet is set.
@@ -444,22 +440,13 @@
       var vol = volUsd / USD;
       var feeFrac = (+row.fee || 0) / 100;
       var fees = vol * feeFrac;
-      var liqUsd = +a.reserve_in_usd || (row.liq != null ? row.liq * USD : 0);
-      var apr = liqUsd > 0 ? (fees * USD * 365 / liqUsd) * 100 : null;
       [['vol', vol], ['fees', fees]].forEach(function (x) {
         var cell = statCell(x[0]);
         if (!cell) return;
-        unitVal(cell.querySelector('.v'), num(x[1], 2), 'NEAR');
+        unitVal(cell.querySelector('.v'), (x[1] > 0 ? '≥ ' : '') + num(x[1], 2), 'NEAR');
         var s = cell.querySelector('.s');
         if (s) s.textContent = x[1] > 0 ? ('≈ ' + usdShort(x[1] * USD)) : 'no trades in 24h';
       });
-      var ap = $('.ph-stat.lx-partstat') || statCell('apr') || statCell('participant');
-      if (ap) {
-        var av = ap.querySelector('.v');
-        if (av) av.textContent = apr != null ? pct(apr) : '—';
-        var as = ap.querySelector('.s');
-        if (as) as.textContent = apr != null ? 'from 24h fees' : '';
-      }
     }, function () {});
   }
 
@@ -471,6 +458,14 @@
     if (a >= 1) return v.toFixed(2);
     if (a >= 0.0001) return v.toFixed(5);
     return v.toPrecision(3);
+  }
+  // Stellar's rule for a tight axis: the decimals follow the gridline step, so a stable pool moving between 1.0001
+  // and 1.0003 does not print the same figure five times.
+  function axisStep(v, step) {
+    if (!(step > 0)) return axisNum(v);
+    var a = Math.abs(v), sc = a >= 1e6 ? 1e6 : (a >= 1e3 ? 1e3 : 1);
+    var dp = Math.ceil(-Math.log(step / sc) / Math.LN10) + 1;
+    return (v / sc).toFixed(Math.max(sc > 1 ? 1 : 2, Math.min(12, dp))) + (sc === 1e6 ? 'M' : (sc === 1e3 ? 'K' : ''));
   }
   function tipWhen(ms, spanMs) {
     var d = new Date(ms), mo = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -500,9 +495,17 @@
       w.appendChild(line(value, 'color:var(--text);font-size:14px;font-weight:800;font-variant-numeric:tabular-nums;margin-top:1px'));
       return w;
     }
+    // One line per figure: a candle has six of them, and the two-line row above would overflow the chart.
+    function kv(label, value, gap) {
+      var w = document.createElement('div');
+      w.style.cssText = 'display:flex;justify-content:space-between;gap:16px;margin-top:' + (gap || 2) + 'px';
+      w.appendChild(line(label, 'color:var(--text-soft,#8a8fa3);font-size:11px;font-weight:600'));
+      w.appendChild(line(value, 'color:var(--text);font-size:13px;font-weight:800;font-variant-numeric:tabular-nums'));
+      return w;
+    }
     function at(cx, cy) {
       var S = host.__lxnHov, svg = host.querySelector('svg');
-      if (!S || !svg || !S.pts || S.pts.length < 2) return hide();
+      if (!S || !svg || !S.pts || S.pts.length < (S.cand ? 1 : 2)) return hide();
       var hr = host.getBoundingClientRect();
       if (cx < hr.left || cx > hr.right || cy < hr.top || cy > hr.bottom) return hide();
       var m = null;
@@ -510,20 +513,26 @@
       if (!m) return hide();
       var pt = svg.createSVGPoint(); pt.x = cx; pt.y = cy;
       var vx = pt.matrixTransform(m.inverse()).x;
-      var n = S.pts.length, k = Math.max(0, Math.min(n - 1, Math.round(vx / S.PW * (n - 1))));
+      var n = S.pts.length, k = Math.max(0, Math.min(n - 1, S.cand ? Math.floor(vx / S.PW * n) : Math.round(vx / S.PW * (n - 1))));
       var p = S.pts[k];
       var sp = svg.createSVGPoint();
-      sp.x = (k / (n - 1)) * S.PW;
+      sp.x = S.cand ? ((k + 0.5) / n) * S.PW : (k / (n - 1)) * S.PW;
       sp.y = S.BOT - ((p[1] - S.mn) / S.rg) * (S.BOT - S.TOP);
       var scr = sp.matrixTransform(m), lx = scr.x - hr.left, ly = scr.y - hr.top;
       vline.style.left = lx + 'px'; vline.style.opacity = '1';
-      dot.style.left = lx + 'px'; dot.style.top = ly + 'px'; dot.style.opacity = '1';
+      dot.style.left = lx + 'px'; dot.style.top = ly + 'px'; dot.style.opacity = S.cand ? '0' : '1';   // a bar is its own mark, as on Stellar
       box.textContent = '';
       box.appendChild(line(tipWhen(p[0], S.span), 'color:var(--text-soft,#8a8fa3);font-size:11px;font-weight:600;margin-bottom:4px'));
-      if (S.metric === 'tvl') box.appendChild(row('TVL', usdShort(p[1])));
+      if (S.cand) {
+        var fig = function (v) { return S.metric === 'tvl' ? usdShort(v) : (rateText(v) + ' ' + S.unit); };
+        [['Open', p[4]], ['High', p[2]], ['Low', p[3]], ['Close', p[1]]].forEach(function (c) { box.appendChild(kv(c[0], fig(c[1]))); });
+        if (+p[6] > 0) box.appendChild(kv('TVL', usdShort(+p[6]), 7));
+        if (+p[5] > 0) box.appendChild(kv('Volume', S.volUsd ? usdShort(+p[5] * S.volUsd) : (axisNum(+p[5]) + ' ' + S.unit), +p[6] > 0 ? 2 : 7));
+      }
+      else if (S.metric === 'tvl') box.appendChild(row('TVL', usdShort(p[1])));
       else if (S.metric === 'vol') box.appendChild(row('Volume', S.volUsd ? usdShort(p[1] * S.volUsd) : (axisNum(p[1]) + ' ' + S.unit)));
       else box.appendChild(row('Price of ' + S.base, num(p[1], 6) + ' ' + S.unit));
-      if (S.metric !== 'vol' && +p[5] > 0) {
+      if (!S.cand && S.metric !== 'vol' && +p[5] > 0) {
         var r2 = row('Volume', S.volUsd ? usdShort(+p[5] * S.volUsd) : (axisNum(+p[5]) + ' ' + S.unit));
         r2.style.marginTop = '8px'; box.appendChild(r2);
       }
@@ -550,7 +559,8 @@
   function drawChart(pts, meta) {
     var wrap = $('.chart-svg-wrap');
     var svg = wrap && wrap.querySelector('svg');
-    if (!svg || !pts || pts.length < 2) return;
+    var cand = !!meta.cand;                          // candles: each point owns a slot, so one point is a chart
+    if (!svg || !pts || pts.length < (cand ? 1 : 2)) return;
     chartNote('');
     [].slice.call(svg.querySelectorAll('rect:not(.lx-ch)')).forEach(function (n) { n.parentNode.removeChild(n); });
     [].slice.call(svg.querySelectorAll('.lx-chcandle, .lx-chvol')).forEach(function (n) { n.parentNode.removeChild(n); });
@@ -565,22 +575,34 @@
     var RIGHT = Math.max(0, W - labX) + 12;
     var TOP = labYs.length ? labYs[0] : 10;
     var BOT = labYs.length ? labYs[labYs.length - 1] : (H - 24);
-    var PW = W - RIGHT;
+    // Candles stop where the design's gridlines do (Stellar's 93.6%), clear of the axis labels the line runs under.
+    var PW = cand ? Math.round(W * 0.936) : W - RIGHT;
     var vals = pts.map(function (p) { return p[1]; });
     var mn = Math.min.apply(null, vals), mx = Math.max.apply(null, vals);
+    if (cand) {
+      // THE VOLUME BAND IS THE CHART'S OWN (RAZA 2026-11-05: "positioned strictly at the lower ~20% of the chart
+      // height"). The axis is opened below the lowest wick so the candles stand above the bars, not on them, and
+      // every label stays true because the scale itself moved.
+      mx = Math.max.apply(null, pts.map(function (p) { return p[2]; }));
+      mn = Math.min.apply(null, pts.map(function (p) { return p[3]; }));
+      var gap = (mx - mn) || (Math.abs(mx) * 0.04) || 1;
+      mx += gap * 0.06;
+      mn = Math.max(0, mn - gap * 0.3);
+    }
     var rg = (mx - mn) || Math.abs(mx) || 1;
     var d = '', i;
-    for (i = 0; i < pts.length; i++) {
+    for (i = 0; !cand && i < pts.length; i++) {
       var x = (i / (pts.length - 1)) * PW;
       var y = BOT - ((vals[i] - mn) / rg) * (BOT - TOP);
       d += (i ? 'L' : 'M') + x.toFixed(1) + ' ' + y.toFixed(1);
     }
     var paths = svg.querySelectorAll('path');
     var area = paths[0], ln = paths[1] || paths[0];
-    if (area) area.setAttribute('d', d + ' L' + PW + ' ' + H + ' L0 ' + H + ' Z');
+    if (area) area.setAttribute('d', cand ? '' : d + ' L' + PW + ' ' + H + ' L0 ' + H + ' Z');
     if (ln && ln !== area) ln.setAttribute('d', d);
     var dot = svg.querySelector('circle');
-    if (dot) {
+    if (dot && cand) dot.setAttribute('r', '0');
+    else if (dot) {
       dot.setAttribute('r', dot.getAttribute('r') === '0' ? '4' : (dot.getAttribute('r') || '4'));
       dot.setAttribute('cx', String(PW));
       dot.setAttribute('cy', (BOT - ((vals[vals.length - 1] - mn) / rg) * (BOT - TOP)).toFixed(1));
@@ -588,12 +610,13 @@
     var vmax = 0;
     pts.forEach(function (p) { var v = +p[5] || 0; if (v > vmax) vmax = v; });
     if (vmax > 0 && meta.metric !== 'vol') {
-      var VH = (BOT - TOP) * 0.24, bwid = Math.max(1, Math.min(10, PW / pts.length * 0.6)), vroot = Math.sqrt(vmax);
+      var VH = (BOT - TOP) * (cand ? 0.2 : 0.24), vroot = Math.sqrt(vmax), nv = pts.length;
+      var bwid = cand ? candleW(PW, nv) : Math.max(1, Math.min(10, PW / nv * 0.6));
       var firstPath = svg.querySelector('path');
       pts.forEach(function (p, k) {
         var v = +p[5] || 0;
         if (!(v > 0)) return;
-        var bh = Math.max(2, (Math.sqrt(v) / vroot) * VH), bx = (k / (pts.length - 1)) * PW;
+        var bh = Math.max(2, (Math.sqrt(v) / vroot) * VH), bx = cand ? ((k + 0.5) / nv) * PW : (k / (nv - 1)) * PW;
         var r = document.createElementNS(NSVG, 'rect');
         r.setAttribute('class', 'lx-ch lx-chvol');
         r.setAttribute('x', (bx - bwid / 2).toFixed(1)); r.setAttribute('y', (BOT - bh).toFixed(1));
@@ -603,15 +626,19 @@
       });
     }
     var host = document.getElementById('tvlChart') || wrap;
-    host.__lxnHov = { pts: pts, PW: PW, TOP: TOP, BOT: BOT, mn: mn, rg: rg, unit: meta.unit, base: meta.base,
+    host.__lxnHov = { pts: pts, PW: PW, TOP: TOP, BOT: BOT, mn: mn, rg: rg, unit: meta.unit, base: meta.base, cand: cand,
       metric: meta.metric, volUsd: meta.volUsd, span: pts[pts.length - 1][0] - pts[0][0] };
     wirePoolHover(host);
     yLab.slice().sort(function (p, q) { return (parseFloat(p.getAttribute('y')) || 0) - (parseFloat(q.getAttribute('y')) || 0); })
-      .forEach(function (t, k, arr) { t.textContent = (meta.pre || '') + axisNum(mn + rg * (1 - k / Math.max(1, arr.length - 1))); });
+      .forEach(function (t, k, arr) {
+        var at = mn + rg * (1 - k / Math.max(1, arr.length - 1));
+        t.textContent = (meta.pre || '') + (cand ? axisStep(at, rg / Math.max(1, arr.length - 1)) : axisNum(at));
+      });
     var span = pts[pts.length - 1][0] - pts[0][0];
     allText.filter(function (t) { return yLab.indexOf(t) < 0; })
       .sort(function (p, q) { return (parseFloat(p.getAttribute('x')) || 0) - (parseFloat(q.getAttribute('x')) || 0); })
       .forEach(function (t, k, arr) {
+        if (pts.length < 2 && k !== Math.floor(arr.length / 2)) { t.textContent = ''; return; }   // one candle, one date
         var dt = new Date(pts[Math.round((k / Math.max(1, arr.length - 1)) * (pts.length - 1))][0]);
         var two = function (v) { return (v < 10 ? '0' : '') + v; };
         var mo = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -620,22 +647,30 @@
       });
     try { document.documentElement.classList.add('lx-chartready'); } catch (e) {}
   }
+  // A candle and the volume bar under it share one width and one centre.
+  function candleW(pw, n) { return Math.max(1.5, Math.min(40, pw / n * 0.62)); }
   function chartBars(kind) {
     var host = document.getElementById('tvlChart') || $('.chart-svg-wrap');
     var svg = host && host.querySelector('svg'), S = host && host.__lxnHov;
-    if (!svg || !S || !S.pts || S.pts.length < 2) return;
+    if (!svg || !S || !S.pts || S.pts.length < (S.cand ? 1 : 2)) return;
     [].forEach.call(svg.querySelectorAll('path'), function (p) { p.setAttribute('d', ''); });
     var dot = svg.querySelector('circle');
     if (dot) dot.setAttribute('r', '0');
-    var n = S.pts.length, w = Math.max(1.5, Math.min(14, S.PW / n * 0.62));
+    var n = S.pts.length, w = S.cand ? candleW(S.PW, n) : Math.max(1.5, Math.min(14, S.PW / n * 0.62));
     var Y = function (val) { return S.BOT - ((val - S.mn) / S.rg) * (S.BOT - S.TOP); };
     S.pts.forEach(function (p, k) {
-      var x = (k / (n - 1)) * S.PW, y1, y2, col;
+      var x = S.cand ? ((k + 0.5) / n) * S.PW : (k / (n - 1)) * S.PW, y1, y2, col;
       if (kind === 'vol') { y1 = Y(p[1]); y2 = S.BOT; col = '#8b7bf0'; }
       else {
         var o = (p[4] > 0) ? p[4] : (k ? S.pts[k - 1][1] : p[1]);
         y1 = Math.min(Y(o), Y(p[1])); y2 = Math.max(Y(o), Y(p[1]));
-        col = p[1] >= o ? '#22c55e' : '#ff5b5b';
+        col = p[1] >= o ? '#22c55e' : '#ef4444';
+        var wick = document.createElementNS(NSVG, 'line');
+        wick.setAttribute('class', 'lx-ch lx-chcandle');
+        wick.setAttribute('x1', x.toFixed(1)); wick.setAttribute('x2', x.toFixed(1));
+        wick.setAttribute('y1', Y(p[2]).toFixed(1)); wick.setAttribute('y2', Y(p[3]).toFixed(1));
+        wick.setAttribute('stroke', col); wick.setAttribute('stroke-width', Math.max(1.2, S.PW / 400).toFixed(1));
+        svg.appendChild(wick);
       }
       var r = document.createElementNS(NSVG, 'rect');
       r.setAttribute('class', 'lx-ch lx-chcandle');
@@ -650,8 +685,8 @@
   // dollars, from Rhea's own daily history (api.data-service.ref.finance /api/pool/<id>/tvl and /volume,
   // current to today and back to the pool's creation; CORS open, so each visitor asks it). Daily is what
   // exists, so 1D is the last two days and 1W the last eight -- a line, never an invented intraday curve.
-  // The GeckoTerminal price path in loadPoolChart is left after its `return`, unreached.
-  var CH = { range: '1M', type: 'line', metric: 'tvl', pts: null, gen: 0 };
+  // The Bar view's candles are the one part that is not this series: see renderCandles.
+  var CH = { range: '1M', type: 'line', metric: 'tvl', pts: null, gen: 0, ohlc: {} };
   var CH_DAYS = { '1D': 2, '1W': 8, '1M': 31, '3M': 91, '1Y': 366, 'ALL': 100000 };
   var RHEA_DS = 'https://api.data-service.ref.finance/api/pool/';
   var DAILY = {};                      // pool id -> Promise of [[ms, tvlUsd, 0, 0, 0, volUsd], ...] oldest first
@@ -710,48 +745,117 @@
     '1M': { tf: 'hour', agg: 4, limit: 180, ttl: 1800000 }, '3M': { tf: 'day', agg: 1, limit: 90, ttl: 3600000 },
     '1Y': { tf: 'day', agg: 1, limit: 365, ttl: 3600000 }, 'ALL': { tf: 'day', agg: 1, limit: 1000, ttl: 3600000 }
   };
+  // The chart reads as the header does: the first token priced in the second, "USDt per wNEAR".
   function chartSides() {
     var p = window.__lxnPool;
     if (!p) return null;
-    var nearSide = p.a.i === 'wrap.near' ? p.a : (p.b.i === 'wrap.near' ? p.b : null);
-    var quote = nearSide || p.b, base = nearSide ? (nearSide === p.a ? p.b : p.a) : p.a;
-    return { base: base, quote: quote, unit: quote.i === 'wrap.near' ? 'NEAR' : quote.name };
+    return { base: p.a, quote: p.b, unit: p.b.name };
+  }
+  // At most 60 candles, the density Stellar draws (46): a year of daily candles at 1.6 units wide is a smear. Each
+  // merged candle is a real one -- first open, last close, highest high, lowest low, summed volume.
+  function mergeCandles(list) {
+    var f = Math.ceil(list.length / 60), out = [];
+    if (f < 2) return list;
+    for (var i = 0; i < list.length; i += f) {
+      var g = list.slice(i, i + f), hi = -Infinity, lo = Infinity, vol = 0;
+      g.forEach(function (c) { if (c[2] > hi) hi = c[2]; if (c[3] < lo) lo = c[3]; vol += +c[5] || 0; });
+      out.push([g[0][0], g[g.length - 1][1], hi, lo, g[0][4], vol]);
+    }
+    return out;
+  }
+  // The pool's daily TVL as candles, each day opening where the last closed, for a pool with no price feed.
+  function tvlCandles(v) {
+    return mergeCandles(v.slice(1).map(function (q, k) {
+      var o = v[k][1], c = q[1];
+      return [q[0], c, Math.max(o, c), Math.min(o, c), o, +q[5] || 0];
+    }));
+  }
+  // The menu says what the chart is drawing: "Pool Price" only while price candles are up.
+  function modeLabel(price) {
+    var tv = price ? 'Pool Price' : 'Pool TVL', sel = $('.chart-mode-select');
+    $$('.chart-mode-menu button[data-metric]').forEach(function (b) {
+      if (b.getAttribute('data-metric') !== 'vol') { b.textContent = tv; b.setAttribute('data-logoed', '1'); }
+    });
+    if (sel) [].forEach.call(sel.childNodes, function (nd) { if (nd.nodeType === 3 && nd.nodeValue.trim()) nd.nodeValue = ' ' + (CH.metric === 'vol' ? 'Volume' : tv) + ' '; });
+  }
+  // REAL CANDLES, ON EVERY RANGE (RAZA 2026-11-05: "the Pool Activity section renders clean financial Japanese
+  // candlesticks", against NEAR's solid purple bars). Rhea's history is one TVL figure a day, which cannot make a
+  // candle: it has no high or low, and 1D would be a single bar. GeckoTerminal has true OHLCV per pool from 15
+  // minutes up, in the header's own quote, so the candles are the pool's price and the tooltip adds the TVL of that
+  // day. Stellar's candles are TVL because Horizon can rebuild its reserves at any moment; NEAR has no such series.
+  // A pool GeckoTerminal does not track (every 3- and 4-token stable pool: a 404, an answer) or a feed that fails
+  // draws daily TVL candles instead. Only an answer is kept in CH.ohlc: a failed read (GeckoTerminal's 429 reaches
+  // the page as a bare network error) is asked again, and the price candles replace the TVL ones when it answers.
+  function renderCandles(s, v) {
+    var range = CH.range, gen = CH.gen, R = CH_R[range] || CH_R['1M'], p = window.__lxnPool;
+    var drawn = function (hit) {
+      if (gen !== CH.gen || CH.type !== 'bar' || CH.metric === 'vol') return;     // the reader moved on
+      if (!hit) {
+        modeLabel(false);
+        drawChart(tvlCandles(v), { unit: '', base: s.base.name, metric: 'tvl', volUsd: 1, pre: '$', cand: true });
+        chartBars('candle');
+        return;
+      }
+      modeLabel(true);
+      // The TVL of the day each candle opened, off the daily series already drawn as the line.
+      var j = 0;
+      hit.pts.forEach(function (c) {
+        while (j + 1 < v.length && v[j + 1][0] <= c[0]) j++;
+        c[6] = v[j][1];
+      });
+      drawChart(hit.pts, { unit: s.unit, base: s.base.name, metric: 'price', volUsd: hit.volUsd, cand: true });
+      chartBars('candle');
+    };
+    if (CH.ohlc[range] !== undefined) { drawn(CH.ohlc[range]); return; }
+    var at = 0, ask = function () {
+      if (gen !== CH.gen) return;
+      gtGet(gtId(p.id) + '/ohlcv/' + R.tf + '?aggregate=' + R.agg + '&limit=' + R.limit + '&currency=token&token=' + encodeURIComponent(s.base.i),
+        'lumos.nearGtPoolOhlc.v2.' + p.id + '.' + range + '.' + s.base.i, R.ttl)
+        .then(function (j) {
+          // GeckoTerminal states volume in the quote token: in dollars here wherever NEAR is one of the two sides.
+          var toUsd = !USD ? null : (s.quote.i === WNEAR ? function (c) { return c[5] * USD; } : (s.base.i === WNEAR ? function (c) { return c[5] / c[1] * USD; } : null));
+          var seen = {}, list = ((j && j.data && j.data.attributes && j.data.attributes.ohlcv_list) || [])
+            .filter(function (c) { if (!c || !(c[4] > 0) || seen[c[0]]) return false; seen[c[0]] = 1; return true; })
+            .map(function (c) { return [c[0] * 1000, +c[4], +c[2], +c[3], +c[1], +c[5]]; })
+            .sort(function (x, y) { return x[0] - y[0]; });
+          if (toUsd) list.forEach(function (c) { c[5] = toUsd(c); });
+          CH.ohlc[range] = list.length ? { pts: mergeCandles(list), volUsd: toUsd ? 1 : null } : null;
+          drawn(CH.ohlc[range]);
+        }, function (e) {
+          if (String(e && e.message) === '404') CH.ohlc[range] = null;
+          drawn(null);
+          if (CH.ohlc[range] === undefined && at < 3) { at++; setTimeout(ask, [3000, 15000, 30000][at - 1]); }
+        });
+    };
+    ask();
   }
   function renderChart() {
     var s = chartSides(), v = CH.pts;
     if (!s || !v) return;
-    var volUsd = s.quote.i === 'wrap.near' ? USD : null;
-    if (CH.src === 'rhea') {
-      if (CH.metric === 'vol') {
-        drawChart(v.map(function (q) { return [q[0], +q[5] || 0, 0, 0, 0, 0]; }), { unit: '', base: s.base.name, metric: 'vol', volUsd: 1, pre: '$' });
-        chartBars('vol');
-      } else {
-        drawChart(v, { unit: '', base: s.base.name, metric: 'tvl', volUsd: 1, pre: '$' });
-        if (CH.type === 'bar') chartBars('vol');
-      }
-      return;
-    }
     if (CH.metric === 'vol') {
-      drawChart(v.map(function (q) { return [q[0], +q[5] || 0, 0, 0, 0, 0]; }), { unit: s.unit, base: s.base.name, metric: 'vol', volUsd: volUsd });
+      modeLabel(false);
+      drawChart(v.map(function (q) { return [q[0], +q[5] || 0, 0, 0, 0, 0]; }), { unit: '', base: s.base.name, metric: 'vol', volUsd: 1, pre: '$' });
       chartBars('vol');
+    } else if (CH.type === 'bar') {
+      renderCandles(s, v);
     } else {
-      drawChart(v, { unit: s.unit, base: s.base.name, metric: 'price', volUsd: volUsd });
-      if (CH.type === 'bar') chartBars('candle');
+      modeLabel(false);
+      drawChart(v, { unit: '', base: s.base.name, metric: 'tvl', volUsd: 1, pre: '$' });
     }
   }
   function loadPoolChart(range) {
-    var p = window.__lxnPool, s = chartSides();
-    if (!p || !s || !$('.chart-svg-wrap')) return;
+    var p = window.__lxnPool;
+    if (!p || !chartSides() || !$('.chart-svg-wrap')) return;
     if (range) CH.range = range;
     $$('.tf-mini button').forEach(function (b) { b.classList.toggle('active', (b.textContent || '').trim().toUpperCase() === CH.range); });
-    var R = CH_R[CH.range] || CH_R['1M'], gen = ++CH.gen, at = 0;
+    var gen = ++CH.gen, at = 0;
     var days = CH_DAYS[CH.range] || 31;
     var daily = function () {
       rheaDaily(p.id).then(function (all) {
         if (gen !== CH.gen) return;
         var list = all.slice(-days);
         if (list.length < 2) { CH.pts = null; clearChart(); chartNote('Not enough history for this range yet.'); return; }
-        CH.src = 'rhea'; CH.pts = list;
+        CH.pts = list;
         renderChart();
       }, function () {
         if (gen !== CH.gen) return;
@@ -760,37 +864,12 @@
       });
     };
     daily();
-    return;
-    var go = function () {
-      gtGet(gtId(p.id) + '/ohlcv/' + R.tf + '?aggregate=' + R.agg + '&limit=' + R.limit + '&currency=token&token=' + encodeURIComponent(s.base.i),
-        'lumos.nearGtPoolOhlc.v1.' + p.id + '.' + CH.range + '.' + s.base.i, R.ttl)
-        .then(function (j) {
-          if (gen !== CH.gen) return;
-          var seen = {}, list = ((j && j.data && j.data.attributes && j.data.attributes.ohlcv_list) || [])
-            .filter(function (c) { if (!c || !(c[4] > 0) || seen[c[0]]) return false; seen[c[0]] = 1; return true; })
-            .map(function (c) { return [c[0] * 1000, +c[4], +c[2], +c[3], +c[1], +c[5]]; })
-            .sort(function (x, y) { return x[0] - y[0]; });
-          if (list.length < 2) { CH.pts = null; clearChart(); chartNote('No trades in this pool over this range.'); return; }
-          CH.pts = list;
-          renderChart();
-        })
-        .catch(function () {
-          if (gen !== CH.gen) return;
-          if (at < 3) { at++; chartNote('The price feed is busy — retrying…'); setTimeout(go, [3000, 15000, 30000][at - 1]); return; }
-          chartNote('Could not load this pool’s history. Reload to try again.');
-        });
-    };
-    go();
   }
-  // The design's controls, driven for real: ranges, Line / Bar, and Price / Volume ("Pool TVL" relabelled).
+  // The design's controls, driven for real: ranges, Line / Bar, and TVL / Volume.
   function wireChartControls() {
     if (window.__lxnPoolChartWired) return;
     window.__lxnPoolChartWired = 1;
-    $$('.chart-mode-menu button[data-metric]').forEach(function (b) {
-      if (b.getAttribute('data-metric') !== 'vol') { b.textContent = 'Pool TVL'; b.setAttribute('data-logoed', '1'); }
-    });
-    var sel = $('.chart-mode-select');
-    if (sel) [].forEach.call(sel.childNodes, function (nd) { if (nd.nodeType === 3 && nd.nodeValue.trim()) nd.nodeValue = ' Pool TVL '; });
+    modeLabel(false);
     window.addEventListener('click', function (e) {
       var t = e.target;
       if (!t || !t.closest || !$('.pool-header')) return;
@@ -807,8 +886,6 @@
       if (mb) {
         CH.metric = mb.getAttribute('data-metric') === 'vol' ? 'vol' : 'tvl';
         [].forEach.call(mb.parentNode.querySelectorAll('button'), function (b) { b.classList.toggle('active', b === mb); });
-        var s2 = $('.chart-mode-select');
-        if (s2) [].forEach.call(s2.childNodes, function (nd) { if (nd.nodeType === 3 && nd.nodeValue.trim()) nd.nodeValue = ' ' + (CH.metric === 'vol' ? 'Volume' : 'Pool TVL') + ' '; });
         mb.parentNode.classList.remove('open');
         if (mb.parentNode.style.display === 'block') mb.parentNode.style.display = 'none';
       }
@@ -1087,12 +1164,9 @@
       var fees = bothPos('fee-val');
       if (fees[0]) fees[0].textContent = '—';                         // Rhea keeps no per-LP fee record
       if (fees[1]) fees[1].textContent = share > 0 ? num(scaled(mine, 24), 6) : '0';
-      $$('.position-share-pill, .my-position-m .mpm-share').forEach(function (pill) {
-        pill.textContent = share > 0 ? ((share * 100) < 0.0001 ? '<0.0001%' : (share * 100).toFixed(4) + '%') : '0%';
-      });
       var value = null;
       if (share > 0 && USD && window.__lxnPoolRow && window.__lxnPoolRow.liq != null) value = window.__lxnPoolRow.liq * USD * share;
-      bothPos('amount').forEach(function (amt) { amt.textContent = share > 0 ? (value != null ? usdShort(value) : num(scaled(mine, 24), 4) + ' LP') : 'No position'; });
+      positionState(share > 0 ? 'held' : 'none', value != null ? usdShort(value) : num(scaled(mine, 24), 4) + ' LP');
       $$('#dwWithdraw .balance').forEach(function (b) { b.textContent = 'Your LP: ' + (share > 0 ? num(scaled(mine, 24), 6) : '0'); });
       holdDw();
     }, function () {});
@@ -1168,9 +1242,10 @@
       });
     }
 
-    // The pool's identity line: its Rhea id (what the copy button copies), its kind and its fee.
+    // The pool's identity line: its Rhea id, which the copy button copies, and nothing else, as Stellar's reads
+    // (RAZA 2026-11-05: "Remove extra metadata tags").
     var idSpan = $('.ph-id span');
-    if (idSpan) idSpan.textContent = 'Pool ID: ' + id + ' · ' + (KIND[row.kind] || 'Pool') + ' · ' + feeText(row.fee) + ' fee';
+    if (idSpan) idSpan.textContent = 'Pool ID: ' + id;
     var copyBtn = $('.ph-id button[data-copy]');
     if (copyBtn) {
       copyBtn.setAttribute('data-copy', id);
@@ -1199,24 +1274,11 @@
       }
     }
 
-    // POOL PRICE: the reserve ratio, which IS the price only in a classic (constant-product) pool.
-    // Quoted in wNEAR where one side is wNEAR, as the rest of the site denominates; otherwise the second
-    // token per the first. A stable / rated / degen pool prices on its own curve, not the ratio, so no
-    // figure is stated there rather than a wrong one.
-    var price = null, quote = null, base = null;
-    if (row.kind === 'SIMPLE_POOL' && T.length === 2) {
-      var nearSide = a.i === 'wrap.near' ? a : (b.i === 'wrap.near' ? b : null);
-      quote = nearSide || b; base = nearSide ? (nearSide === a ? b : a) : a;
-      if (base.amount > 0 && quote.amount != null) price = quote.amount / base.amount;
-    }
-    var pv = $('.ph-price .v') || $('.ph-price .value');
-    if (!pv) pv = priceBlock('value');
-    if (pv) pv.textContent = price != null ? (num(price, 6) + ' ' + quote.name) : '—';
-    // The phone's sub-line is .ph-price-row .vs, which neither the desktop selectors nor priceBlock('sub')
-    // reach -- found on the phone check, where the price stood with no 'per USDC' under it.
-    var ps = $('.ph-price .s') || $('.ph-price .sub') || $('.ph-price-row .vs');
-    if (!ps) ps = priceBlock('sub');
-    if (ps) ps.textContent = price != null ? (' per ' + base.name) : '';
+    // POOL PRICE: the second token per the first, the way the pair reads and the way Stellar's header does
+    // ("6.2590 XLM per USDC"). The reserve ratio IS the price only in a classic (constant-product) pool, so that
+    // is the only pool it is stated for -- and why LUMOS / wNEAR had a rate while wNEAR / USDt, a degen pool, had a
+    // lone dash (RAZA 2026-11-05: "show the live exchange rate"). Every other kind asks the pool: curveRate below.
+    if (row.kind === 'SIMPLE_POOL' && T.length === 2 && a.amount > 0 && b.amount != null) paintRate(b.amount / a.amount, a, b);
 
     // LIQUIDITY: every reserve, the first as the headline and the rest beneath it in the same weight
     // (Stellar's two-sided cell), then the pool's dollar value from the endpoint's own liquidity figure.
@@ -1242,8 +1304,9 @@
       }
     }
 
-    // 24h VOLUME and FEES, in NEAR with the dollar line beneath, as Stellar's two cells read. Null means
-    // DexScreener does not carry this pool: an em dash and why, never a zero.
+    // 24h VOLUME and FEES, in NEAR with the dollar line beneath, as Stellar's two cells read, "≥" included: a
+    // figure from a feed is what that feed saw, so it is a floor. Null means DexScreener does not carry this
+    // pool: an em dash and why, never a zero.
     [['vol', row.vol], ['fees', row.fees]].forEach(function (x) {
       var cell = statCell(x[0]);
       if (!cell) return;
@@ -1254,29 +1317,58 @@
         if (s) s.textContent = 'no 24h data';           // short: the four cells share one row and .s is nowrap
         return;
       }
-      unitVal(cell.querySelector('.v'), num(x[1], 2), 'NEAR');
+      unitVal(cell.querySelector('.v'), (x[1] > 0 ? '≥ ' : '') + num(x[1], 2), 'NEAR');
       if (s) s.textContent = (USD && x[1] > 0) ? ('≈ ' + usdShort(x[1] * USD)) : '';
     });
 
-    // THE FOURTH STAT IS APR, as the Pools table's sixth column: Rhea publishes no LP-holder count, and
-    // APR is the figure this pool does have. The cell's label is relabelled; nothing is added.
+    // THE FOURTH STAT IS PARTICIPANTS, as on Stellar (RAZA 2026-11-05: "Replace the 4th metric card"). The count
+    // comes with the pool: lps is null when no one has counted this pool yet, which is an em dash and never a 0,
+    // and lpa 1 marks a count that is approximate.
     var ap = $('.ph-stat.lx-partstat') || statCell('participant');
     if (ap) {
       var lab = ap.querySelector('.l');
-      if (lab) lab.textContent = 'APR';
+      if (lab) lab.textContent = 'Participants';
       var av = ap.querySelector('.v');
-      if (av) av.textContent = pct(row.apr);
+      var lps = row.lps == null || !isFinite(row.lps) ? null : +row.lps;
+      if (av) av.textContent = lps == null ? '—' : ((+row.lpa === 1 ? '~' : '') + lps.toLocaleString('en-US'));
       var as = ap.querySelector('.s');
-      if (as) as.textContent = row.apr != null ? 'from 24h fees' : 'no 24h data';
+      if (as) as.textContent = lps === 1 ? 'liquidity provider' : 'liquidity providers';
     }
 
     window.__lxnPool = { id: id, a: a, b: b, tokens: T, fee: row.fee, kind: row.kind };
+    if (row.kind !== 'SIMPLE_POOL' || T.length !== 2) curveRate();
     paintDwStatic();
     paintPositionIdentity();
     holdDw();
     live(id, row);
     loadParticipants(id);
     liftPage();
+  }
+
+  function paintRate(rate, base, quote) {
+    var pv = $('.ph-price .v') || $('.ph-price .value');
+    if (!pv) pv = priceBlock('value');
+    if (pv) pv.textContent = rateText(rate) + ' ' + quote.name;
+    // The phone's sub-line is .ph-price-row .vs, which neither the desktop selectors nor priceBlock('sub')
+    // reach -- found on the phone check, where the price stood with no 'per USDC' under it.
+    var ps = $('.ph-price .s') || $('.ph-price .sub') || $('.ph-price-row .vs');
+    if (!ps) ps = priceBlock('sub');
+    if (ps) ps.textContent = ' per ' + base.name;
+  }
+  // The rate on a pool's own curve: what the pool itself pays for a sliver of the first token (one ten-thousandth
+  // of its reserve, too small to move the price), with the pool's fee put back so the header states the pool's
+  // rate, not the swap's. A pool of three or four tokens states its first two. If the pool cannot be asked the dash
+  // stands: no figure rather than a wrong one.
+  function curveRate() {
+    var p = window.__lxnPool;
+    poolRaw().then(function (R) {
+      var sliver = (bigI(R.amounts[R.ids.indexOf(p.a.i)]) / BigInt(10000)).toString();
+      if (sliver === '0') return;
+      return nview(REF, 'get_return', { pool_id: +p.id, token_in: p.a.i, amount_in: sliver, token_out: p.b.i }).then(function (out) {
+        var rate = scaled(out, R.decs[p.b.i]) / scaled(sliver, R.decs[p.a.i]) / (1 - (+p.fee || 0) / 100);
+        if (window.__lxnPool === p && rate > 0) paintRate(rate, p.a, p.b);
+      });
+    }).catch(function () {});
   }
 
   // THE POSITION PANEL'S TWO ASSETS, WHATEVER THE CONNECTION. The design ships LUMOS and APT marks and
@@ -1417,13 +1509,19 @@
       });
     }
 
-    // The fee-tier row is the design's own and NEAR's pools each carry one, so it is filled rather than
-    // hidden; share-after and network fee have nothing to compute from until the form can be used.
-    setSummary('trading fee', feeText(p.fee));
+    // Share-after and network fee have nothing to compute from until the form can be used.
     setSummary('pool share', '—');
     setSummary('network fee', '—');
   }
 
+  // Two rows, as on Stellar (RAZA 2026-11-05: "Remove the Trading fee tier"). Removed, not hidden, from holdDw so
+  // the deposit and withdraw tabs, which share this one summary, both lose it however early they are drawn.
+  function dropFeeRow() {
+    $$('.dw-summary .r').forEach(function (r) {
+      var k = r.querySelector('span');
+      if (k && (k.textContent || '').toLowerCase().indexOf('trading fee') >= 0) r.parentNode.removeChild(r);
+    });
+  }
   function setSummary(match, value) {
     $$('.dw-summary .r').forEach(function (r) {
       var k = r.querySelector('span');
@@ -1535,13 +1633,28 @@
     var t = $('.dw-tabs button.active');
     return (t && t.getAttribute('data-dw')) === 'withdraw' ? 'withdraw' : 'deposit';
   }
+  // Stellar's two words: "Add Liquidity" and "Withdraw". The "+" in front of each is the design's own icon, which
+  // both tabs share there too (RAZA 2026-11-05: "+ Withdraw").
   function ctaLabel() {
-    if (!window.__lxnPool) return dwMode() === 'withdraw' ? 'Remove Liquidity' : 'Add Liquidity';   // still reading
+    if (!window.__lxnPool) return dwMode() === 'withdraw' ? 'Withdraw' : 'Add Liquidity';   // still reading
     if (!canDw()) return DW_OFF[dwMode()];
     if (DW.sweep && DW.sweep.length) return 'Withdraw to wallet';
-    return dwMode() === 'withdraw' ? 'Remove Liquidity' : 'Add Liquidity';
+    return dwMode() === 'withdraw' ? 'Withdraw' : 'Add Liquidity';
   }
-  function setCta(label, on) {
+  // Something to send: every deposit field above zero, or an LP amount; "Withdraw to wallet" needs neither. The
+  // button stayed live on an empty form (RAZA 2026-11-05: "uses active button styling when form inputs are empty").
+  function amountsIn() {
+    if (DW.sweep && DW.sweep.length) return true;
+    var i = dwInputs(), pos = function (x) { return parseFloat(inVal(x)) > 0; };
+    if (dwMode() === 'withdraw') return pos(i.lp);
+    return i.dep.length > 0 && i.dep.every(pos);
+  }
+  function syncCta() {
+    var ready = canDw() && amountsIn();
+    setCta(ctaLabel(), ready, canDw() && !ready ? 'Enter an amount' : '');
+  }
+  var CTA_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>';
+  function setCta(label, on, why) {
     $$('.dw-cta').forEach(function (b) {
       // lx-gate swaps this button to "Connect wallet" while no wallet is connected and restores data-lxorig /
       // data-lxdis on connect, so both always carry the state this layer wants.
@@ -1552,7 +1665,9 @@
       b.classList.toggle('lx-dwoff', !on);
       b.disabled = !on;
       if (on) b.removeAttribute('aria-disabled'); else b.setAttribute('aria-disabled', 'true');
-      b.title = on ? '' : label;
+      b.title = on ? '' : (why || label);
+      // lx-gate restores the label with textContent, which takes the icon with it.
+      if (!b.querySelector('svg')) b.insertAdjacentHTML('afterbegin', CTA_ICON);
       var wrote = false;
       [].forEach.call(b.childNodes, function (nd) {
         if (nd.nodeType === 3 && nd.nodeValue.trim()) { nd.nodeValue = ' ' + label + ' '; wrote = true; }
@@ -1583,8 +1698,9 @@
       if (on) b.removeAttribute('aria-disabled'); else b.setAttribute('aria-disabled', 'true');
       if (b.tagName === 'BUTTON') b.disabled = !on;
     });
-    setCta(ctaLabel(), on);
-    if (on) setSummary('network fee', '0.003 NEAR');
+    syncCta();
+    dropFeeRow();
+    if (on) setSummary('network fee', '≈ 0.003 NEAR');
   }
 
   // ---- the form: amounts, ratio, previews ----
@@ -1604,6 +1720,7 @@
         i.dep[k].value = x0 && x0 !== '0' ? fromRaw((bigI(x0) * rk / r0).toString(), R.decs[t.i], 6) : '';
       });
       previewDeposit(R);
+      syncCta();                                     // a value set from here fires no input event
     }, function () {});
   }
   // Every field's amount in raw units, keyed by token id; null when one is empty or zero.
@@ -1640,6 +1757,7 @@
   function previewWithdraw() {
     var p = window.__lxnPool, i = dwInputs();
     if (!p || !i.lp) return;
+    syncCta();
     poolRaw().then(function (R) {
       var sh = toRaw(inVal(i.lp), 24), sup = bigI(R.supply);
       var recv = $$('#dwWithdraw .dw-field')[1], rows = recv ? recv.querySelectorAll('.row') : [];
@@ -1848,7 +1966,7 @@
     if (depHost) {
       depHost.addEventListener('input', function (e) {
         var k = dwInputs().dep.indexOf(e.target);
-        if (k >= 0) syncRatio(k);
+        if (k >= 0) { syncCta(); syncRatio(k); }
       });
       depHost.addEventListener('click', function (e) {
         var btn = e.target && e.target.closest && e.target.closest('.max-btn');
@@ -1918,20 +2036,28 @@
     return $$('.my-position .mp-' + desktopSuffix + ', .my-position-m .mpm-' + (phoneSuffix || desktopSuffix));
   }
 
-  function clearMockPosition() {
-    var connected = addr();
-    bothPos('amount').forEach(function (a) {
-      // Connected, the position is simply not read yet on NEAR -- "No position" would be a claim.
-      a.textContent = connected ? '—' : 'Connect a wallet';
-    });
-
+  // THE CARD READS AS STELLAR'S (RAZA 2026-11-05: "Rename the widget header title from My Position to Position
+  // Value and remove the percentage badge"): "Position Value" over a centred "YOUR POSITION", an em dash and one
+  // line saying why. Holding liquidity, the value takes the dash's place, the sub-header steps aside and the line
+  // reads "current value", as there. 'unread' is a connected wallet not answered yet: saying "no liquidity" then
+  // would be a claim.
+  function positionState(state, value) {
+    var line = state === 'held' ? 'current value' : (state === 'none' ? 'You have no liquidity in this pool'
+      : (state === 'off' ? 'Connect your wallet to see your position' : ''));
+    $$('.my-position, .my-position-m').forEach(function (mp) { mp.classList.toggle('active', state === 'held'); });
+    $$('.position-share-pill, .my-position-m .mpm-share').forEach(function (s) { s.style.display = 'none'; });
+    $$('.side-card .side-head h3').forEach(function (h) { if (/^my position$/i.test((h.textContent || '').trim())) h.textContent = 'Position Value'; });
+    $$('.my-position .mp-label').forEach(function (l) { l.textContent = 'Your Position'; l.style.display = state === 'held' ? 'none' : ''; });
+    bothPos('amount').forEach(function (a) { a.textContent = state === 'held' ? value : '—'; });
     // Replaced wholesale: the "· all time" is a bare text node beside the span, so blanking only
     // the span would leave the page reading "— · all time".
-    bothPos('pnl').forEach(function (p) { p.textContent = '—'; });
+    bothPos('pnl').forEach(function (p) { p.textContent = line; p.style.color = 'var(--text-muted)'; });
+  }
+
+  function clearMockPosition() {
+    positionState(addr() ? 'unread' : 'off');
     // The phone puts the delta straight into .pnl-up/.pnl-down with no .mpm-pnl wrapper.
     $$('.my-position-m .pnl-up, .my-position-m .pnl-down').forEach(function (p) { p.textContent = '—'; });
-
-    $$('.position-share-pill, .my-position-m .mpm-share').forEach(function (s) { s.textContent = '—'; });
 
     // Amounts, fees and the asset tickers. The tickers matter as much as the numbers: leaving them
     // is how "APT" ends up labelling a row on an XRP Ledger pool.

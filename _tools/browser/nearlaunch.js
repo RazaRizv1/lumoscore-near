@@ -592,10 +592,49 @@
       });
     }, true);
   }
+  // TOTAL SUPPLY READS WITH COMMAS AS IT IS TYPED (RAZA 2026-11-05: "Fix thousand-separator comma formatting
+  // in Total Supply input"), Stellar's behaviour: whole tokens, grouped, held at the 10,000,000,000 maximum, and
+  // input fired again so the design's preview reads the final value. The commas live only in the field:
+  // readForm() strips them, so the draft, the validation and total_supply all carry a plain number. The caret
+  // keeps its place by counting the digits to its left, since the commas before it move on every keystroke.
+  var SUPPLY_MAX = '10000000000';
+  var groupingSupply = false;
+  function groupDigits(digits) {
+    var out = '', n = digits.length;
+    for (var i = 0; i < n; i++) {
+      if (i && (n - i) % 3 === 0) out += ',';
+      out += digits.charAt(i);
+    }
+    return out;
+  }
+  function groupSupply(el) {
+    if (groupingSupply) return;
+    var was = String(el.value || '');
+    var at = el.selectionStart;
+    var left = was.slice(0, at == null ? was.length : at).replace(/[^0-9]/g, '').length;
+    // Only what stands before a decimal point counts: a pasted "1,000.50" is 1,000, never 100,050.
+    var digits = was.split('.')[0].replace(/[^0-9]/g, '').replace(/^0+(?=[0-9])/, '');
+    if (digits.length > SUPPLY_MAX.length || (digits.length === SUPPLY_MAX.length && digits > SUPPLY_MAX)) digits = SUPPLY_MAX;
+    var shown = groupDigits(digits);
+    if (shown === was) return;
+    groupingSupply = true;
+    el.value = shown;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    groupingSupply = false;
+    var pos = 0, seen = 0;
+    while (seen < left && pos < shown.length) { if (shown.charAt(pos) !== ',') seen++; pos++; }
+    try { if (document.activeElement === el) el.setSelectionRange(pos, pos); } catch (e) {}
+  }
   function wireNumericFields() {
     ['#supply', '#shareNum', '#extraLiquidity'].forEach(function (sel) {
       var el = $(sel);
       if (!el) return;
+      if (sel === '#supply') {
+        el.addEventListener('input', function () { groupSupply(el); });
+        el.addEventListener('keydown', function (e) { if ('-+eE.'.indexOf(e.key) >= 0 && e.key.length === 1) e.preventDefault(); });
+        el.setAttribute('inputmode', 'numeric');
+        return;
+      }
       var allow = sel === '#extraLiquidity' ? /[^0-9.]/g : /[^0-9,]/g;
       el.addEventListener('input', function () {
         var before = el.value, cleaned = before.replace(allow, '');

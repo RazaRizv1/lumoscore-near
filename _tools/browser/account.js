@@ -92,7 +92,7 @@
   // rule (browser/wallet.js cssUrl): an SVG data url often carries a raw # or a newline.
   function cssUrl(u) {
     u = String(u || '');
-    if (!/^data:image\//i.test(u) && !/^https:\/\//i.test(u)) return '';
+    if (!/^data:image\//i.test(u) && !/^https:\/\//i.test(u) && u.indexOf('/assets/') !== 0) return '';   // LUMOS's curated logo is a site path
     if (u.indexOf('"') >= 0 || u.indexOf('\\') >= 0 || u.length > 400000) return '';
     u = u.replace(/[\r\n\t]/g, '');
     if (/^data:image\/svg\+xml,/i.test(u)) u = u.replace(/#/g, '%23');

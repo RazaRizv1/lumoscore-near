@@ -26,7 +26,7 @@
 import { CURATED } from './_nearcurated.js';
 import { ownPools, ownPrices } from './_nearownpools.js';
 
-const TTL = 120, KEEP = 86400, VER = 'v3';   // v3: LumosCore's own pools joined (2026-11-04)
+const TTL = 120, KEEP = 86400, VER = 'v4';   // v3: LumosCore's own pools joined (2026-11-04)
 const WNEAR = 'wrap.near';
 const POOLS = 'https://indexer.ref.finance/list-top-pools';
 const PRICES = 'https://indexer.ref.finance/list-token-price';
@@ -51,6 +51,19 @@ async function getJson(u, ms) {
   } finally { clearTimeout(t); }
 }
 const num = (v) => { const n = Number(v); return isFinite(n) ? n : null; };
+
+// Participants per pool (RAZA 2026-11-05: "Replace APR table column with PARTICIPANTS", as Stellar): the pool indexer's
+// count, read off the chain by its own background job (workers/near-pool-indexer lpJob). Asking registers a pool with
+// that job, so a pool it has not reached yet is null here and an em dash on the page, never 0.
+const IDX = 'https://near-pool-indexer.usa282.workers.dev';
+async function withLps(rows) {
+  const ids = rows.map((r) => String(r.id)).filter((x) => /^[0-9]{1,7}$/.test(x)).slice(0, 600);
+  if (!ids.length) return rows;
+  const j = await getJson(IDX + '/lps?ids=' + ids.join(','), 5000).catch(() => null);
+  const c = (j && j.ok && j.c) || {};
+  for (const r of rows) { const v = c[r.id]; r.lps = v ? v[0] : null; r.lpa = v ? v[1] : 0; }
+  return rows;
+}
 
 async function build(context) {
   const [pools, prices, own] = await Promise.all([getJson(POOLS, 8000), getJson(PRICES, 6000), ownPools(context).catch(() => [])]);
@@ -117,6 +130,7 @@ async function build(context) {
   });
 
   rows = rows.sort((a, b) => (b.liq || 0) - (a.liq || 0)).slice(0, 200);
+  await withLps(rows);
   const sum = (k) => rows.reduce((a, r) => a + (r[k] || 0), 0);
   return { ok: true, src: 'Rhea Finance indexer, DexScreener, Rhea data service (volume DexScreener lacks)', usd: nearUsd, at: Date.now(),
     // Over the pools in this list, which is what the page shows; not a network-wide total.
@@ -214,6 +228,7 @@ async function offList(context, body, id) {
   const meta = {};
   await Promise.all(p.ids.map(async (t) => { if (!META[t]) meta[t] = await ftMeta(t); }));
   const row = offRow(p, all, meta);
+  await withLps([row]);
   // Rhea's own 24h volume, as the list uses for the pools DexScreener lacks.
   try {
     const arr = await getJson(RHEA_VOL + id + '/rolling24hvolume/sum', 5000);
@@ -228,7 +243,7 @@ async function offList(context, body, id) {
 // Every term must BE one of the pool's token symbols or contract ids -- an exact match, as Stellar's search
 // requires an exact asset code: a substring would offer pools of a different token that merely contains the
 // letters. Listed pools come back as their list rows, first; the rest as off-list rows, best liquidity first.
-async function searchAll(context, body, q) {
+async function searchAll(context, body, q, full) {
   const terms = q.split(/[\s\/,]+/).filter(Boolean).slice(0, 4).map((x) => x === 'near' ? 'wnear' : x);
   const all = await allPools(context);
   const listed = {};
@@ -239,7 +254,11 @@ async function searchAll(context, body, q) {
   });
   const rows = hits.map((p) => listed[p.id] || offRow(p, all, null));
   rows.sort((a, b) => ((b.listed === false ? 0 : 1) - (a.listed === false ? 0 : 1)) || ((b.liq || 0) - (a.liq || 0)));
-  return { ok: true, usd: body.usd, at: Date.now(), q, rows: rows.slice(0, 30), count: Math.min(rows.length, 30), total: rows.length, summary: null };
+  // full=1: every pool of a token, for its Trade page's Pools tab (RAZA 2026-11-05: "fetching all 22 pools for AURORA"),
+  // which pages them itself. A search keeps its 30.
+  const out = rows.slice(0, full ? 600 : 30);
+  await withLps(out.filter((r) => r.lps === undefined));
+  return { ok: true, usd: body.usd, at: Date.now(), q, rows: out, count: out.length, total: rows.length, summary: null };
 }
 
 export async function onRequestGet(context) {
@@ -271,9 +290,9 @@ export async function onRequestGet(context) {
   // whole pool list -- as Stellar's search and pool page reach any pool on its network (RAZA 2026-10-30, a search
   // for "batman" finding nothing although Rhea has a BATMAN/wNEAR pool). Such rows carry listed:false and the
   // pages say so.
-  const q = String(url.searchParams.get('q') || '').trim().toLowerCase().slice(0, 60);
+  const q = String(url.searchParams.get('q') || '').trim().toLowerCase().slice(0, 64);   // 64: USDC's contract id
   if (q) {
-    try { return json(await searchAll(context, body, q), 60); }
+    try { return json(await searchAll(context, body, q, url.searchParams.get('full') === '1'), 60); }
     catch (e) { return json({ ok: false, error: 'pool search unavailable', why: String((e && e.message) || e).slice(0, 200), rows: [] }, 0); }
   }
   if (want && /^\d{1,9}$/.test(want) && !body.rows.some((r) => r.id === String(want))) {

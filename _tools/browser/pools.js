@@ -12,10 +12,11 @@
 // hold 2+ tokens (stable pools hold 3 or 4): the name lists them all, the two design discs show the
 // first two. A row's identity is its Rhea pool id and it links to /pools/near/id/<id>.
 //
-// THE SIXTH COLUMN IS APR, not Participants: Rhea publishes no LP-holder count, and APR (24h fees x 365
-// / liquidity) is the figure nearpools does carry. The header and the phone card's third stat are
-// relabelled; nothing is added. Volume, fees and APR are null where DexScreener does not carry a pool
-// -- an em dash, never a zero. Search filters the loaded rows (the endpoint returns every curated pool,
+// THE SIXTH COLUMN IS PARTICIPANTS, as on Stellar (RAZA 2026-11-05: "Replace APR table column with
+// PARTICIPANTS"). Rhea publishes no LP-holder count, so nearpools carries the pool indexer's: lps, null
+// until its background job reaches the pool, and lpa = 1 where the count is approximate. Participants,
+// volume and fees are null where nothing has a figure for the pool -- an em dash, never a zero.
+// Search filters the loaded rows (the endpoint returns every curated pool,
 // so there is no ledger-wide lookup to make); there is no deep walk; My Pools and Create Pool show their
 // "not yet" states (browser/mypositions.js, browser/createpool.js) until NEAR liquidity signing exists.
 // Pools page: XRP Ledger AMM pools.
@@ -121,13 +122,6 @@
   function pairName(p) {
     return ((p && p.tokens) || []).map(nameOf).join(' / ') || '?';
   }
-  // APR as the column shows it. Null (no 24h volume for the pool) is an em dash, never 0%.
-  function pct(v) {
-    if (v == null || !isFinite(v)) return '—';
-    if (v > 0 && v < 0.01) return '<0.01%';
-    return v.toLocaleString('en-US', { maximumFractionDigits: 2, minimumFractionDigits: 2 }) + '%';
-  }
-
   function amount(v) {
     if (v == null || !isFinite(v)) return '—';
     if (v >= 1e9) return (v / 1e9).toFixed(2) + 'B';
@@ -138,6 +132,12 @@
 
   function count(v) {
     return (v == null || !isFinite(v)) ? '—' : Math.round(v).toLocaleString('en-US');
+  }
+
+  // A pool's participants as the column and the phone card show them. "~" is a count the indexer could only
+  // approximate; null is a pool it has not reached yet, an em dash and never 0.
+  function participants(p) {
+    return (p && p.lps != null) ? (p.lpa ? '~' : '') + count(p.lps) : '—';
   }
 
   // A MONEY FIGURE, ABBREVIATED THE WAY STELLAR'S OVERVIEW ABBREVIATES ONE — "$5.32M", "$545.3K".
@@ -407,11 +407,10 @@
     tr.appendChild(usdCell(p.liq, composition(p)));
     tr.appendChild(usdCell(p.vol));
     tr.appendChild(usdCell(p.fees));
-    // APR where Stellar has Participants -- see the header note. Right-aligned like the design's cell.
-    var aprTd = el('td', null, pct(p.apr));
-    aprTd.style.textAlign = 'right';
-    aprTd.style.paddingRight = '24px';
-    tr.appendChild(aprTd);
+    // Participants, centred under its heading as on the live Stellar table -- see the header note.
+    var partTd = el('td', null, participants(p));
+    partTd.style.textAlign = 'center';
+    tr.appendChild(partTd);
     // WEIGHTS OFF THE LIVE STELLAR ROW: the liquidity headline and the participant count are 700 there,
     // the volume and fee figures 400. Set inline on those two cells only.
     tr.children[2].firstChild.style.fontWeight = '700';
@@ -476,7 +475,7 @@
     // sub-line the reference does not have.
     stats.appendChild(stat('Liquidity', usdText(p.liq), composition(p)));
     stats.appendChild(stat('Vol (today)', usdText(p.vol)));   // main's phone label, as the note above records
-    stats.appendChild(stat('APR', pct(p.apr)));                // the third stat, as the table's sixth column
+    stats.appendChild(stat('Participants', participants(p)));  // the third stat, as the table's sixth column
     a.appendChild(stats);
     return a;
   }
@@ -618,13 +617,13 @@
           // Grouped, not abbreviated: "63,771,155 XLM" is Stellar's headline, so "27,243,110 XRP" is ours.
           setVal(s.liquidity != null ? Math.round(s.liquidity).toLocaleString('en-US') : '—', 'NEAR');
           if (vsub) vsub.textContent = usd ? ('≈ $' + money(s.liquidity * usd)) : '';
-          // NOT "across all pools": the list is the curated-token pools, which is what the figure sums.
-          if (sub) { sub.textContent = 'Across the pools listed here'; plainSub(sub); }
+          // Ships in the markup too (_nearpoolsmock.js), so the two must say the same thing.
+          if (sub) { sub.textContent = 'Across all NEAR pools'; plainSub(sub); }   // RAZA 2026-11-05
         } else if (label.indexOf('active pools') === 0) {
           setVal(s.pools != null ? count(s.pools) : '—');
           // Stellar's wording, and Stellar's colour by the same route Stellar gets it — see plainSub.
           if (sub) {
-            sub.textContent = 'Curated-token pools on NEAR';
+            sub.textContent = 'Liquidity pools on NEAR';   // RAZA 2026-11-05
             plainSub(sub);
           }
         } else if (label.indexOf('24h volume') === 0) {
@@ -685,6 +684,11 @@
     if (strongs.length > 1) {
       strongs[0].textContent = from + '–' + to;
       strongs[1].textContent = count(total);
+      // ONE PLAIN LINE, AS ON STELLAR (RAZA 2026-11-05: "Fix font-weight styling on table footer pagination
+      // count"): Stellar's reads weight 400 and one colour end to end. The design's <strong>s carry an inline
+      // brighter colour as well as the bold, so both are taken back to the line's own.
+      strongs[0].style.fontWeight = strongs[1].style.fontWeight = '400';
+      strongs[0].style.color = strongs[1].style.color = 'inherit';
     }
   }
 
@@ -809,8 +813,9 @@
     if (!SORT.key) return rows;
     var k = SORT.key, dir = SORT.dir;
     return rows.slice().sort(function (a, b) {
-      var x = +a[k], y = +b[k];
       // A pool with no figure for this column sorts last in either direction rather than counting as zero.
+      // Null is asked about by name: +null IS 0, which is finite, so without this it sorted among the zeros.
+      var x = a[k] == null ? NaN : +a[k], y = b[k] == null ? NaN : +b[k];
       var xb = !isFinite(x), yb = !isFinite(y);
       if (xb && yb) return 0;
       if (xb) return 1;
@@ -933,9 +938,9 @@
     setTimeout(grow, 400);
   }
 
-  // NO PARTICIPANT SWEEP ON NEAR. The XRPL build counted each visible pool's LP-token holders here; Rhea
-  // publishes no such count, and the column shows APR instead. Kept as a no-op so the render paths that
-  // call it stay identical to the XRPL file.
+  // NO PARTICIPANT SWEEP ON NEAR. The XRPL build counted each visible pool's LP-token holders here; on NEAR
+  // the counts arrive with the rows (lps), so nothing is left to fill in. Kept as a no-op so the render paths
+  // that call it stay identical to the XRPL file.
   function fillParticipants() {}
 
   // THE HEADINGS lumoscore.com USES, read off its live table (RAZA 2026-09-15):
@@ -956,7 +961,7 @@
       // high to low just like im able to sort Trade main page columns"). The arrow marks the column in force and its
       // direction; the four figure columns take a click, and # and Pair stay inert as they are on lumoscore.com.
       var WANT = [['#', null, null], ['Pair', null, null], ['Liquidity ', '↓', 'liq'],
-                  ['VOL (TODAY)', '', 'vol'], ['FEES (TODAY)', '', 'fees'], ['APR ', '', 'apr']];
+                  ['VOL (TODAY)', '', 'vol'], ['FEES (TODAY)', '', 'fees'], ['Participants ', '', 'lps']];
       var ths = head.querySelectorAll('th');
       for (var i = 0; i < ths.length && i < WANT.length; i++) {
         var th = ths[i];
@@ -965,13 +970,15 @@
         if (WANT[i][1] != null) {
           var si = document.createElement('span');
           si.className = 'sort-i';
-          si.textContent = key === SORT.key ? (SORT.dir < 0 ? '↓' : '↑') : '';
+          // Stellar's glyphs: the direction on the column in force, ↕ on every other column that takes a click.
+          si.textContent = key === SORT.key ? (SORT.dir < 0 ? '↓' : '↑') : '↕';
           th.appendChild(si);
         }
         if (key) {
           th.setAttribute('data-lxsort', key);
           th.style.cursor = 'pointer';
-          th.title = (i === 3 || i === 4 ? 'Past 24 hours · ' : (i === 5 ? '24h fees x 365 / liquidity · ' : '')) + 'Sort by this column';
+          th.title = (i === 3 || i === 4 ? 'Past 24 hours · ' : '') + 'Sort by this column';
+          if (i === 5) th.style.textAlign = 'center';
         } else {
           th.style.cursor = 'default';
         }
@@ -1146,7 +1153,7 @@
         renderPage(h, d, 1);
         if ($('#poolsBody')) $('#poolsBody').classList.add('lxlt');
         // The All Pools badge: how many pools this list holds. Not a network-wide count -- Rhea lists
-        // thousands, most of them uncurated -- and the overview's caption says which pools these are.
+        // thousands, most of them uncurated.
         var tabCount = $('#poolTabs [data-tab="all"] .count') || $('#poolTabs .count');
         // .lx-snapd is the inherited sheet's "a real number is in THIS cell" marker:
         //     html.lx-ammready #poolTabs .count:not(.lx-snapd){visibility:hidden}

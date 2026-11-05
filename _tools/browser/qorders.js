@@ -33,10 +33,9 @@
 //   Orders  lxnDcl.activeOrders + buildCancel — the same source as the wallet page's Open orders.
 //
 // ONE REAL DIFFERENCE FROM STELLAR AND XRPL, AND IT IS THE LEDGER'S, NOT A SHORTCUT. A DCL limit order
-// needs a Rhea pool, and `lxnDcl.poolFor` only finds pools of <token> against wNEAR — so on NEAR a limit
-// order is <token> ↔ NEAR and nothing else. The pane still offers two pickers, exactly as the design
-// draws it; pick a pair with no pool and the button stays disabled and says why, which is what
-// dxalimit.js does on an unsupported token. Silently hiding one picker would be a different dialog.
+// needs a Rhea pool for the pair. Any two tokens can have one (RAZA 2026-11-05: "without requiring NEAR as a
+// direct side of the pair"), and most do not; pick a pair with no pool and the button stays disabled and says
+// why, which is what dxalimit.js does on an unsupported token.
 //
 // The design's own #swapModal script binds mock listeners to #swapAmtIn, #swapFlip and #swapGo. Those
 // three nodes are replaced with clean clones before anything is wired — the second-writer shape this
@@ -580,7 +579,9 @@
       // prints it verbatim. Wrapping it read "≈ ~0.003 NEAR NEAR".
       detail('net', S().NET_FEE_EST);
       detail('min', show(q.min, t.dec, 6) + ' ' + t.code);
-      if (q.impact != null && q.impact >= 1) swapSay('Price impact ' + fmtNum(q.impact, 2) + '% — this trade moves the pool.', true);
+      // Two swaps, not one (nearswap.js viaHub): said before the press, because the second can fail on its own.
+      if (q.split) swapSay('This pair swaps in two steps through ' + q.split.code + ', two approvals. If the second step fails, you keep the ' + q.split.code + '.', true);
+      else if (q.impact != null && q.impact >= 1) swapSay('Price impact ' + fmtNum(q.impact, 2) + '% — this trade moves the pool.', true);
       else swapSay('');
       // EVERY MONEY CHECK THE PRESS WILL MAKE AGAIN, including the one that cannot be made: an unknown
       // balance keeps the button down and says which it is, rather than offering a press that fails at
@@ -814,7 +815,7 @@
     }).then(function (x) {
       var v = S().verdict(x.res);
       if (v.ok === false) {
-        stop(v.why === 'refunded'
+        stop(v.stranded ? 'Only the first step went through: the ' + v.stranded + ' is in your wallet, and the second step did not fill.' : v.why === 'refunded'
           ? (S().ROUTED
             ? 'The pool did not fill the swap (the price moved). All of your ' + f.code + ' came back, the platform fee included.'
             : 'The pool did not fill the swap (the price moved). Your ' + f.code + ' came back; the ' + (S().FEE_BPS / 100) + '% platform fee was kept.')
@@ -837,9 +838,8 @@
   }
 
   // ======================================================================================== LIMIT
-  // The pair is <token> ↔ NEAR, because that is the only pair Rhea's DCL contract has pools for (see the
-  // header). lim.pool is the resolved pool for whichever side is the token; null means "asked, none", and
-  // undefined means "not asked yet" — a failed read is neither, and is asked again.
+  // Any two tokens with a DCL pool (see the header). lim.pool is the resolved pool for the pair; null means
+  // "asked, none", and undefined means "not asked yet" — a failed read is neither, and is asked again.
   var lim = { s: null, b: null, pool: undefined, poolFor: '', busy: false };
   function lEl(s) { return $('#swapModal .lxo-pane[data-pane="limit"] ' + s); }
   function limSay(text) { var e = lEl('.lxq-err'); if (e) e.textContent = text || ''; }
@@ -851,12 +851,13 @@
     if (label) b.textContent = label;
     b.disabled = !on;
   }
-  // Which side is the token, and which the NEAR: a DCL order is always one against the other.
+  // Which side is the token, and which the quote the price is written in. NEAR is the quote whenever it is
+  // on the pair, as ever; between two other tokens, the one being sold is priced in the one being bought.
   function limPair() {
     if (!lim.s || !lim.b) return null;
-    if (isNear(lim.s) && !isNear(lim.b)) return { side: 'buy', token: lim.b, near: lim.s };
-    if (isNear(lim.b) && !isNear(lim.s)) return { side: 'sell', token: lim.s, near: lim.b };
-    return null;
+    if (isNear(lim.s) && isNear(lim.b)) return null;                 // NEAR and wNEAR are one asset
+    if (isNear(lim.s)) return { side: 'buy', token: lim.b, quote: lim.s };
+    return { side: 'sell', token: lim.s, quote: lim.b };
   }
 
   function limitUi() {
@@ -894,9 +895,6 @@
           function pick(a) {
             if (side === 'sell') { lim.s = heldOf(a) || a; if (same(lim.b, a)) lim.b = null; }
             else { lim.b = a; if (same(lim.s, a)) lim.s = null; }
-            // A non-NEAR pick next to a non-NEAR token: the other side empties, and its list then offers NEAR only.
-            var nr = function (x) { return !!x && (x.id === 'near' || x.id === 'wrap.near'); };
-            if (!nr(a)) { if (side === 'sell' && lim.b && !nr(lim.b)) lim.b = null; if (side !== 'sell' && lim.s && !nr(lim.s)) lim.s = null; }
             var pe = lEl('.lxq-price'); if (pe) pe.value = '';
             lim.pool = undefined; lim.poolFor = '';
             limitSync();
@@ -904,11 +902,9 @@
             if (side === 'sell') ensureBal(lim.s).then(limitSync);
           }
           var other = side === 'sell' ? lim.b : lim.s;
+          // Any token on either side (RAZA 2026-11-05, removing 2026-11-04's NEAR-only list): a pair with no
+          // order-book pool is answered by limitSync, not by hiding the token.
           var list = (side === 'sell' ? H.held : curated()).filter(function (a) { return !same(a, other); });
-          // ONE SIDE IS NEAR (RAZA 2026-11-04): once the other side holds a token that is not NEAR, this list
-          // offers NEAR and wNEAR only, so a pair that cannot rest in an order-book pool (DARK -> QTC) can't be picked.
-          var nearish = function (a) { return !!a && (a.id === 'near' || a.id === 'wrap.near'); };
-          if (other && !nearish(other)) list = list.filter(nearish);
           if (side === 'sell') {
             var mine = list.filter(function (a) { return a.id === 'near' || rawBal(a) == null || S().big(rawBal(a)) > BigInt(0); });
             if (!mine.length) { menuHead(m, emptyWhy()); return; }
@@ -916,12 +912,6 @@
           } else {
             if (!list.length) { menuHead(m, 'The token list could not be loaded'); return; }
             filterInto(m, ANY_HEAD, ANY_PH, list, null, pick);
-            var note = document.createElement('div');
-            note.className = 'h';
-            note.style.textTransform = 'none';
-            note.style.letterSpacing = '0';
-            note.textContent = 'A limit order rests in an order-book pool, and those are paired against NEAR — so one side of the pair is NEAR.';
-            m.appendChild(note);
           }
         });
         return;
@@ -940,17 +930,15 @@
         }
         // "You sell" is ALWAYS the asset being sold, so MAX is simply what can be sold of it.
         var i = lEl('.lxq-amt');
-        // Less the fee that comes on top of the order, so MAX is an order that can actually be placed.
-        var bps = window.__lxFeeRate === 0.001 ? 10 : 20;
-        var net = (S().big(room) * BigInt(10000) / BigInt(10000 + bps)).toString();
-        if (i) i.value = down(net, lim.s.dec, Math.min(lim.s.dec, 7));   // 7 places, as Stellar fills it; truncated, never rounded up
+        // All of it: limit orders are free (RAZA 2026-11-04), so no fee comes on top of the order.
+        if (i) i.value = down(room, lim.s.dec, Math.min(lim.s.dec, 7));  // 7 places, as Stellar fills it; truncated, never rounded up
         limitSync();
         return;
       }
       if (t.closest('.lxq-mkt')) {
         e.preventDefault(); e.stopImmediatePropagation();
         var pr0 = limPair();
-        if (!pr0 || !lim.pool) { toast('Pick a token against NEAR first.', true); return; }
+        if (!pr0 || !lim.pool) { toast('Pick a pair with an order-book pool first.', true); return; }
         var mkt = D().tokenPriceAt(lim.pool, pr0.token.dec, lim.pool.cur);
         if (!(mkt > 0)) { toast('The pool did not give a market price.', true); return; }
         var pe = lEl('.lxq-price');
@@ -994,11 +982,11 @@
   function limitPool() {
     var pr = limPair();
     if (!pr || !D()) { lim.pool = undefined; limitSync(); return; }
-    var key = pr.token.id;
+    var key = pr.token.id + '|' + pr.quote.id;
     if (lim.poolFor === key && lim.pool !== undefined) { limitSync(); return; }
     lim.poolFor = key; lim.pool = undefined;
     limitSync();
-    D().poolFor(pr.token.id).then(function (p) {
+    D().poolFor(pr.token.id, isNear(pr.quote) ? null : pr.quote.id, pr.quote.dec).then(function (p) {
       if (lim.poolFor !== key) return;
       lim.pool = p || null;
       // THE PRICE STARTS AT THE MARKET, as Stellar's does: with it empty, "You buy" had nothing to multiply
@@ -1034,7 +1022,7 @@
 
     var pr = limPair();
     var unit = lEl('.lxq-unit');
-    if (unit) unit.textContent = pr ? ('NEAR per ' + pr.token.code) : '';
+    if (unit) unit.textContent = pr ? ((isNear(pr.quote) ? 'NEAR' : pr.quote.code) + ' per ' + pr.token.code) : '';
 
     var amtEl = lEl('.lxq-amt'), pxEl = lEl('.lxq-price'), recv = lEl('.lxq-recv');
     var amt = String((amtEl || {}).value || '').trim(), px = String((pxEl || {}).value || '').trim();
@@ -1043,7 +1031,8 @@
     // NEAR was being sold — type 0.007 under "You sell NEAR" and the order was for 0.007 ZEC — so "You buy"
     // could never be read off it. The price is always NEAR per token, so selling a token buys amount x price
     // NEAR, and selling NEAR buys amount / price of the token. `tokAmt` is that token figure, truncated as a
-    // string to the token's decimals, and it is what the DCL planner is given.
+    // string to the token's decimals, and it is what the DCL planner is given. Between two other tokens the
+    // sold one is the token, so the same "sell" arithmetic holds with the bought one as the quote.
     var A = Number(amt), P = Number(px), got = 0, tokAmt = '';
     if (pr && A > 0 && P > 0) {
       got = pr.side === 'sell' ? A * P : A / P;
@@ -1077,15 +1066,21 @@
     if (!lim.s || !lim.b) { limNote(''); limSay(''); limGo(false, 'Place limit order'); return; }
     if (!pr) {
       limNote('');
-      // RAZA 2026-11-03 (DARK -> USDC): say what to change, not what is missing. Rhea's limit orders rest in a
-      // pool against NEAR here, so a pair of two other tokens has nowhere to rest.
-      limSay('On NEAR, a limit order needs NEAR on one side. Choose NEAR as the token you sell or the one you buy.');
+      limSay('NEAR and wNEAR are one asset. Choose another token to trade against.');
       limGo(false, 'Place limit order');
       return;
     }
-    if (lim.pool === undefined) { limNote('Checking for a ' + pr.token.code + ' / NEAR pool…'); limSay(''); limGo(false, 'Place limit order'); return; }
+    if (lim.pool === undefined) { limNote('Checking for a ' + pr.token.code + ' / ' + pr.quote.code + ' pool…'); limSay(''); limGo(false, 'Place limit order'); return; }
     // A classic pool is not an order-book pool: "there is no LUMOS / NEAR pool" read false beside LUMOS/wNEAR 9001 (RAZA 2026-11-04).
-    if (lim.pool === null) { limNote(''); limSay(pr.token.code + ' has no order-book pool yet, so limit orders have nowhere to rest. Its Trade page can create one (Limit tab).'); limGo(false, 'Place limit order'); return; }
+    // The Trade page's Create flow opens a pool against NEAR only, so a pair of two other tokens is not sent there.
+    if (lim.pool === null) {
+      limNote('');
+      limSay(isNear(pr.quote)
+        ? pr.token.code + ' has no order-book pool yet, so limit orders have nowhere to rest. Its Trade page can create one (Limit tab).'
+        : pr.token.code + ' / ' + pr.quote.code + ' has no order-book pool yet, so limit orders have nowhere to rest. Try this token against NEAR.');
+      limGo(false, 'Place limit order');
+      return;
+    }
 
     // The tick the order really rests at, and -- since NEAR limit orders carry the LumosCore fee (RAZA
     // 2026-11-01; neardcl.js) -- what that fee is, because it comes on top of the amount typed.
@@ -1166,7 +1161,7 @@
       if (v.ok === false) {
         // ft_transfer_call returning "0" means the contract refused the order and the tokens came back.
         stop(v.why === 'refunded'
-          ? 'The order book did not accept the order, so nothing is resting — your ' + (pr.side === 'sell' ? pr.token.code : 'NEAR') + ' came back.'
+          ? 'The order book did not accept the order, so nothing is resting — your ' + lim.s.code + ' came back.'
           : 'The order failed on chain. Check your wallet activity.');
         return;
       }

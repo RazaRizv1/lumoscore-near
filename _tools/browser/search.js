@@ -100,12 +100,14 @@
   })();
 
   // A token's logo travels with its row (the curated list carries each token's own metadata icon), and
-  // is accepted only as a data:image or https url -- an img cannot run script, so a data: SVG is safe.
+  // is accepted only as a data:image or https url -- an img cannot run script, so a data: SVG is safe --
+  // or as the site's own /assets/ path, which is what LUMOS's curated logo is (RAZA 2026-11-05: "Fix missing
+  // LUMOS token logo rendering in search"; it was refused here and drew the lettered disc, in pool rows too).
   // wNEAR's metadata has no icon, so it gets NEAR's own mark. No logo: a lettered disc, drawn as an
   // inline SVG data url so the logo healer (which repaints 1-5 character text) has no text to find.
   function okUrl(u) {
     u = String(u || '');
-    return (/^data:image\//i.test(u) || /^https:\/\//i.test(u)) && u.length < 400000 ? u : '';
+    return (/^data:image\//i.test(u) || /^https:\/\//i.test(u) || u.indexOf('/assets/') === 0) && u.length < 400000 ? u : '';
   }
   function letterUri(code) {
     var c = String(code || '?'), h = 0;

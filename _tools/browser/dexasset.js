@@ -502,7 +502,7 @@
     // All in NEAR terms, like the price headline. 24h is the token payload's own change converted
     // with NEAR's move (d24n); 1h comes off the 1D chart series and 7d/1m/3m/6m off one daily series.
     var have = {
-      '1h': LONG['1h'], '24h': d ? d.d24n : null, '7d': LONG['7d'],
+      '1h': LONG['1h'], '24h': (d && d.d24n != null) ? d.d24n : LONG['24h'], '7d': LONG['7d'],
       '1m': LONG['1m'], '3m': LONG['3m'], '6m': LONG['6m'],
     };
 
@@ -572,10 +572,18 @@
     var at = attempt || 0;
     seriesFor('PERF', 'NEAR')
       .then(function (pts) {
-        LONG['7d'] = changeOver(pts, 7);
-        LONG['1m'] = changeOver(pts, 30);
-        LONG['3m'] = changeOver(pts, 90);
-        LONG['6m'] = changeOver(pts, 180);
+        // A series that starts at the pool's own first deposit (idxSeries) holds the token's whole market, so a
+        // window longer than its life measures from that opening price rather than em-dashing: there is no older
+        // price the box could be missing (RAZA 2026-11-05: "lumos isnt showing its chart and neither the %change
+        // boxes"). Any other short series keeps the rule above.
+        var over = function (days) {
+          var v = changeOver(pts, days), f = pts[0][4], l = pts[pts.length - 1][1];            // f: the first candle's OPEN
+          return (v == null && pts.born && f > 0) ? (l - f) / f * 100 : v;
+        };
+        LONG['7d'] = over(7);
+        LONG['1m'] = over(30);
+        LONG['3m'] = over(90);
+        LONG['6m'] = over(180);
         PERF.long = 'done'; paintPerf(LASTD);
       }, function (e) {
         var hopeless = /no wNEAR pool|NEAR in NEAR|no token|short|empty/.test(String((e && e.message) || ''));
@@ -799,7 +807,7 @@
 
     // MCap is the same series times ISSUED supply — the figure the supply and market-cap boxes use.
     var K = (CH_VIEW.metric === 'mcap' && CH_VIEW.supply > 0) ? CH_VIEW.supply : 1;
-    if (K !== 1) pts = pts.map(function (p) { return [p[0], p[1] * K, p[2] * K, p[3] * K, p[4] * K, p[5], p[6] != null ? p[6] * K : null, p[7]]; });
+    if (K !== 1) pts = pts.map(function (p) { return [p[0], p[1] * K, p[2] * K, p[3] * K, p[4] * K, p[5], p[6] != null ? p[6] * K : null, p[7], p[8]]; });
 
     var W = 900, HT = 380, PADL = 14, PADT = 16, PADB = 28, n = pts.length;
     var pw = pc.getBoundingClientRect().width || 622, PADR = Math.min(W * 0.25, Math.round(900 * 70 / pw));
@@ -912,7 +920,7 @@
     // Only now is the gate lifted: the box stays hidden while it holds the design's Aptos prices,
     // and opens the moment it holds this token's own.
     pc.classList.add('lxda');
-    wireChartHover(pc, { pts: pts, L: L, R: R, t0: t0, tspan: tspan, y: y, K: K, bucket: FIT.bucket, vol: vmax > 0 });
+    wireChartHover(pc, { pts: pts, L: L, R: R, t0: t0, tspan: tspan, y: y, K: K, bucket: FIT.bucket, vol: vmax > 0 || pts[0][8] != null });
     watchChartWidth();
   }
   // The right gutter is sized in pixels, so a new width redraws rather than stretches.
@@ -957,6 +965,21 @@
     var n = 0;
     for (var i = 0; i < TR.ts.length; i++) if (TR.ts[i] >= t && TR.ts[i] < t + bucket) n++;
     return n;
+  }
+  // THE TRADES ROW, ON EVERY RANGE (RAZA 2026-11-05: "Cross-Timeframe Parity", Stellar's readout has it on all of
+  // them; the row used to appear only on a chart the trades feed covered end to end, which on NEAR meant 1D).
+  // WHAT THE SERIES CARRIES: GeckoTerminal's candle is [time, open, high, low, close, volume] -- no trade count --
+  // and no free NEAR source counts the trades of a past candle. So, in order:
+  //   * a point from the pool indexer carries its own exact count (p[8]);
+  //   * a candle inside the recent-trades feed is counted from that feed, exact;
+  //   * an older candle has no trade count anywhere free (GeckoTerminal's candles carry volume only), so it reads "—"
+  //     unless it had no volume, which is a true 0. Dividing volume by a mean trade size would print an invented figure.
+  function tradesTxt(p, S, inUsd, usdPerNear) {
+    if (p[8] != null) return Number(p[8]).toLocaleString('en-US');
+    var n = tradesIn(p[0], S.bucket);
+    if (n != null) return n.toLocaleString('en-US');
+    var v = +p[5];
+    return (isFinite(v) && !(v > 0)) ? '0' : '—';
   }
   function tipEl(cls, text) {
     var e = el('div', cls, text);
@@ -1024,18 +1047,10 @@
         tip.appendChild(row);
       }
       // Trades in this candle (RAZA 2026-11-01: "I don't see the number of trades"), Stellar's row under Volume.
-      // Counted from the recent-trades feed on the same pool, so only for candles that feed fully covers.
-      // ...but only on a chart the trades feed covers END TO END (RAZA 2026-11-01 saw "—" on 1W/1M/1Y). The free
-      // feed reaches back 24 hours at most (300 trades) and no free NEAR source counts trades per past candle,
-      // so a longer range, or a busy token's day, has no Trades row on ANY point: one shape per chart, and
-      // never a count that is really "the part we could see".
-      var nTr = tradesIn(p[0], S.bucket);
-      if (S.vol && TR.ts && TR.from <= S.t0 + S.bucket) {
-        var trow = el('div', 'lxrow');
-        trow.appendChild(tipEl('l', 'Trades'));
-        trow.appendChild(tipEl('p', nTr == null ? '—' : nTr.toLocaleString('en-US')));
-        tip.appendChild(trow);
-      }
+      var trow = el('div', 'lxrow');
+      trow.appendChild(tipEl('l', 'Trades'));
+      trow.appendChild(tipEl('p', tradesTxt(p, S, inUsd, usdPerXrp)));
+      tip.appendChild(trow);
       tip.style.opacity = 1;
       var tw = tip.offsetWidth, th = tip.offsetHeight, tx = lx + 14;
       if (tx + tw > hr.width) tx = lx - tw - 14;
@@ -1095,9 +1110,9 @@
     if (pill) {
       var lbl = String(CH_VIEW.label || '1D').toUpperCase();
       var pct = null, tag = PILL_TAG[lbl] || lbl.toLowerCase();
-      if (lbl === '1D') {
-        pct = usd ? d.d24 : d.d24n;
-      } else if (pts && pts.length > 1) {
+      if (lbl === '1D') pct = usd ? d.d24 : d.d24n;
+      // A token only its own pool prices has no 24h figure in the payload; the plotted series answers.
+      if (pct == null && pts && pts.length > 1) {
         // First and last CLOSE that are real numbers. A gap at either end is skipped rather than
         // read as a price, which would otherwise show a 100% move against a zero.
         var firstC = null, lastC = null;
@@ -1363,10 +1378,110 @@
     });
   }
 
+  // ---- a pool GeckoTerminal has never heard of ------------------------------------------------------------
+  //
+  // RAZA 2026-11-05: "Its already been a day and lumos isnt showing its chart and neither the %change boxes", and
+  // "why aren't the recent trxs showing up". GeckoTerminal answers 404 for LUMOS/wNEAR 9001 and DexScreener has no
+  // trades for it, so the only record of that pool's market is the pool indexer (workers/near-pool-indexer): its
+  // deposits, and every swap of LumosCore's own pools from 2026-11-05 on. The chart, the change boxes and Recent
+  // Exchanges are built from those rows. Opening price: the first deposit's own amounts. After that, each swap's
+  // amounts. Then flat to now at the current price: a flat line is correct when nobody has traded.
+  //
+  // A 404 sends this visit's later requests for that pool straight here (GT_NONE) -- in memory only, so the next
+  // visit asks GeckoTerminal again and the page moves to real candles the day it lists the pool. An indexer that
+  // fails to answer is never kept: the chart's retry asks again.
+  var IDX = 'https://near-pool-indexer.usa282.workers.dev', IDX_ASK = {}, GT_NONE = {};
+  function poolNo(pool) {
+    var m = /^refv1-([0-9]+)/.exec(String((pool && pool.id) || ''));
+    return m ? m[1] : null;
+  }
+  function idxRows(no) {
+    var c = IDX_ASK[no];
+    if (c && Date.now() - c.at < 60000) return c.p;
+    var p = fetch(IDX + '/pool?id=' + no + '&limit=500')
+      .then(function (r) { if (!r.ok) throw new Error('indexer ' + r.status); return r.json(); })
+      .then(function (j) { if (!j || !j.ok || !Array.isArray(j.rows)) throw new Error('indexer down'); return j; });
+    IDX_ASK[no] = { at: Date.now(), p: p };
+    p.catch(function () { delete IDX_ASK[no]; });
+    return p;
+  }
+  // The pool's price moments, oldest first: { t, px, near, n } and, for a swap, the trade's own fields. Only this
+  // token against wNEAR: a swap between two other tokens of a stable pool says nothing about this price.
+  function idxTicks(j, d) {
+    var dec = +d.decimals, rows = (j.rows || []).slice().sort(function (a, b) { return a.t - b.t; }), out = [], born = false;
+    var raw = function (v, places) { var n = Number(v); return n > 0 ? n / Math.pow(10, places) : 0; };
+    rows.forEach(function (r) {
+      if (r.kind === 'add' && !out.length) {
+        var tk = (r.extra && r.extra.tokens) || [], a = null, b = null;
+        tk.forEach(function (x) { if (x.t === d.i) a = raw(x.a, dec); if (x.t === WNEAR) b = raw(x.a, 24); });
+        if (a > 0 && b > 0) { out.push({ t: r.t, px: b / a, near: 0, n: 0 }); born = true; }
+        return;
+      }
+      if (r.kind !== 'swap') return;
+      var buy = r.tb === d.i && r.ta === WNEAR, sell = r.ta === d.i && r.tb === WNEAR;
+      if (!buy && !sell) return;
+      var amt = raw(buy ? r.ab : r.aa, dec), near = raw(buy ? r.aa : r.ab, 24);
+      if (!(amt > 0) || !(near > 0)) return;
+      out.push({ t: r.t, px: near / amt, near: near, n: 1, amt: amt, side: buy ? 'buy' : 'sell', addr: String(r.who || ''), tx: String(r.tx || '') });
+    });
+    // 500 rows is the indexer's page: a pool past it has lost its first deposit off the end.
+    return { ticks: out, born: born && rows.length < 500 };
+  }
+  // [t, close, high, low, open, volume, usdClose, usdVolume, trades]: gtOne's shape with gtSeries' dollar fields, and
+  // the one thing a GeckoTerminal candle does not have, its trade count.
+  function idxSeries(d, pool, R, vs, label) {
+    var no = poolNo(pool);
+    if (!no) return Promise.reject(new Error('404'));
+    if (d.decimals == null) return Promise.reject(new Error('no token decimals'));
+    var wantUsd = !(label === 'PERF' && vs !== 'USD');
+    return Promise.all([idxRows(no), wantUsd ? cgSeries('near', R.days, R.ttl).catch(function () { return null; }) : null]).then(function (r) {
+      var T = idxTicks(r[0], d), ticks = T.ticks, near = r[1];
+      if (!ticks.length) throw new Error('404');                 // nothing recorded: no history, as GeckoTerminal said
+      var size = (R.tf === 'minute' ? 60000 : R.tf === 'hour' ? 3600000 : 86400000) * R.agg;
+      var tol = Math.max(3600000, R.days * 86400000 / 100), at = 0;
+      var rate = function (t) {
+        if (!near || !near.length) return null;
+        while (at < near.length - 1 && Math.abs(near[at + 1][0] - t) <= Math.abs(near[at][0] - t)) at++;
+        return (near[at][1] > 0 && Math.abs(near[at][0] - t) <= tol) ? near[at][1] : null;
+      };
+      var point = function (c) {
+        var u = rate(c.t), m = vs === 'USD' ? (u || +d.nearUsd || 0) : 1;
+        if (!(m > 0)) throw new Error('no NEAR price');
+        return [c.t, c.c * m, c.h * m, c.l * m, c.o * m, c.v * m, u ? c.c * u : null, u ? c.v * u : 0, c.n];
+      };
+      var out = [], cur = null;
+      ticks.forEach(function (k) {
+        var b = Math.floor(k.t / size) * size;
+        if (!cur || cur.t !== b) {
+          if (cur) out.push(point(cur));
+          var o = cur ? cur.c : k.px;
+          cur = { t: b, o: o, h: Math.max(o, k.px), l: Math.min(o, k.px), c: k.px, v: 0, n: 0 };
+        }
+        cur.h = Math.max(cur.h, k.px); cur.l = Math.min(cur.l, k.px); cur.c = k.px;
+        cur.v += k.near; cur.n += k.n;
+      });
+      out.push(point(cur));
+      var now = Date.now(), px = d.price > 0 ? +d.price : cur.c;
+      if (now > cur.t) out.push(point({ t: now, o: cur.c, h: Math.max(cur.c, px), l: Math.min(cur.c, px), c: px, v: 0, n: 0 }));
+      out.bucketMs = size;
+      out.born = T.born;
+      return out;
+    });
+  }
+
   function seriesFor(label, vs) {
     var d = window.__lxnAssetData, R = CH_SRC[label] || CH_SRC['1D'];
     if (!d) return Promise.reject(new Error('no token'));
     if (d.i === WNEAR && vs !== 'USD') return Promise.reject(new Error('NEAR in NEAR'));
+    var pool = gtPool(d);
+    if (pool && GT_NONE[pool.id]) return idxSeries(d, pool, R, vs, label);
+    return feedSeries(d, R, label, vs).catch(function (e) {
+      if (!pool || !/^404$/.test(String((e && e.message) || ''))) throw e;
+      GT_NONE[pool.id] = 1;
+      return idxSeries(d, pool, R, vs, label);
+    });
+  }
+  function feedSeries(d, R, label, vs) {
     // REAL CANDLES FIRST, now that the chart draws Stellar's volume band (RAZA 2026-10-29). GeckoTerminal's
     // candles carry each bucket's volume; CoinGecko's points carry only a rolling 24h total, so a curated
     // token charted from CoinGecko -- USDC among them -- had no bars at all, on any range. CoinGecko stays
@@ -1412,7 +1527,9 @@
     var take = function (p) {
       var last = p[p.length - 1], cut = last[0] - 3600000, base = null;
       for (var i = p.length - 1; i >= 0; i--) { if (p[i][0] <= cut) { base = p[i]; break; } }
+      if (!base && p.born) base = p[0];                        // younger than the hour: since its opening price
       LONG['1h'] = (base && base[1] > 0) ? (last[1] - base[1]) / base[1] * 100 : null;
+      LONG['24h'] = changeOver(p, 1);                          // read only when the payload has no 24h figure
       PERF.h1 = 'done';
       paintPerf(LASTD);
     };
@@ -1435,11 +1552,12 @@
     for (var i = 1; i < pts.length; i++) { var df = pts[i][0] - pts[i - 1][0]; if (df > 0) diffs.push(df); }
     diffs.sort(function (a, b) { return a - b; });
     var win = R.days * 86400000;
-    var bucket = Math.max(60000, Math.min(win / 20, diffs[0] || 60000));
+    // The indexer's series knows its candle; its closing "now" point would otherwise pass for a one-minute candle.
+    var bucket = pts.bucketMs || Math.max(60000, Math.min(win / 20, diffs[0] || 60000));
     var end = Math.max(Date.now(), pts[pts.length - 1][0]), start = end - win;
     var prev = null, inside = [];
     for (var k = 0; k < pts.length; k++) { if (pts[k][0] < start) prev = pts[k]; else inside.push(pts[k]); }
-    var flat = function (t, p) { return [t, p[1], p[1], p[1], p[1], 0, p[6], 0]; };
+    var flat = function (t, p) { return [t, p[1], p[1], p[1], p[1], 0, p[6], 0, p[8] != null ? 0 : undefined]; };
     var seq = prev ? [flat(start, prev)].concat(inside) : inside;
     if (seq.length < 2) { FIT = { t0: pts[0][0], t1: pts[pts.length - 1][0], bucket: bucket }; return pts; }
     var out = [seq[0]];
@@ -1451,6 +1569,7 @@
     var last = out[out.length - 1];
     if (end - last[0] > 1.5 * bucket) out.push(flat(end, last));
     FIT = { t0: prev ? start : out[0][0], t1: end, bucket: bucket };
+    out.born = pts.born;
     return out;
   }
 
@@ -1697,11 +1816,35 @@
     l.style.setProperty('text-decoration', TR.mine ? 'underline' : 'none', 'important');
   }
   var TR_PER = 50;
+  // The mean trade size in NEAR, for the readout on a candle older than the feed (tradesTxt).
+  function trMean(rows) {
+    var sum = 0, n = 0;
+    (rows || []).forEach(function (r) { if (r.near > 0) { sum += r.near; n++; } });
+    return n ? sum / n : 0;
+  }
+  // Recent Exchanges from the pool indexer's swap rows, in paintTrades' row shape (see idxSeries).
+  function idxTrades(pool, attempt) {
+    var d = window.__lxnAssetData, no = poolNo(pool), at = attempt || 0;
+    if (!no) { TR.rows = []; TR.at = Date.now(); syncPanel(); return; }
+    idxRows(no).then(function (j) {
+      var out = idxTicks(j, d).ticks.filter(function (k) { return k.n > 0 && ACCT_RE.test(k.addr); }).map(function (k) {
+        return { addr: k.addr, side: k.side, amt: k.amt, near: k.near, px: k.px, t: k.t,
+          hash: /^[A-Za-z0-9]{20,64}$/.test(k.tx) ? k.tx : '' };
+      }).reverse();
+      TR.rows = out; TR.mean = trMean(out);
+      TR.ts = null; TR.err = false; TR.at = Date.now();
+      syncPanel();
+    }, function () {
+      if (at >= CH_RETRY.length) { TR.err = true; syncPanel(); }
+      if (at < 12) setTimeout(function () { idxTrades(pool, at + 1); }, at < CH_RETRY.length ? CH_RETRY[at] : 60000);
+    });
+  }
   function loadTrades(attempt) {
     var d = window.__lxnAssetData, pool = gtPool(d);
     if (!pool) { TR.none = true; TR.rows = []; syncPanel(); return; }
     TR.pool = pool;
     var at = attempt || 0;
+    if (GT_NONE[pool.id]) { idxTrades(pool, at); return; }
     // v2: the first element is { meta: 1, ts, from } for the chart readout's trade count (below).
     getJsonOnce('lumos.nearGtTr.v2.' + pool.id, 'https://api.geckoterminal.com/api/v2/networks/near/pools/'
       + encodeURIComponent(pool.id) + '/trades', 60000, function (j) {
@@ -1728,9 +1871,12 @@
       var m = rows[0] && rows[0].meta ? rows[0] : null;         // slice, not shift: the array is shared
       TR.ts = m ? m.ts : null; TR.from = m ? m.from : 0;
       TR.rows = m ? rows.slice(1) : rows;
+      TR.mean = trMean(TR.rows);
       TR.err = false; TR.at = Date.now();
       syncPanel();
-    }, function () {
+    }, function (e) {
+      // GeckoTerminal has never seen this pool, which waiting cannot change: the indexer's swap rows instead.
+      if (/^404$/.test(String((e && e.message) || ''))) { GT_NONE[pool.id] = 1; idxTrades(pool, 0); return; }
       // A refusal is GeckoTerminal's per-minute allowance, so keep asking -- every minute once the quick
       // retries are spent -- and say so in the table only after those, rather than giving up for good.
       if (at >= CH_RETRY.length) { TR.err = true; syncPanel(); }
@@ -1836,7 +1982,7 @@
         ? (!me ? 'Connect a wallet to see your own trades in this asset.'
           : !MINE.rows ? (MINE.err ? 'Your trades could not be read right now. Try again in a moment.' : 'Reading your trades…')
           : 'No trades from this wallet in this asset.')                   // Stellar's line (RAZA 2026-11-03)
-        : TR.min > 0 ? ('No trades of ' + TR.min.toLocaleString('en-US') + '+ NEAR among the latest ' + TR.rows.length + '.') : 'No trades on this pool recently.';
+        : TR.min > 0 ? ('No trades of ' + TR.min.toLocaleString('en-US') + '+ NEAR among the latest ' + TR.rows.length + '.') : 'No trades in the recent window.';   // Stellar's line
       tb.innerHTML = phone
         ? '<div class="lxda-ex-empty" data-lxda="1" style="text-align:center;padding:26px 12px;color:var(--text-soft,#8a8fa3);font-size:13.5px">' + none + '</div>'
         : '<tr class="lxda-ex-empty" data-lxda="1"><td colspan="6" style="text-align:center;padding:26px 12px;color:var(--text-soft,#8a8fa3);font-size:13.5px">' + none + '</td></tr>';
@@ -2000,8 +2146,22 @@
       if (!t) return;
       var chip = t.closest('#dxaPanelFilters .chip, #mdxaPanelFilters .chip');
       var pgb = t.closest('[data-lxpg]'), hpb = t.closest('[data-lxhp]'), mtb = t.closest('.lx-mytrades');
-      if (!chip && !pgb && !hpb && !mtb) return;
+      var plb = t.closest('.lx-pl-prev, .lx-pl-next'), prw = t.closest('[data-lxhref]');
+      if (!chip && !pgb && !hpb && !mtb && !plb && !prw) return;
       e.preventDefault(); e.stopImmediatePropagation();
+      // Here at window capture because the design's __lumosNav claims any row click and resolves it to a Stellar
+      // route. A row with an empty href is a concentrated-liquidity pool, which has no pool page yet.
+      if (prw) {
+        var hr = prw.getAttribute('data-lxhref');
+        if (hr) { if (e.ctrlKey || e.metaKey) window.open(hr, '_blank', 'noopener'); else window.location.href = hr; }
+        return;
+      }
+      if (plb) {
+        PL.page += plb.classList.contains('lx-pl-next') ? 1 : -1;
+        var plx = plb.closest('.dxa-pools, .mdxa-pools');
+        if (plx) poolsPage(plx);
+        return;
+      }
       if (mtb) {
         TR.mine = !TR.mine; TR.page = 1;
         myTradesBtn();
@@ -2038,7 +2198,7 @@
     if (hl) paintHolders(hl, phone);
     var pl = panel.querySelector('.' + pre + '-tab-extra.' + pre + '-pools:not(.lxda)');
     if (pl && DONE) {
-      if (window.__lxnAssetData) paintPools(window.__lxnAssetData, pl);
+      if (window.__lxnAssetData) { if (PL.list) paintPools(window.__lxnAssetData, pl); }
       else {
         pl.innerHTML = '';
         pl.appendChild(emptyState(pre + '-empty-state', 'Pools unavailable', 'Pool data could not be loaded just now.'));
@@ -2145,13 +2305,16 @@
     }
   }
 
-  // ---- Pools, from the token payload ------------------------------------------------------------
+  // ---- Pools ------------------------------------------------------------------------------------------
   //
-  // Every pair DexScreener knows for the token, largest first (the payload carries up to 25 and the
-  // full count). Four columns as on Stellar's Pools tab, with the design's own 24h volume in place of
-  // Stellar's LP holders, which NEAR has no source for: Pool, TVL, 24h volume, Pool share. The share
-  // is each pool's part of the listed pools' combined TVL. Rows do not navigate: NEAR has no pool page
-  // yet, and sending a row click off-site would be a behaviour the design does not have.
+  // STELLAR'S TAB (RAZA 2026-11-05): Active pools, Combined TVL and LP positions over the table; Pool, TVL, LP
+  // holders, Pool share in it; 25 rows a page with Stellar's footer; each row opens that pool's page. EVERY POOL OF
+  // THE TOKEN, "fetching all 22 pools for AURORA": /lxapi/nearpools?q=<contract>&full=1 lists them, and the token
+  // payload adds what that list cannot hold -- its concentrated-liquidity pools, and a pool too new for it.
+  //
+  // ACTIVE MEANS HOLDING LIQUIDITY, the rule the baked counts use (_tools/_nearpoolcounts.js): a pool with a zero
+  // reserve is left out, a reserve we could not size (null) is not zero and stays. The tab, the card and the table
+  // all read this one list's length, so they cannot disagree; the baked count is no longer shown.
   function money0(v) { return (v == null || !isFinite(v)) ? '—' : usdCompact(v); }
 
   // The two pair marks. The design's slots carry "$" / "★" glyphs on a gradient; each is cleared and
@@ -2180,82 +2343,167 @@
     }
   }
 
-  function poolCounts(d) {
-    var pools = d.pools || [];
-    var n = d.poolCount != null ? +d.poolCount : pools.length;
-    var more = n > pools.length ? '+' : '';
-    if (d.poolCapped) n = n + '+';                      // DexScreener's 30-pair cap, not the token's total
-    var tvl = 0, vol = 0;
-    pools.forEach(function (p) { tvl += +p.liqUsd || 0; vol += +p.volUsd || 0; });
-    setTabCount(/pools/i, String(n));
-    setHlStat(/^(active\s+)?pools/i, String(n));
-    setHlStat(/^(combined\s+)?tvl/i, money0(tvl) + more);
-    setHlStat(/^24h vol/i, money0(vol) + more);
-    return tvl;
+  function poolHref(id, syms) {
+    var slug = (syms || []).map(function (x) { return String(x || '').toLowerCase().replace(/[^a-z0-9]/g, ''); })
+      .filter(Boolean).join('-').slice(0, 60).replace(/-+$/, '');
+    return '/pools/near/' + (slug || 'pool') + '/' + encodeURIComponent(id);
   }
 
+  var PL = { i: '', list: null, err: false, page: 1 }, PL_PER = 25;
+
+  // One row: { name, href, ico:[{logo,s},{logo,s}], liqUsd, lps, lpa }. This token first, as Stellar's "LMX / eLMNR".
+  function poolRow(d, id, tokens, liqUsd, lps, lpa, href) {
+    var own = tokens.filter(function (t) { return t.i === d.i; }), rest = tokens.filter(function (t) { return t.i !== d.i; });
+    var ts = own.concat(rest), logos = d.logos || {};
+    var ico = ts.slice(0, 2).map(function (t) {
+      // wNEAR carries no logo in its own metadata; it is NEAR, so it wears NEAR's mark.
+      return { s: t.s, logo: t.logo || logos[t.i] || (t.i === d.i ? d.logo : '') || (t.i === WNEAR ? NEAR_LOGO : '') };
+    });
+    return { id: id, name: ts.map(function (t) { return t.s; }).join(' / '), ico: ico, liqUsd: liqUsd, lps: lps, lpa: lpa,
+      href: href ? poolHref(id, ts.map(function (t) { return t.s; })) : '' };
+  }
+  function mergePools(d, j) {
+    var usd = (j && j.usd > 0) ? +j.usd : (+d.nearUsd || 0), seen = {}, out = [];
+    ((j && j.rows) || []).forEach(function (r) {
+      var ts = (r && r.tokens) || [];
+      // q is a search, so a same-named token's pools can come back with it: only pools really holding this contract.
+      if (!ts.some(function (t) { return t.i === d.i; })) return;
+      seen[r.id] = 1;
+      if (ts.some(function (t) { return t.v === 0; })) return;
+      out.push(poolRow(d, r.id, ts, (r.liq != null && usd > 0) ? r.liq * usd : null, r.lps, r.lpa, true));
+    });
+    (d.pools || []).forEach(function (p) {
+      if (!p || !p.id || !(+p.liqUsd > 0 || +p.liq > 0)) return;
+      var no = poolNo(p), key = no || p.id;                     // refv1-4179:3 is one pair of pool 4179
+      if (seen[key]) return;
+      seen[key] = 1;
+      out.push(poolRow(d, key, [p.base, p.quote], +p.liqUsd > 0 ? +p.liqUsd : null, null, 0, !!no));
+    });
+    return out.sort(function (a, b) { return (b.liqUsd || 0) - (a.liqUsd || 0); });
+  }
+  function poolCounts() {
+    setTabCount(/pools/i, PL.list ? PL.list.length.toLocaleString('en-US') : '—');
+  }
+  function poolsReady() {
+    poolCounts();
+    // A tab already painted from the payload's rows is repainted from the fuller list.
+    $$('.dxa-tab-extra.dxa-pools, .mdxa-tab-extra.mdxa-pools').forEach(function (n) { n.classList.remove('lxda'); });
+    syncPanel();
+  }
+  // Participants of the pools the live list did not answer for: the indexer's own count. Asking also queues them there.
+  function holders(d, j) {
+    var ids = (j.rows || []).filter(function (r) { return r.lps == null; }).map(function (r) { return r.id; }).slice(0, 600);
+    if (!ids.length) return;
+    return fetch(IDX + '/lps?ids=' + ids.join(',')).then(function (r) { return r.json(); }).then(function (x) {
+      if (!x || !x.ok || PL.i !== d.i) return;
+      (PL.list || []).forEach(function (p) { var v = x.c[p.id]; if (v) { p.lps = v[0]; p.lpa = v[1]; } });
+      poolsReady();
+    }).catch(function () {});
+  }
+  function loadPools(attempt) {
+    var d = window.__lxnAssetData, at = attempt || 0;
+    if (!d) return;
+    if (PL.i !== d.i) PL = { i: d.i, list: null, err: false, page: 1 };
+    // The whole-chain list baked for this token (_tools/_nearpoolcounts.js): the live answer holds ~2,500 of ~9,000
+    // pools, so USDC read 52 where its count says 394. Absent for a token outside the curated list.
+    var baked = fetch('/assets/tokenpools/' + encodeURIComponent(d.i) + '.json')
+      .then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; });
+    Promise.all([fetch('/lxapi/nearpools?q=' + encodeURIComponent(d.i) + '&full=1').then(function (r) { return r.json(); }), baked])
+      .then(function (a) {
+        var j = a[0];
+        if (!j || !j.ok) throw new Error('down');
+        (a[1] || []).forEach(function (b) {
+          if ((j.rows || []).some(function (r) { return String(r.id) === b[0]; })) return;
+          j.rows.push({ id: b[0], liq: b[1], lps: null, lpa: 0, tokens: b[2].map(function (t) { return { i: t[0], s: t[1] }; }) });
+        });
+        PL.list = mergePools(d, j); PL.err = false;
+        poolsReady();
+        return holders(d, j);
+      })
+      .catch(function () {
+        // The payload's rows stand in meanwhile; a refused call is never taken to mean the token has no pools.
+        if (!PL.list) { PL.list = mergePools(d, null); PL.err = true; poolsReady(); }
+        if (at < 2) setTimeout(function () { loadPools(at + 1); }, CH_RETRY[at + 1]);
+      });
+  }
+
+  function lpTxt(p) {
+    return p.lps == null ? '—' : ((p.lpa ? '~' : '') + Number(p.lps).toLocaleString('en-US'));
+  }
+  function shareTxt(p, tvl) {
+    if (!(tvl > 0) || p.liqUsd == null) return '—';
+    var v = p.liqUsd / tvl * 100;
+    return (v >= 0.1 ? v.toFixed(1) : '<0.1') + '%';
+  }
+  // data-logo="" and data-logoed on every short cell: "TVL" and a count of 12 are what the logo healer eats.
   function paintPools(d, extra) {
     if (!extra || extra.classList.contains('lxda')) return;
-    var pools = d.pools || [];
-    var tvl = poolCounts(d);
-    var logos = d.logos || {};
-    // The design's fourth stat (Avg APR) has no NEAR source and Stellar's tab has no fourth stat.
-    statCells(extra).forEach(function (cell) {
-      if (/^avg apr/i.test((cell.textContent || '').trim()) && cell.parentNode) cell.parentNode.removeChild(cell);
-    });
-    var body = extra.querySelector('tbody') || extra.querySelector('.mdxa-pl-list');
-    var template = body && body.children.length ? body.children[0].cloneNode(true) : null;
-    if (body && template) {
-      var table = body.closest ? body.closest('table') : null;
-      if (table) {
-        var WANT = ['Pool', 'TVL', '24h volume', 'Pool share'];
-        [].slice.call(table.querySelectorAll('thead th')).forEach(function (th, k) {
-          if (k < WANT.length) plain(th, WANT[k]);
-          else if (th.parentNode) th.parentNode.removeChild(th);
-        });
-      }
-      body.innerHTML = '';
-      pools.forEach(function (p) {
-        var tr = template.cloneNode(true), td = tr.children;
-        var nameEl = tr.querySelector('[class*="dxa-pl-name"]');
-        if (nameEl) nameEl.textContent = p.pair;
-        var slots = tr.querySelectorAll('.dxa-pl-ico, .mdxa-pl-ico');
-        // wNEAR carries no logo in its own metadata; it is NEAR, so it wears NEAR's mark.
-        poolIcon(slots[0], logos[p.base.i] || (p.base.i === WNEAR ? NEAR_LOGO : ''), p.base.s);
-        poolIcon(slots[1], logos[p.quote.i] || (p.quote.i === WNEAR ? NEAR_LOGO : ''), p.quote.s);
-        var icos = tr.querySelector('.dxa-pl-icos');
-        if (icos) icos.setAttribute('data-paired', '1');      // the healer's own "done" marker
-        var share = (tvl > 0 && p.liqUsd != null) ? ((p.liqUsd / tvl) * 100).toFixed(1) + '%' : '—';
-        var mTvl = tr.querySelector('.mdxa-pl-tvl');
-        if (mTvl) {
-          mTvl.textContent = money0(p.liqUsd);
-          var mApr = tr.querySelector('.mdxa-pl-apr');
-          // "44.9% share", never a bare "44.9%": see the XRPL note on the logo healer eating this cell.
-          if (mApr) { plain(mApr, share === '—' ? '—' : (share + ' share')); mApr.className = 'mdxa-pl-apr'; }
-          var pill = tr.querySelector('.net-pill');
-          if (pill) plain(pill, 'NEAR Protocol');
-        } else {
-          if (td[1]) { td[1].className = 'mono'; td[1].textContent = money0(p.liqUsd); }
-          if (td[2]) { td[2].className = 'mono'; td[2].textContent = money0(p.volUsd); }
-          if (td[3]) { td[3].className = 'mono'; td[3].textContent = share; }
-          while (tr.children.length > 4) tr.removeChild(tr.lastElementChild);
-          tr.className = 'dxa-pl-row';
-        }
-        tr.setAttribute('data-lxpool', p.id);
-        body.appendChild(tr);
-      });
-      // No note under the table (RAZA 2026-11-03, as on Stellar). It said the table holds only the largest pools
-      // DexScreener returns while the tab count is Rhea's; that caveat is gone from the page by his call.
-      var fn = extra.querySelector('.lxn-plnote');
-      if (fn && fn.parentNode) fn.parentNode.removeChild(fn);
-      if (!pools.length) {
-        var none = emptyState(/mdxa/.test(extra.className) ? 'mdxa-empty-state' : 'dxa-empty-state',
-          'No pools found', 'No pool lists this token on NEAR right now.');
-        (table || body).parentNode.insertBefore(none, table || body);
-        hideEl(table || body);
-      }
-    }
+    var phone = extra.className.indexOf('mdxa') >= 0, pre = phone ? 'mdxa' : 'dxa', list = PL.list;
     extra.classList.add('lxda');
+    extra.setAttribute('data-logoed', '1');
+    extra.innerHTML = '';
+    if (!list.length) {
+      extra.appendChild(PL.err ? emptyState(pre + '-empty-state', 'Pools unavailable', 'Pool data could not be loaded just now.')
+        : emptyState(pre + '-empty-state', 'No pools found', 'No pool lists this token on NEAR right now.'));
+      return;
+    }
+    var tvl = 0, lps = 0, some = false, approx = false, gaps = false;
+    list.forEach(function (p) {
+      tvl += +p.liqUsd || 0;
+      if (p.lps == null) { gaps = true; return; }
+      lps += +p.lps; some = true;
+      if (p.lpa) approx = true;
+    });
+    extra.__lxnTvl = tvl;
+    // "~" a count is approximate; "+" a pool's count is not read yet, so the total is a floor.
+    var lpsTxt = some ? ((approx ? '~' : '') + statAmt(lps) + (gaps ? '+' : '')) : '—';
+    var stat = function (lbl, val) {
+      return '<div class="' + pre + '-hl-stat"><span class="lbl">' + lbl + '</span><span class="val mono lxp" data-logoed="1" data-logo="">' + escH(val) + '</span></div>';
+    };
+    var head = stat('Active pools', list.length.toLocaleString('en-US')) + stat('Combined TVL', money0(tvl)) + stat('LP positions', lpsTxt);
+    var th = function (t) { return '<th data-logoed="1" data-logo="">' + t + '</th>'; };
+    extra.innerHTML = phone
+      ? '<div class="mdxa-pl-head">' + head + '</div><div class="mdxa-pl-list"></div><div class="lx-pl-foot"></div>'
+      : '<div class="dxa-pl-head">' + head + '</div><table class="ex-table"><thead><tr>' + th('Pool') + th('TVL') + th('LP holders') + th('Pool share')
+        + '</tr></thead><tbody></tbody></table><div class="lx-pl-foot"></div>';
+    poolsPage(extra);
+  }
+  // Rows and footer for the current page: Stellar's poolsPaint.
+  function poolsPage(extra) {
+    var phone = extra.className.indexOf('mdxa') >= 0, list = PL.list || [], tvl = extra.__lxnTvl;
+    var body = extra.querySelector(phone ? '.mdxa-pl-list' : 'tbody'), foot = extra.querySelector('.lx-pl-foot');
+    if (!body || !foot) return;
+    var pages = Math.max(1, Math.ceil(list.length / PL_PER));
+    if (PL.page > pages) PL.page = pages;
+    if (PL.page < 1) PL.page = 1;
+    var start = (PL.page - 1) * PL_PER, end = Math.min(start + PL_PER, list.length), top = list.slice(start, end);
+    var ICOS = '<span class="dxa-pl-icos" data-paired="1"><span class="dxa-pl-ico"></span><span class="dxa-pl-ico"></span></span>';
+    body.innerHTML = top.map(function (p) {
+      var name = escH(p.name), hf = escH(p.href), liq = money0(p.liqUsd), share = shareTxt(p, tvl);
+      if (phone) {
+        var tag = p.href ? 'a' : 'div';
+        return '<' + tag + ' class="mdxa-pl-row"' + (p.href ? ' href="' + hf + '"' : '') + ' data-lxhref="' + hf + '" data-logoed="1">'
+          + '<div class="mdxa-pl-l">' + ICOS + '<div><div class="mdxa-pl-name">' + name + '</div>'
+          + '<div class="mdxa-pl-net mdxa-pl-lp">' + lpTxt(p) + ' LP holders</div></div></div>'
+          + '<div class="mdxa-pl-r"><div class="mdxa-pl-tvl mono">' + liq + '</div>'
+          + '<div class="mdxa-pl-apr apr-low">' + (share === '—' ? share : share + ' share') + '</div></div></' + tag + '>';
+      }
+      var cell = function (t) { return '<td class="mono" data-logoed="1" data-logo="">' + t + '</td>'; };
+      return '<tr class="dxa-pl-row" data-lxhref="' + hf + '"' + (p.href ? '' : ' style="cursor:default"') + '><td><div class="dxa-pl-pair">' + ICOS
+        + '<span class="dxa-pl-name">' + (p.href ? '<a href="' + hf + '" style="color:inherit;text-decoration:none">' + name + '</a>' : name) + '</span></div></td>'
+        + cell(liq) + cell(lpTxt(p)) + cell(escH(share)) + '</tr>';
+    }).join('');
+    [].forEach.call(body.children, function (row, k) {
+      var slots = row.querySelectorAll('.dxa-pl-ico'), ico = top[k].ico;
+      poolIcon(slots[0], ico[0] && ico[0].logo, ico[0] && ico[0].s);
+      poolIcon(slots[1], ico[1] && ico[1].logo, ico[1] && ico[1].s);
+    });
+    // One page needs no pager, as on Stellar.
+    foot.style.display = pages > 1 ? '' : 'none';
+    foot.innerHTML = '<span class="info lxp">Showing ' + (start + 1).toLocaleString('en-US') + '–' + end.toLocaleString('en-US') + ' of '
+      + list.length.toLocaleString('en-US') + ' pools</span><span class="pc"><button type="button" class="lx-pl-prev"' + (PL.page <= 1 ? ' disabled' : '') + '>‹ Prev</button>'
+      + '<span class="pmid">Page ' + PL.page + ' of ' + pages + '</span>'
+      + '<button type="button" class="lx-pl-next"' + (PL.page >= pages ? ' disabled' : '') + '>Next ›</button></span>';
   }
 
   // ---- identity ---------------------------------------------------------------------------------
@@ -2463,7 +2711,7 @@
   function paintLogo(asset, d) {
     var box = $('.asset-logo');
     if (!box || box.getAttribute('data-lxlogo') === asset.id) return;
-    var src = (d && /^(data:image\/|https:\/\/)/i.test(d.logo || '')) ? d.logo : '';
+    var src = (d && /^(data:image\/|https:\/\/|\/assets\/)/i.test(d.logo || '')) ? d.logo : '';
     var initials = function () {
       box.innerHTML = '';
       box.textContent = String(asset.code || '?').replace(/[^A-Za-z0-9]/g, '').slice(0, 3).toUpperCase();
@@ -2510,7 +2758,7 @@
     // Spaces encoded too: an inline SVG logo carries them ("<?xml version=..."), and the review popup
     // (lx-feemodal) strips every space out of the url it copies -- which turned USDC's mark into a broken
     // image there (RAZA 2026-10-29: "The logo for the asset I receive is not appearing").
-    var tokLogo = (d && /^(data:image\/|https:\/\/)/i.test(d.logo || '')) ? d.logo.replace(/"/g, '%22').replace(/\s/g, '%20') : '';
+    var tokLogo = (d && /^(data:image\/|https:\/\/|\/assets\/)/i.test(d.logo || '')) ? d.logo.replace(/"/g, '%22').replace(/\s/g, '%20') : '';
 
     $$('[class*="dxa-side-btn"]').forEach(function (b) {
       var sell = b.classList.contains('sell');
@@ -3034,7 +3282,7 @@
       loadChart(asset, '1D');
       wireChartRanges(asset);
       loadLongPerf(asset);
-      poolCounts(window.__lxnAssetData);
+      loadPools();
       syncPanel();
       loadBook(asset, window.__lxnAssetData);
       loadTrades();

@@ -64,7 +64,14 @@
     if (document.getElementById('lx-cpfit')) return;
     var st = document.createElement('style');
     st.id = 'lx-cpfit';
-    st.textContent = '#createPoolModal .asset-amt{min-width:0}';
+    // A long contract id ellipsises inside its row (RAZA 2026-11-05: AURORA's and DARK's ids ran out of the list and
+    // over the rows around them). The text column may shrink; the logo and the balance keep their width.
+    st.textContent = '#createPoolModal .asset-amt{min-width:0}'
+      + '#createPoolModal .ad-list{overflow-x:hidden}'
+      + '#createPoolModal .lx-cpitem{min-width:0;max-width:100%;overflow:hidden}'
+      + '#createPoolModal .lx-cpitem .ad-ico,#createPoolModal .lx-cpitem .ad-bal{flex:0 0 auto}'
+      + '#createPoolModal .lx-cpitem .ad-meta{flex:1 1 0;min-width:0;overflow:hidden}'
+      + '#createPoolModal .lx-cpitem .ad-tk,#createPoolModal .lx-cpitem .ad-nm{display:block;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}';
     (document.head || document.documentElement).appendChild(st);
   })();
 
@@ -677,16 +684,26 @@
 
   // A POOL JUST CREATED IS NOT READABLE AT ONCE (RAZA 2026-11-04, LUMOS/wNEAR pool 8998: "E85: invalid pool id"
   // and no liquidity step). add_simple_pool's receipt returns the id a block or two before the RPC's finalised
-  // view holds the pool, and get_pool on it panics with E85. So E85 is asked again, for about 15 seconds, before
+  // view holds the pool, and get_pool on it panics with E85. So E85 is asked again, for about 30 seconds, before
   // it counts as an answer; any other error is passed on at once.
+  //
+  // AND NEVER THE CONTRACT'S OWN WORDS (RAZA 2026-11-05, DARK/AURORA: "wasm execution failed with error: HostError(...)"
+  // in red; that attempt left pool 8999 on chain, created and empty). A pool that stays unreadable has still been
+  // created, and pressing Create pool again finds it (findEmptyPool) and adds the liquidity, so that is what it says.
   function poolSettled(pid, tries) {
-    tries = tries == null ? 10 : tries;
+    tries = tries == null ? 20 : tries;
     return C().callView(REF, 'get_pool', { pool_id: pid }).catch(function (e) {
-      if (tries > 0 && /E85|invalid pool id/i.test(String((e && e.message) || e))) {
-        return new Promise(function (r) { setTimeout(r, 1500); }).then(function () { return poolSettled(pid, tries - 1); });
+      if (/E85|invalid pool id/i.test(String((e && e.message) || e))) {
+        if (tries > 0) return new Promise(function (r) { setTimeout(r, 1500); }).then(function () { return poolSettled(pid, tries - 1); });
+        throw new Error('The pool was created, but NEAR has not made it readable yet, so no liquidity was added and your tokens have not moved. Press Create pool again in a moment to add them.');
       }
       throw e;
     });
+  }
+  // A contract's panic, in plain words. Everything else is a sentence of ours or a wallet's, and passes through.
+  function plainErr(m) {
+    m = String(m || '');
+    return /wasm execution|HostError|GuestPanic|panicked at/i.test(m) ? 'The NEAR contract refused this, and nothing more was sent. Check your wallet activity, then try again.' : m;
   }
 
   // The pool this dialog has just created: the NEWEST match is the right answer here, because it is ours.
@@ -908,16 +925,16 @@
                   : 'Nothing was signed, so nothing moved.', 'bad');
               }
               return stop((creating ? 'The pool was created (#' + pid + ') but the liquidity step failed: ' : 'The liquidity step failed: ')
-                + ((e && e.message) || 'the wallet reported an error.'), 'bad');
+                + (plainErr(e && e.message) || 'the wallet reported an error.'), 'bad');
             });
           });
         }, function (e) {
           return stop(rejected(e) ? 'Nothing was signed, so nothing moved.'
-            : ((e && e.message) || 'The pool could not be created.'), 'bad');
+            : (plainErr(e && e.message) || 'The pool could not be created.'), 'bad');
         });
       });
     }).catch(function (e) {
-      stop((e && e.message) || 'Something went wrong, and nothing was signed.', 'bad');
+      stop(plainErr(e && e.message) || 'Something went wrong, and nothing was signed.', 'bad');
     });
   }
 

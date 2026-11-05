@@ -188,6 +188,8 @@
     var otherF = s === 'sell' ? f[2] : f[1];
     if (otherF && otherF !== spendF) { var om = frowMono(otherF); mark(om, ''); if (om) om.removeAttribute('data-lxbal'); maxButton(otherF, false); }
     // Stellar's "Avail:" on both layouts; data-lxbal is the hook its stylesheet right-aligns the figure by.
+    // MAX stays beside the balance at zero too, as on Stellar (RAZA 2026-11-05: Sell QTC read "Avail: 0 QTC" with no
+    // MAX, where lumoscore.com shows it); a press then says why there is nothing to fill.
     var pre = 'Avail: ', text = pre + '—', canMax = false;          // signed out: "Avail: —", as Stellar
     if (who && pool) {
       var id = s === 'sell' ? a.id : 'near', raw = acct.bal[id];
@@ -196,14 +198,15 @@
         // Floored from the raw units, like MAX: a rounded figure here would name, as available, more than is held.
         var have = s === 'sell' ? fmtDown(raw, dec) : fmtDown(SW() ? SW().swapRoom('near', raw) : raw, 24);
         text = pre + have + ' ' + (s === 'sell' ? code() : 'NEAR');
-        canMax = have !== '0';
+        canMax = true;
       }
     }
     mark(frowMono(spendF), text);
     if (frowMono(spendF)) frowMono(spendF).setAttribute('data-lxbal', '1');
     maxButton(spendF, canMax);
-    // Ghost text in every empty field (RAZA 2026-11-03), never a value: the fields still start blank.
-    f.forEach(function (x) { var i = input(x); if (i && i.placeholder !== '0.00') i.placeholder = '0.00'; });
+    // NO GHOST TEXT (RAZA 2026-11-05, reversing 2026-11-03's "0.00"): "rendering them empty". Stellar's three
+    // inputs carry no placeholder at all, measured on lumoscore.com, so an empty field here is empty too.
+    f.forEach(function (x) { var i = input(x); if (i && i.placeholder) i.placeholder = ''; });
     var tot = input(f[2]);
     if (tot && !phone(p) && tot.hasAttribute('readonly')) tot.removeAttribute('readonly');
     feeRow(p);
@@ -259,6 +262,21 @@
   // would have to cross, and what is ahead of it. Read from the same book the Orderbook tab paints
   // (window.__lxnBook, Rhea's DCL liquidity, repainted on 'lxn:book'). A DCL book is liquidity at price
   // POINTS rather than individual orders, so the queue is counted in price levels, not orders.
+  //
+  // SELL (RAZA 2026-11-05: "0.09% below the ask", and "Ahead of you" instead of "fills now"). Stellar's own rows on
+  // Sell are its Buy rows: limitSide() there never sees the active tab, so lumoscore.com measures Sell against the ask
+  // and fills the fourth row from the bids. What is copied here is what that screen shows: the ask, always, and always
+  // "Ahead of you" on Sell, in Stellar's "7.8K USDC · 7 orders" shape. What is NOT copied is its "fills now" for a sell
+  // priced ABOVE the ask, which would be false: that order waits, behind the asks at or under its price, and those are
+  // what the row counts. A sell at or under the best bid counts the bids it meets, the same figure Stellar prints.
+  function qty(n) {
+    var a = Math.abs(n);
+    if (a >= 1e9) return (n / 1e9).toFixed(1) + 'B';
+    if (a >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+    if (a >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+    if (a >= 1) return n.toLocaleString('en-US', { maximumFractionDigits: 2 });
+    return a === 0 ? '0' : String(+n.toFixed(3));
+  }
   function orderCtx(p) {
     if (phone(p)) return;
     var bk = window.__lxnBook;
@@ -278,11 +296,10 @@
     var bb = bids.length ? +bids[0].px : 0, ba = asks.length ? +asks[0].px : 0;
     var mid = (bb && ba) ? (bb + ba) / 2 : (bb || ba);
     var spread = (bb && ba && mid) ? ((ba - bb) / mid * 100) : null;
-    var ref = s === 'buy' ? ba : bb;
-    var away = (pr > 0 && ref) ? ((pr - ref) / ref * 100) : null;
-    var awayTxt = away == null ? '—' : (Math.abs(away) < 0.01 ? ('at the ' + (s === 'buy' ? 'ask' : 'bid'))
-      : (Math.abs(away).toFixed(2) + '% ' + (away < 0 ? 'below ' : 'above ') + (s === 'buy' ? 'the ask' : 'the bid')));
-    var fills = !!(pr > 0 && ref) && (s === 'buy' ? pr >= ba : pr <= bb);
+    var away = (pr > 0 && ba) ? ((pr - ba) / ba * 100) : null;
+    var awayTxt = away == null ? '—' : (Math.abs(away) < 0.01 ? 'at the ask'
+      : (Math.abs(away).toFixed(2) + '% ' + (away < 0 ? 'below ' : 'above ') + 'the ask'));
+    var fills = !!(pr > 0 && ba) && s === 'buy' && pr >= ba;
     var six = function (v) { return v ? String(+(+v).toPrecision(6)) : '—'; };
     var esc = function (t) { return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;'); };
     var lab, val, cls;
@@ -290,26 +307,29 @@
     else if (fills) {
       // How much of THIS order the book can absorb at or better than the typed price (amounts are in the token).
       lab = 'Execution';
-      var have = 0, src = s === 'buy' ? asks : bids;
-      for (var k = 0; k < src.length; k++) {
-        var kp = +src[k].px;
-        if (s === 'buy' ? kp > pr : kp < pr) break;
-        have += +src[k].amt || 0;
+      var have = 0;
+      for (var k = 0; k < asks.length; k++) {
+        var kp = +asks[k].px;
+        if (kp > pr) break;
+        have += +asks[k].amt || 0;
       }
       var pf = want > 0 ? Math.max(0, Math.min(100, have / want * 100)) : 100;
       if (pf >= 99.5) { val = 'fills now'; cls = 'lx-oc-ok'; }
       else { val = (pf < 0.5 ? '<1%' : Math.round(pf) + '%') + ' fills now | ' + Math.max(0, 100 - Math.round(pf)) + '% open order'; cls = 'lx-oc-hi'; }
     } else {
-      // The liquidity already at this price or better on the order's own side of the book.
+      // The liquidity already at this price or better on the order's own side of the book (a crossing sell: see above).
       lab = 'Ahead of you';
-      var q0 = 0, nlev = 0, list = s === 'buy' ? bids : asks;
+      var crosses = s === 'sell' && !!bb && pr <= bb;
+      var q0 = 0, nlev = 0, list = (s === 'buy' || crosses) ? bids : asks;
       for (var i = 0; i < list.length; i++) {
         var lp = +list[i].px;
-        if (s === 'buy' ? lp < pr : lp > pr) break;
+        if ((s === 'buy' || crosses) ? lp < pr : lp > pr) break;
         q0 += +list[i].amt || 0; nlev++;
       }
       cls = nlev ? 'lx-oc-hi' : 'lx-oc-ok';
-      val = nlev ? (fmt(q0, q0 >= 1000 ? 0 : 2) + ' ' + c + ' · ' + nlev + (nlev === 1 ? ' price level' : ' price levels')) : 'nothing — first in line';
+      // Stellar's "over x · n+" when the whole of what was read is ahead: the book may run on past it.
+      var more = nlev > 0 && nlev >= list.length;
+      val = nlev ? ((more ? 'over ' : '') + qty(q0) + ' ' + c + ' · ' + nlev + (more ? '+ price levels' : (nlev === 1 ? ' price level' : ' price levels'))) : 'nothing — first in line';
     }
     host.innerHTML = '<div class="lx-oc-t">Order context</div>'
       + '<div class="lx-oc-r"><span>Best bid / ask (NEAR)</span><b>' + six(bb) + ' / ' + six(ba) + '</b></div>'
@@ -335,16 +355,14 @@
     // plainIn's 12 significant digits drop the 6th decimal of any balance from a million up --
     // 1,234,567.999999 filled as 1,234,568. So sell truncates the exact raw string, and buy, which
     // has to divide by a price anyway, floors to 6 places and is printed without re-rounding.
-    // The fee comes on top of the order, so MAX leaves room for it: amount x (1 + fee) fits the balance.
-    var bps = window.__lxFeeRate === 0.001 ? 10 : 20;
+    // Nothing is held back for a fee: limit orders are free (RAZA 2026-11-04), so MAX is the whole balance.
     if (side(p) === 'sell') {
-      if (acct.bal[a.id] != null && dec != null) out = trunc6(D().fromUnits((D().big(acct.bal[a.id]) * BigInt(10000) / BigInt(10000 + bps)).toString(), dec));
+      if (acct.bal[a.id] != null && dec != null) out = trunc6(D().fromUnits(acct.bal[a.id], dec));
     }
     else if (price > 0 && acct.bal.near != null && SW()) {
       // Leave room for the DCL storage a first order adds.
       var room = D().big(SW().swapRoom('near', acct.bal.near));
       if (acct.reg === false) room -= D().big('500000000000000000000000');
-      room = room * BigInt(10000) / BigInt(10000 + bps);
       var amt = room > BigInt(0) ? D().toNum(room.toString(), 24) / price : 0;
       if (amt > 0) out = trunc6((Math.floor(amt * 1e6) / 1e6).toFixed(6));
     }
@@ -470,16 +488,10 @@
       var keep = D().big(SW().SWAP_KEEP);                            // 0.2 NEAR for gas, as a swap keeps
       // What leaves the wallet is the order itself (neardcl plan().spendRaw; limit orders carry no fee).
       var needNear = D().big(pre.storage) + (o.sell === D().WNEAR ? D().big(o.spendRaw) : BigInt(0));
-      if (o.sell !== D().WNEAR && D().big(o.spendRaw) > D().big(r[2])) {
-        throw new Error('You only have ' + fmtDown(r[2], dec) + ' ' + code() + ' — the order needs ' + fmtDown(o.spendRaw, dec) + '.');
-      }
-      if (needNear + keep > nearBal) {
-        // The figures, not just the verdict (RAZA 2026-11-04: a 13,500 NEAR buy read "Not enough NEAR" beside "Avail: 0.95").
-        var needTxt = fmt(D().toNum((needNear + keep).toString(), 24), 4), haveTxt = fmt(D().toNum(nearBal.toString(), 24), 4);
-        throw new Error(o.sell === D().WNEAR
-          ? 'This order needs ' + needTxt + ' NEAR, including ' + (D().big(pre.storage) > BigInt(0) ? 'its storage and ' : '') + '0.2 NEAR kept for gas. This wallet has ' + haveTxt + ' NEAR.'
-          : 'The storage this order needs, with 0.2 NEAR kept for gas, comes to ' + needTxt + ' NEAR. This wallet has ' + haveTxt + ' NEAR.');
-      }
+      // JUST THE VERDICT (RAZA 2026-11-05, replacing 2026-11-04's sentence with the figures): inline above the button,
+      // "Not enough NEAR" / "Not enough <TOKEN>", the same words as Stellar. The Avail line beside it has the figure.
+      if (o.sell !== D().WNEAR && D().big(o.spendRaw) > D().big(r[2])) throw new Error('Not enough ' + code());
+      if (needNear + keep > nearBal) throw new Error('Not enough NEAR');
       var txs = D().buildPlace(who, o, pre);
       window.__lxnLastLimit = { plan: o, pre: pre, txs: txs };
       if (b) b.textContent = 'Confirm in wallet…';
@@ -487,7 +499,7 @@
     }).then(function (res) {
       var v = D().verdict(res);
       if (v.ok === false) {
-        stop(v.why === 'refunded' ? 'The order book did not accept the order, so your tokens came back (the fee had already been paid).' : 'The order failed on chain. Check your wallet activity.');
+        stop(v.why === 'refunded' ? 'The order book did not accept the order, so your tokens came back.' : 'The order failed on chain. Check your wallet activity.');
         return;
       }
       stop('');

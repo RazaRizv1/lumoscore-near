@@ -20,3 +20,6 @@ CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT);
 -- does not list. Only tokens a page has asked for (pxwatch) are kept, 8 days of them.
 CREATE TABLE IF NOT EXISTS px (t TEXT NOT NULL, h INTEGER NOT NULL, usd REAL NOT NULL, PRIMARY KEY (t, h));
 CREATE TABLE IF NOT EXISTS pxwatch (t TEXT PRIMARY KEY, seen INTEGER NOT NULL);
+-- How many accounts hold each pool (lpJob). n NULL = not read yet; a = 1 = approximate; at = when last claimed.
+CREATE TABLE IF NOT EXISTS lpn (pool INTEGER PRIMARY KEY, n INTEGER, a INTEGER NOT NULL DEFAULT 0, at INTEGER NOT NULL DEFAULT 0);
+CREATE INDEX IF NOT EXISTS lpn_at ON lpn (at);
