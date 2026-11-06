@@ -2117,6 +2117,29 @@
   // resumed on the next visit for anything under a week old that has not finished. NEAR Intents joins them
   // (RAZA 2026-11-06): once the form is let go, its row keeps moving here.
   var FOLLOWING = {};
+  // THE DIALOG FOLLOWS THE TRANSFER (RAZA 2026-11-06: "Its just stuck here even though the swap is already done"): it is
+  // opened at the deposit, so it moves on when the row does, to the words Stellar's lxBrProgDone ends on. Closed by then,
+  // nothing reopens it.
+  var DLG_HASH = '', NI_LINK = {};
+  function dialogStatus(hash, st) {
+    var el = document.getElementById('lx-prog');
+    if (!el || hash !== DLG_HASH || el.style.display === 'none' || !/^(SUCCESS|REFUNDED|FAILED)$/.test(st || '')) return;
+    var rec = txFind(hash) || {}, place = (rec.route ? rec.chain : NI_CHAIN[rec.chain]) || placeLabel(rec.chain) || 'destination', list = el.querySelector('.lx-prog-list'),
+      msg = el.querySelector('.lx-prog-msg'), url = NI_LINK[rec.dep];
+    var done = st === 'SUCCESS';
+    el.querySelector('.lx-prog-h').textContent = done ? 'Delivered via NEAR Intents ✓' : (st === 'REFUNDED' ? 'Refunded' : 'This transfer failed');
+    msg.textContent = done
+      ? ((rec.out ? fmt(rec.out, 6) + ' ' + (rec.sym || '') + ' arrived' : 'It arrived') + ' at your ' + place + ' address. There is nothing to claim.')
+      : (st === 'REFUNDED' ? 'NEAR Intents could not complete this and refunded it to your NEAR wallet.' : 'NEAR Intents reported this transfer as failed. Check Recent transactions.');
+    if (done && url) {
+      var a = document.createElement('a');
+      a.href = url; a.target = '_blank'; a.rel = 'noopener'; a.textContent = 'View on ' + place + ' ↗';
+      msg.appendChild(document.createTextNode(' ')); msg.appendChild(a);
+    }
+    if (done) [].slice.call(list.children).forEach(function (li) { li.className = 'done'; });
+    else list.style.display = 'none';
+    DLG_HASH = '';
+  }
   function follow(hash, tries) {
     var rec = txFind(hash);
     if (!rec || (rec.route ? !BRX() : !rec.dep) || (tries === 0 && FOLLOWING[hash])) return;
@@ -2128,8 +2151,9 @@
       if (s.status && (s.status !== rec.status || (s.claimTx && s.claimTx !== rec.claimTx))) {
         patchRec(hash, function (x) { x.status = s.status; if (s.claimTx) x.claimTx = s.claimTx; });
       }
+      dialogStatus(hash, s.status);
       if (s.status === 'SUCCESS' || s.status === 'FAILED' || s.status === 'REFUNDED') { delete FOLLOWING[hash]; return; }
-      setTimeout(function () { follow(hash, tries + 1); }, 20000);
+      setTimeout(function () { follow(hash, tries + 1); }, hash === DLG_HASH ? 6000 : 20000);
     }, function () { setTimeout(function () { follow(hash, tries + 1); }, 30000); });
   }
   // A CLAIM ASKS WORMHOLESCAN AGAIN FIRST: the signed message is not stored, and the transfer may have
@@ -2193,7 +2217,7 @@
       el.innerHTML = '<div class="lx-prog-card"><div class="lx-prog-h"></div><ul class="lx-prog-list"></ul>'
         + '<div class="lx-prog-msg"></div><button class="lx-prog-x" type="button">Done</button></div>';
       host.appendChild(el);
-      el.querySelector('.lx-prog-x').addEventListener('click', function () { el.style.display = 'none'; });
+      el.querySelector('.lx-prog-x').addEventListener('click', function () { el.style.display = 'none'; DLG_HASH = ''; });
     }
     var place = placeLabel(destChain()), list = el.querySelector('.lx-prog-list');
     el.querySelector('.lx-prog-h').textContent = bad ? 'This transfer needs a look' : 'Sent — delivery is automatic';
@@ -2269,7 +2293,12 @@
       var t = setTimeout(function () { if (ctl) ctl.abort(); done(''); }, NI_READ_MS);
       fetch(API + '?op=status&depositAddress=' + encodeURIComponent(dep), ctl ? { cache: 'no-store', signal: ctl.signal } : { cache: 'no-store' })
         .then(function (r) { return r.ok ? r.json() : null; })
-        .then(function (j) { clearTimeout(t); done(j && typeof j.status === 'string' ? j.status : ''); })
+        .then(function (j) {
+          clearTimeout(t);
+          var h = j && j.swapDetails && j.swapDetails.destinationChainTxHashes, u = h && h[0] && h[0].explorerUrl;
+          if (typeof u === 'string' && u.indexOf('https://') === 0) NI_LINK[dep] = u;
+          done(j && typeof j.status === 'string' ? j.status : '');
+        })
         .catch(function () { clearTimeout(t); done(''); });
     });
   }
@@ -2277,8 +2306,8 @@
   // this page (_cctp.js, RAZA 2026-10-23: "users wont be waiting on here"), so past the wait the row takes over.
   function handOver(dep, msg, bad) {
     var rec = txList().filter(function (x) { return x && x.dep === dep; })[0];
-    if (rec) follow(rec.hash, 0);
     resetAfterDelivery(msg, bad);
+    if (rec) { DLG_HASH = bad ? '' : rec.hash; follow(rec.hash, 0); }
   }
   var NI_READ_MS = 15000, FOLLOW_MAX = 7 * 86400000;
   function mark(dep, st) {
