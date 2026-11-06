@@ -654,10 +654,10 @@ async function icon(url, env) {
     }
     await db.prepare('INSERT OR REPLACE INTO icn (t, u) VALUES (?1, ?2)').bind(t, u).run();
   }
-  if (/^https:[/][/]/i.test(u)) return Response.redirect(u, 302);
+  if (/^https:[/][/]/i.test(u)) return Response.redirect('https://wsrv.nl/?url=' + encodeURIComponent(u) + '&w=64&h=64&fit=cover&output=webp', 302);
   if (ipfsUrl(u)) return Response.redirect(ipfsUrl(u), 302);
   const b = u ? iconBytes(u) : null;
-  if (!b) return none(604800);
+  if (!b) return none(3600);
   return new Response(b.o, { headers: { 'content-type': b.type, 'cache-control': 'public, max-age=2592000', 'access-control-allow-origin': '*',
     'x-content-type-options': 'nosniff', 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox" } });
 }

@@ -2465,7 +2465,7 @@
         if (!j || !j.ok) throw new Error('down');
         (a[1] || []).forEach(function (b) {
           if ((j.rows || []).some(function (r) { return String(r.id) === b[0]; })) return;
-          j.rows.push({ id: b[0], liq: b[1], lps: null, lpa: 0, tokens: b[2].map(function (t) { return { i: t[0], s: t[1], logo: t[0] === WNEAR ? '' : IDX + '/icon?t=' + encodeURIComponent(t[0]) }; }) });
+          j.rows.push({ id: b[0], liq: b[1], lps: null, lpa: 0, tokens: b[2].map(function (t) { return { i: t[0], s: t[1], logo: t[0] === WNEAR ? '' : IDX + '/icon?v=2&t=' + encodeURIComponent(t[0]) }; }) });
         });
         PL.list = mergePools(d, j); PL.err = false;
         poolsReady();

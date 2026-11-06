@@ -66,7 +66,7 @@
     if (t.logo) return t.logo;
     if (t.i === 'wrap.near') return NEAR_LOGO;
     // Any token without one, curated or not: the indexer serves what its contract publishes (RAZA 2026-11-06).
-    return t.i ? 'https://near-pool-indexer.usa282.workers.dev/icon?t=' + encodeURIComponent(t.i) : '';
+    return t.i ? 'https://near-pool-indexer.usa282.workers.dev/icon?v=2&t=' + encodeURIComponent(t.i) : '';
   }
   function logoEl(name, logo, size) {
     var s = size || 32;
@@ -1215,7 +1215,7 @@
         add.push({ id: b[0], kind: b[1], fee: b[2] / 100, liq: b[3], vol: null, fees: null, apr: null, trades: null,
           tokens: b[4].map(function (t) {
             // The indexer serves any token's own logo (RAZA 2026-11-06: "most of the pools arent even showing their logos").
-            return { i: t[0], s: t[1], v: t[2], logo: logos[t[0]] || (t[0] === 'wrap.near' ? '' : 'https://near-pool-indexer.usa282.workers.dev/icon?t=' + encodeURIComponent(t[0])) };
+            return { i: t[0], s: t[1], v: t[2], logo: logos[t[0]] || (t[0] === 'wrap.near' ? '' : 'https://near-pool-indexer.usa282.workers.dev/icon?v=2&t=' + encodeURIComponent(t[0])) };
           }) });
       });
       if (!add.length) return;
