@@ -376,11 +376,17 @@ async function prices(url, env) {
 // view_state over Rhea's share keys would list holders outright; free RPCs refuse it (TOO_LARGE_CONTRACT_STATE), so a
 // holder who joined between the February list and 2026-10-29 and never staked stays invisible: these are VERIFIED KNOWN
 // holders, which is what the page's plain number means.
+// FOUND HOLDERS (RAZA 2026-11-06: "Why arent you fixing the participants column"). Thousands of pools are on neither list:
+// the February snapshot ends and they were never staked. Those shares mostly sit with whoever seeded the pool, and that
+// is readable: the token's own contract (macho.token0.near held 99.58% of pool 5857) or its launchpad (meme-cooking.near
+// held 99.94% of 5639), else one of the token's top holders. lpFind asks those, stops as soon as 95% of the pool's shares
+// are accounted for, and keeps who it found in lpc, so the six-hourly recount above includes them. lpx is its worklist, in
+// liquidity order, seeded from the Pools list with each pool's tokens; a pool new to the page joins the end of it.
 // Two more crons (*/2 and its odd minutes) run ONLY this, in their own invocations with their own 50-subrequest
 // budget, so it can never starve the block scan. A pool is claimed (at = now) BEFORE it is read: one that kills the run
 // waits a cycle, not forever.
 const LP_DS = 'https://api.data-service.ref.finance';
-const LP_VERIFY = 20, LP_BUDGET = 20, LP_EVERY_MS = 6 * 3600000, LP_BIG_EVERY_MS = 3 * 86400000, LP_WATCH_MAX = 3000;
+const LP_VERIFY = 20, LP_BUDGET = 20, LP_EVERY_MS = 6 * 3600000, LP_BIG_EVERY_MS = 3 * 86400000, LP_WATCH_MAX = 6000, LP_TOP = 12, LP_FIND_BUDGET = 40;
 const LP_NOT = new Set([REF, 'boostfarm.ref-labs.near']);
 async function dsGet(path) {
   const r = await fetch(LP_DS + path, { headers: Object.assign({ accept: 'application/json' }, UA) });
@@ -388,12 +394,69 @@ async function dsGet(path) {
   return r.json();
 }
 // One account's shares: true / false, or null when it could not be asked.
+async function refView(method, args) {
+  const r = await rpc('query', { request_type: 'call_function', finality: 'final', account_id: REF, method_name: method,
+    args_base64: btoa(JSON.stringify(args)) });
+  return JSON.parse(new TextDecoder().decode(new Uint8Array((r && r.result) || [])));
+}
+async function sharesOf(id, a) {
+  try { return BigInt(String((await refView('get_pool_shares', { pool_id: id, account_id: a })) || '0')); } catch (e) { return null; }
+}
 async function holds(id, a) {
-  try {
-    const r = await rpc('query', { request_type: 'call_function', finality: 'final', account_id: REF, method_name: 'get_pool_shares',
-      args_base64: btoa(JSON.stringify({ pool_id: id, account_id: a })) });
-    return BigInt(String(JSON.parse(new TextDecoder().decode(new Uint8Array((r && r.result) || []))) || '0')) > 0n;
-  } catch (e) { return null; }
+  const v = await sharesOf(id, a);
+  return v === null ? null : v > 0n;
+}
+// Who seeded the pools no list knows, in two passes so thousands of pools take hours, not days. First the token contracts
+// and launchpads (done = 0): a read or two per pool, the token ids came with the worklist. A pool those leave under 95%
+// accounted for comes back (done = 2) for the top holders of its first token, which costs a dozen reads. A pool that
+// already shows a count is left to the six-hourly recount.
+async function lpFind(env) {
+  const db = env.DB;
+  let spent = 0, done = 0;
+  const next = await db.prepare('SELECT x.pool, x.t, x.tries, x.done FROM lpx x LEFT JOIN lpn l ON l.pool = x.pool WHERE x.done <> 1 AND (x.done = 2 OR COALESCE(l.n, 0) = 0) ORDER BY x.done, x.rank LIMIT 30').all();
+  for (const row of next.results || []) {
+    if (spent > LP_FIND_BUDGET - (row.done ? 15 : 6)) break;
+    const id = row.pool, found = [];
+    let sum = 0n, failed = 0, again = false;
+    const ask = async (list) => {
+      spent += list.length;
+      for (let i = 0; i < list.length; i += 6) {
+        const got = await Promise.all(list.slice(i, i + 6).map((a) => sharesOf(id, a).then((v) => [a, v])));
+        for (const [a, v] of got) { if (v === null) failed++; else if (v > 0n) { sum += v; found.push(a); } }
+      }
+    };
+    try {
+      let ids = String(row.t || '').split(',').filter(Boolean);
+      if (!ids.length) { spent++; ids = ((await refView('get_pool', { pool_id: id })).token_account_ids) || []; }
+      const toks = ids.filter((x) => x !== WNEAR), seen = new Set(LP_NOT);
+      const fresh = (x) => { if (!x || seen.has(x)) return false; seen.add(x); return true; };
+      if (!row.done) {
+        const first = [];
+        for (const x of toks) {
+          const parent = x.split('.').slice(1).join('.');
+          if (fresh(x)) first.push(x);
+          if (parent.indexOf('.') > 0 && fresh(parent)) first.push(parent);
+        }
+        await ask(first.slice(0, 5));
+        spent++;
+        const total = BigInt(String((await refView('get_pool_total_shares', { pool_id: id })) || '0'));
+        again = total > 0n && sum * 100n < total * 95n;
+      } else if (toks[0]) {
+        spent++;
+        const r = await fetch('https://api.fastnear.com/v1/ft/' + encodeURIComponent(toks[0]) + '/top', { headers: UA }).catch(() => null);
+        const top = r && r.ok ? await r.json().catch(() => null) : null;
+        if (!top) failed++;
+        await ask(((top && top.accounts) || []).map((x) => String((x && x.account_id) || '')).filter(fresh).slice(0, LP_TOP));
+      }
+    } catch (e) { failed++; }
+    if (failed && !found.length && row.tries < 3) { await db.prepare('UPDATE lpx SET tries = tries + 1 WHERE pool = ?1').bind(id).run(); continue; }
+    const st = [db.prepare('UPDATE lpx SET done = ?1, tries = 0 WHERE pool = ?2').bind(again ? 2 : 1, id)];
+    for (const a of found) st.push(db.prepare('INSERT OR IGNORE INTO lpc (pool, who) VALUES (?1, ?2)').bind(id, a));
+    if (found.length) st.push(db.prepare('UPDATE lpn SET n = MAX(COALESCE(n, 0), (SELECT COUNT(*) FROM lpc WHERE pool = ?1)), a = 0 WHERE pool = ?1').bind(id));
+    await db.batch(st);
+    done++;
+  }
+  return { found: done, spent };
 }
 // The next batch of the big pool in progress. Finishes it, or moves its cursor: one row written either way.
 async function lpBatch(db, v) {
@@ -420,8 +483,9 @@ async function lpJob(env, bigTurn) {
   // The two crons take turns (RAZA 2026-11-06: "most of the pools dont have anything in ... participants"): one minute
   // carries on a big pool, the next reads the small ones, so a 4,000-account pool cannot hold up every pool behind it.
   if (bigTurn) {
-    const open = await db.prepare('SELECT pool, list, pos, run, st, fail FROM lpv LIMIT 1').first();
-    return open ? lpBatch(db, open) : { big: 'none' };
+    // ...and the big pool gives three turns in four to the pools nobody has found holders for yet.
+    const open = new Date(now).getUTCMinutes() % 8 === 1 ? await db.prepare('SELECT pool, list, pos, run, st, fail FROM lpv LIMIT 1').first() : null;
+    return open ? lpBatch(db, open) : lpFind(env);
   }
   let spent = 0, done = 0;
   const due = await db.prepare('SELECT pool FROM lpn WHERE at < ?1 ORDER BY at LIMIT 12').bind(now - LP_EVERY_MS).all();
@@ -433,7 +497,7 @@ async function lpJob(env, bigTurn) {
     const [lp, farm, adds] = await Promise.all([
       dsGet('/api/pool/' + id + '/lp').catch(() => null),
       dsGet('/api/seedv2/' + seed + '/accounts').catch(() => null),
-      db.prepare("SELECT DISTINCT who FROM txs WHERE pool = ?1 AND kind = 'add' LIMIT 500").bind(id).all(),
+      db.prepare("SELECT DISTINCT who FROM txs WHERE pool = ?1 AND kind = 'add' UNION SELECT who FROM lpc WHERE pool = ?1 LIMIT 500").bind(id).all(),
     ]);
     spent += 2;
     if (!lp) continue;                                  // could not ask: the old figure stands, never a guessed zero
@@ -481,7 +545,8 @@ async function lps(url, env) {
   if (add.length) {
     const t = await db.prepare('SELECT COUNT(*) AS n FROM lpn').first();
     const room = Math.max(0, LP_WATCH_MAX - ((t && t.n) || 0));
-    const st = add.slice(0, room).map((id) => db.prepare('INSERT OR IGNORE INTO lpn (pool, n, a, at) VALUES (?1, NULL, 0, 0)').bind(id));
+    const st = add.slice(0, room).flatMap((id) => [db.prepare('INSERT OR IGNORE INTO lpn (pool, n, a, at) VALUES (?1, NULL, 0, 0)').bind(id),
+      db.prepare('INSERT OR IGNORE INTO lpx (pool, rank) VALUES (?1, 99999)').bind(id)]);
     if (st.length) await db.batch(st);
   }
   return json({ ok: true, c }, 120);

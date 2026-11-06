@@ -250,6 +250,23 @@
     return POOLS_P;
   }
 
+  // EVERY TOKEN, NOT ONLY THE CURATED ONES (RAZA 2026-11-06: "Why am i unable to search this asset. its not curated").
+  // Asked per query, after the curated rows are up, and only ever adds to them: a failed answer leaves those as they are.
+  var WIDE = {};
+  function wideHits(q) {
+    if (WIDE[q]) return WIDE[q];
+    var p = fetch('/lxapi/neartokensearch?q=' + encodeURIComponent(q)).then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d || !d.ok || !d.rows) { delete WIDE[q]; return []; }
+        return d.rows.filter(function (r) { return r && C.isAccountId(r.i); }).map(function (r) {
+          return { i: r.i, n: C.cleanSym(r.n) || short(r.i), nm: C.cleanSym(r.nm), p: null, d: null, cur: false,
+            logo: 'https://near-pool-indexer.usa282.workers.dev/icon?v=2&t=' + encodeURIComponent(r.i) };
+        });
+      }, function () { delete WIDE[q]; return []; });
+    WIDE[q] = p;
+    return p;
+  }
+
   // Lower is better; -1 is no match. A contract id matches from its start, or anywhere once the query
   // itself has a dot -- every contract contains ".near", so a bare word must not match them all.
   function rank(t, q) {
@@ -559,20 +576,36 @@
     if (!TOKS) { setCount(null); note(list, 'Searching NEAR…'); }
 
     var exact = exactEligible(ql) ? resolveExact(ql) : null;
+    var wide = wideHits(ql), wideRows = null;
     Promise.all([loadTokens(), loadPools()]).then(function (r) {
       if (mine !== seq) return;
-      var toks = r[0], pools = r[1];
+      var toks = r[0], pools = r[1], xNow = null;
       var hits = toks ? tokenHits(toks, ql) : [];
       var phits = pools ? poolHits(pools, ql) : [];
-      paint(list, hits, phits, null, !toks && !pools);
+      function draw() {
+        var known = {};
+        hits.forEach(function (t) { known[t.i] = 1; });
+        var more = (wideRows || []).filter(function (t) { return !known[t.i]; });
+        paint(list, hits.concat(more), phits, xNow, !toks && !pools);
+      }
+      draw();
+      // Still asking the wider index: "nothing matches" would be a guess.
+      if (!hits.length && !phits.length && !exact) note(list, 'Searching NEAR…');
+      wide.then(function (rows) {
+        if (mine !== seq) return;
+        wideRows = rows;
+        if (rows.length || !exact) draw();
+      });
       if (!exact) return;
       if (!list.children.length) note(list, 'Looking up ' + ql + ' on NEAR…');
       exact.then(function (x) {
         if (mine !== seq) return;
-        paint(list, hits, phits, x, !toks && !pools);
+        xNow = x;
+        draw();
       }, function () {
         if (mine !== seq) return;
-        paint(list, hits, phits, { kind: 'down' }, !toks && !pools);
+        xNow = { kind: 'down' };
+        draw();
       });
     });
   }

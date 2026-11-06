@@ -30,3 +30,7 @@ CREATE TABLE IF NOT EXISTS trc (pool TEXT NOT NULL, b INTEGER NOT NULL, n INTEGE
 CREATE TABLE IF NOT EXISTS trw (pool TEXT PRIMARY KEY, first INTEGER NOT NULL, seen INTEGER NOT NULL);
 -- Token logos as the contract publishes them (icon()); u '' = the token publishes none.
 CREATE TABLE IF NOT EXISTS icn (t TEXT PRIMARY KEY, u TEXT NOT NULL);
+-- pools no list knows the holders of, worked through in liquidity order; lpc is who was found, recounted with the rest
+CREATE TABLE IF NOT EXISTS lpx (pool INTEGER PRIMARY KEY, rank INTEGER NOT NULL DEFAULT 99999, tries INTEGER NOT NULL DEFAULT 0, done INTEGER NOT NULL DEFAULT 0, t TEXT);
+CREATE INDEX IF NOT EXISTS lpx_next ON lpx (done, rank);
+CREATE TABLE IF NOT EXISTS lpc (pool INTEGER NOT NULL, who TEXT NOT NULL, PRIMARY KEY (pool, who));
