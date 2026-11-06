@@ -25,3 +25,6 @@ CREATE TABLE IF NOT EXISTS lpn (pool INTEGER PRIMARY KEY, n INTEGER, a INTEGER N
 CREATE INDEX IF NOT EXISTS lpn_at ON lpn (at);
 -- A big pool's holder check in progress: its candidate list, the cursor, the running count (lpJob, lpBatch).
 CREATE TABLE IF NOT EXISTS lpv (pool INTEGER PRIMARY KEY, list TEXT NOT NULL, pos INTEGER NOT NULL, run INTEGER NOT NULL, st INTEGER NOT NULL, fail INTEGER NOT NULL);
+-- Trades per pool per 5-minute window, from DexScreener's rolling m5 (trJob). trw: the pools sampled, first = when it began.
+CREATE TABLE IF NOT EXISTS trc (pool TEXT NOT NULL, b INTEGER NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (pool, b));
+CREATE TABLE IF NOT EXISTS trw (pool TEXT PRIMARY KEY, first INTEGER NOT NULL, seen INTEGER NOT NULL);

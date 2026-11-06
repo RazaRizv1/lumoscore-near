@@ -556,6 +556,48 @@ async function netstats(env) {
   return json(Object.assign({ ok: !!row }, row ? JSON.parse(row.v) : {}), 60);
 }
 
+// ---- trades per candle ----------------------------------------------------------------------------------------
+// RAZA 2026-11-06: "whys it not showing number of trades on hover". GeckoTerminal's candles carry no trade count and no
+// free source publishes past ones, so the record starts here: every 5 minutes DexScreener's rolling five-minute count
+// (txns.m5) is stored per pool. Sampled once per window, so each sample is that window. Forward only: a candle from
+// before a pool was first sampled has no count (`since` says when that was), and a sampled window with no row is a
+// true 0. Only non-zero windows are written, and they are kept 30 days.
+const TR_PAIRS = 'https://api.dexscreener.com/latest/dex/pairs/near/';
+const TR_MS = 300000, TR_KEEP_MS = 30 * 86400000, TR_WATCH = 300;
+const TR_ID = /^[A-Za-z0-9._:-]{3,120}$/;
+async function trJob(env) {
+  const db = env.DB, now = Date.now(), b = Math.floor(now / TR_MS);
+  const w = await db.prepare('SELECT pool FROM trw ORDER BY seen DESC LIMIT ?1').bind(TR_WATCH).all();
+  const ids = (w.results || []).map((r) => r.pool), st = [], bad = [];
+  let good = 0;
+  for (let i = 0; i < ids.length; i += 30) {
+    const r = await fetch(TR_PAIRS + ids.slice(i, i + 30).join(','), { headers: Object.assign({ accept: 'application/json' }, UA) });
+    if (!r.ok) { bad.push(r.status); continue; }
+    good++;
+    for (const p of ((await r.json()).pairs || [])) {
+      const tx = (p.txns || {}).m5 || {}, n = (+tx.buys || 0) + (+tx.sells || 0);
+      if (n > 0 && p.pairAddress) st.push(db.prepare('INSERT OR REPLACE INTO trc (pool, b, n) VALUES (?1, ?2, ?3)').bind(p.pairAddress, b, n));
+    }
+  }
+  if (b % 12 === 0) st.push(db.prepare('DELETE FROM trc WHERE b < ?1').bind(Math.floor((now - TR_KEEP_MS) / TR_MS)));
+  // The last run, read through /status: a run that fetched nothing must not look like a quiet five minutes.
+  st.push(setMeta(db, 'trlast', JSON.stringify({ at: now, rows: st.length, good, bad })));
+  await db.batch(st);
+  return { tr: st.length, of: ids.length };
+}
+// GET /tradecounts?pool=&bucket=<ms>&from=<ms> -> { ok, since, c: { candleStartMs: trades } }. Asking registers the pool.
+async function tradeCounts(url, env) {
+  const pool = String(url.searchParams.get('pool') || ''), bucket = +url.searchParams.get('bucket'), from = +url.searchParams.get('from') || 0;
+  if (!TR_ID.test(pool) || !(bucket >= TR_MS)) return json({ ok: false, error: 'bad request' }, 0);
+  const db = env.DB, now = Date.now();
+  const w = await db.prepare('SELECT first FROM trw WHERE pool = ?1').bind(pool).first();
+  await db.prepare('INSERT INTO trw (pool, first, seen) VALUES (?1, ?2, ?2) ON CONFLICT(pool) DO UPDATE SET seen = ?2').bind(pool, now).run();
+  const r = await db.prepare('SELECT b, n FROM trc WHERE pool = ?1 AND b >= ?2 LIMIT 9000').bind(pool, Math.floor(from / TR_MS)).all();
+  const c = {};
+  for (const x of r.results || []) { const k = Math.floor(x.b * TR_MS / bucket) * bucket; c[k] = (c[k] || 0) + x.n; }
+  return json({ ok: true, since: w ? w.first : now, c }, 120);
+}
+
 // ---- read --------------------------------------------------------------------------------------------
 function json(body, maxAge) {
   return new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json; charset=utf-8',
@@ -594,6 +636,10 @@ async function who(url, env) {
 
 export default {
   async scheduled(event, env, ctx) {
+    if (event.cron === '*/5 * * * *') {                   // trade counts only: its own invocation, its own budget
+      ctx.waitUntil(trJob(env).then((r) => console.log('tr', JSON.stringify(r)), (e) => console.error('trade counts failed', e && e.message)));
+      return;
+    }
     if (event.cron !== '* * * * *') {                     // participants only: its own invocation, its own budget
       ctx.waitUntil(lpJob(env).then((r) => console.log('lps', JSON.stringify(r)), (e) => console.error('lp job failed', e && e.message)));
       ctx.waitUntil(netJob(env).then((r) => console.log('net', JSON.stringify(r)), (e) => console.error('net job failed', e && e.message)));
@@ -611,6 +657,9 @@ export default {
     }
     if (url.pathname === '/who') {
       try { return await who(url, env); } catch (e) { return json({ ok: false, error: 'read failed' }, 0); }
+    }
+    if (url.pathname === '/tradecounts') {
+      try { return await tradeCounts(url, env); } catch (e) { return json({ ok: false, error: 'read failed' }, 0); }
     }
     if (url.pathname === '/netstats') {
       try { return await netstats(env); } catch (e) { return json({ ok: false, error: 'read failed' }, 0); }

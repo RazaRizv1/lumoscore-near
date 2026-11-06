@@ -1520,19 +1520,36 @@
     var d = Math.floor(s / 86400);
     return d + (d === 1 ? ' day ago' : ' days ago');
   }
+  // THE ASSET'S MARK, WHEREVER IT IS KEPT (RAZA 2026-11-06: "logo in To is very tiny. Also it only shows one
+  // logo instead of 2"). symLogo knows only assets/tokens/ni, which has no XLM: the circle stayed empty and
+  // the row was the 14px network badge alone. Past the shipped art it takes what the picker uses for that
+  // chain's token. That list arrives after the first paint, so load() repaints once it has.
+  function txAssetLogo(sym, place) {
+    if (sym === 'NEAR') return NEAR_LOGO;
+    if (sym === 'XLM') return '/assets/tokens/xlm.png';
+    var s = symLogo(sym);
+    if (s) return s;
+    var hit = null;
+    Object.keys(BY_CHAIN).forEach(function (c) {
+      if (!hit && NI_CHAIN[c] === place) hit = BY_CHAIN[c].filter(function (t) { return t.symbol === sym; })[0] || null;
+    });
+    return hit ? tokenLogo(hit, place) : '';
+  }
   function txAmt(v, sym, place) {
     var n = (v === null || v === undefined || v === '') ? NaN : Number(v);
     var shown = isFinite(n) ? fmt(n, (n > 0 && n < 1) ? 8 : 6) : '—';
     var nu = place === 'NEAR' ? NEAR_LOGO : netFile(place);
-    var a = (sym === 'NEAR') ? NEAR_LOGO : symLogo(sym);
-    var badge = nu
+    var a = txAssetLogo(sym, place);
+    // With no asset mark at all the chain takes the main circle (XRPL's rule), never a badge on nothing.
+    var main = a || nu;
+    var badge = (a && nu)
       ? ('<img loading="lazy" decoding="async" src="' + esc2(nu) + '" alt="" style="position:absolute;'
         + 'right:-2px;bottom:-2px;width:14px!important;height:14px!important;min-width:0!important;'
         + 'border-radius:50%;object-fit:cover;display:block;box-shadow:0 0 0 2px var(--surface)">')
       : '';
     return '<span class="br-asschip">'
       + '<span class="br-ic lx-netic" data-logo="" data-logoed="1" style="position:relative;overflow:visible">'
-      + (a ? ('<img loading="lazy" decoding="async" src="' + esc2(a) + '" alt=""'
+      + (main ? ('<img loading="lazy" decoding="async" src="' + esc2(main) + '" alt=""'
         + ' style="width:100%;height:100%;border-radius:50%;object-fit:cover;display:block">') : '')
       + badge
       + '</span><span><span class="am">' + esc2(shown + ' ' + (sym || '')) + '</span>'
@@ -1543,6 +1560,37 @@
     + '<path d="M10 14 21 3"></path><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h6">'
     + '</path></svg>';
   function txExplorer(hash) { return 'https://nearblocks.io/txns/' + encodeURIComponent(hash); }
+  // THE DESTINATION WALLET'S PAGE (RAZA 2026-11-06: "the destination is not clickable"). Stellar's
+  // LX_ACCT_EXP (_cctp.js) for the places this page can reach, where each host was opened on a real address
+  // before it was listed. A chain with no entry there stays plain text rather than a guessed host: Abstract,
+  // Aptos and Aleo today. The address is stored or fetched, so it is encoded here and escaped on the way out.
+  var ACCT_XP = {
+    Ethereum: 'https://etherscan.io/address/', Arbitrum: 'https://arbiscan.io/address/',
+    Base: 'https://basescan.org/address/', Optimism: 'https://optimistic.etherscan.io/address/',
+    Polygon: 'https://polygonscan.com/address/', Avalanche: 'https://snowtrace.io/address/',
+    'BNB Chain': 'https://bscscan.com/address/', Scroll: 'https://scrollscan.com/address/',
+    Gnosis: 'https://gnosisscan.io/address/', Berachain: 'https://berascan.com/address/',
+    Monad: 'https://monadexplorer.com/address/', Plasma: 'https://plasmascan.to/address/',
+    'X Layer': 'https://www.oklink.com/x-layer/address/', Hood: 'https://robinscan.io/address/',
+    Hyperliquid: 'https://hyperevmscan.io/address/', Solana: 'https://solscan.io/account/',
+    Sui: 'https://suiscan.xyz/mainnet/account/', Starknet: 'https://starkscan.co/contract/',
+    Movement: 'https://explorer.movementnetwork.xyz/account/', TON: 'https://tonviewer.com/',
+    Tron: 'https://tronscan.org/#/address/', Cardano: 'https://cardanoscan.io/address/',
+    Bitcoin: 'https://mempool.space/address/', Litecoin: 'https://litecoinspace.org/address/',
+    Dogecoin: 'https://dogechain.info/address/', 'Bitcoin Cash': 'https://www.blockchain.com/explorer/addresses/bch/',
+    Dash: 'https://blockexplorer.one/dash/mainnet/address/', Zcash: 'https://mainnet.zcashexplorer.app/address/',
+    Fogo: 'https://explorer.fogo.io/address/', ADI: 'https://explorer.adifoundation.ai/address/',
+    Stellar: 'https://stellar.expert/explorer/public/account/', XRPL: 'https://xrpscan.com/account/',
+    Linea: 'https://lineascan.build/address/', Mantle: 'https://mantlescan.xyz/address/',
+    Sei: 'https://seistream.app/account/', 'World Chain': 'https://worldscan.org/address/',
+    Hedera: 'https://hashscan.io/mainnet/account/'
+  };
+  function txDest(place, to) {
+    var base = Object.prototype.hasOwnProperty.call(ACCT_XP, place) ? ACCT_XP[place] : '';
+    if (!base) return esc2(short(to));
+    return '<a class="lx-txaddr" href="' + esc2(base + encodeURIComponent(to)) + '" target="_blank" rel="noopener" '
+      + 'title="View destination wallet on ' + esc2(place) + ' explorer">' + esc2(short(to)) + '</a>';
+  }
   function txRoute(route, r) {
     var m = ROUTE_META[route] || ROUTE_META.ni;
     var img = route === 'om' || route === 'wh' ? m.img
@@ -1575,7 +1623,15 @@
       return '<span style="' + ST_CSS + '">' + (r.status === 'SUCCESS' ? 'Delivered' : r.status === 'FAILED' ? 'Failed'
         : 'Omni is delivering it') + '</span>';
     }
-    return '';
+    // WHAT THE HAND-OVER LINE PROMISES IS HERE (RAZA 2026-11-06): "its status is in Recent transactions"
+    // needs a NEAR Intents row to carry one, and it carried none. A row follow() stopped watching a week
+    // ago is left blank rather than still claiming to be delivering.
+    if (r.status === 'SUCCESS') return '<span style="' + ST_CSS + '">Delivered</span>';
+    if (r.status === 'REFUNDED') return '<span style="' + ST_CSS + '">Refunded</span>';
+    if (r.status === 'FAILED') return '<span style="' + ST_CSS + '">Failed</span>';
+    if (r.status === 'INCOMPLETE_DEPOSIT') return '<span style="' + ST_CSS + '">Deposit incomplete — refundable</span>';
+    if (!r.status || Date.now() - (r.at || 0) > FOLLOW_MAX) return '';
+    return '<span style="' + ST_CSS + '">NEAR Intents is delivering it</span>';
   }
   var TX_HEAD = '<tr><th>Time</th><th>From</th><th>Source address</th><th>To</th>'
     + '<th>Destination address</th><th>Bridge used</th>'
@@ -1607,7 +1663,7 @@
               + '<td class="mono">' + (src ? ('<a class="lx-txaddr" href="https://nearblocks.io/address/'
                 + encodeURIComponent(src) + '" target="_blank" rel="noopener">' + esc2(short(src)) + '</a>') : '—') + '</td>'
               + '<td>' + txAmt(r.recv, r.recvSym, r.place) + '</td>'
-              + '<td class="mono">' + (r.to ? esc2(short(r.to)) : '—') + '</td>'
+              + '<td class="mono">' + (r.to ? txDest(r.place, r.to) : '—') + '</td>'
               + '<td class="lx-buse">' + txRoute(r.route, r) + '</td>'
               + '<td class="br-xp"><a class="br-xplink" href="' + esc2(txExplorer(r.hash))
               + '" target="_blank" rel="noopener" aria-label="View on NearBlocks" '
@@ -1659,7 +1715,7 @@
             + '" target="_blank" rel="noopener" title="View this transaction on NearBlocks">' + XP_ICON + '</a></div>'
             + '<div class="brm-flow">' + txAmt(r.sent, r.sentSym, 'NEAR')
             + '<span class="br-ar">→</span>' + txAmt(r.recv, r.recvSym, r.place) + '</div>'
-            + (r.to ? ('<div class="brm-recv">To ' + esc2(short(r.to)) + ' · via ' + txRoute(r.route, r) + '</div>')
+            + (r.to ? ('<div class="brm-recv">To ' + txDest(r.place, r.to) + ' · via ' + txRoute(r.route, r) + '</div>')
               : ('<div class="brm-recv">via ' + txRoute(r.route, r) + '</div>'))
             + '</div>';
         });
@@ -2021,7 +2077,9 @@
       recordBr(r, res.o.hash, src, label, me, to, amt);
       say(r === 'om' ? 'Sent — Omni is delivering it' : 'Sent — claim it below once Wormhole signs (~15 min)');
       if (res.o.hash) follow(res.o.hash, 0);
-      setTimeout(function () { busy = false; setCta(); resetAfterDelivery(); }, 5000);
+      var line = r === 'om' ? 'Sent. Omni is delivering it — its status is in Recent transactions.'
+        : 'Sent. Claim it in Recent transactions once Wormhole signs (~15 min).';
+      setTimeout(function () { resetAfterDelivery(res.o.hash ? line : ''); }, 5000);
     }).catch(function (e) {
       say(e && e.lxnWallet ? walletSaid(e, e.lxnMulti) : String((e && e.message) || 'Transfer failed'));
       setTimeout(function () { busy = false; setCta(); }, 6000);
@@ -2052,19 +2110,21 @@
   }
   // WHERE IT HAS GOT TO. Omni until its relayers finish; Wormhole until the guardians sign (then it is the
   // reader's to claim) and on until a claim lands, from here or anywhere else. Every 20 s for an hour, and
-  // resumed on the next visit for anything under a week old that has not finished.
+  // resumed on the next visit for anything under a week old that has not finished. NEAR Intents joins them
+  // (RAZA 2026-11-06): once poll() has let the form go, its row keeps moving here.
   var FOLLOWING = {};
   function follow(hash, tries) {
     var rec = txFind(hash);
-    if (!rec || !BRX() || (tries === 0 && FOLLOWING[hash])) return;
+    if (!rec || (rec.route ? !BRX() : !rec.dep) || (tries === 0 && FOLLOWING[hash])) return;
     FOLLOWING[hash] = 1;
     if (tries > 180) { delete FOLLOWING[hash]; return; }
-    var p = rec.route === 'om' ? BRX().omStatus(hash).then(function (st) { return { status: st }; }) : BRX().whStatus(hash);
+    var p = !rec.route ? niStatus(rec.dep).then(function (st) { return { status: st }; })
+      : rec.route === 'om' ? BRX().omStatus(hash).then(function (st) { return { status: st }; }) : BRX().whStatus(hash);
     p.then(function (s) {
       if (s.status && (s.status !== rec.status || (s.claimTx && s.claimTx !== rec.claimTx))) {
         patchRec(hash, function (x) { x.status = s.status; if (s.claimTx) x.claimTx = s.claimTx; });
       }
-      if (s.status === 'SUCCESS' || s.status === 'FAILED') { delete FOLLOWING[hash]; return; }
+      if (s.status === 'SUCCESS' || s.status === 'FAILED' || s.status === 'REFUNDED') { delete FOLLOWING[hash]; return; }
       setTimeout(function () { follow(hash, tries + 1); }, 20000);
     }, function () { setTimeout(function () { follow(hash, tries + 1); }, 30000); });
   }
@@ -2108,36 +2168,121 @@
     try { paintTxs(); } catch (_) {}
   }
 
-  function resetAfterDelivery() {
+  // THE FORM ENDS WHERE STELLAR AND XRPL END IT (RAZA 2026-11-06: "doesn't take me to cross-chain step 1",
+  // "it doesn't refresh the fields"). This stopped at step 2, kept the address and the hand-picked route, and
+  // never repainted the receive figure: only paintQuote() writes that box, so "~ 2.28701 XLM" outlived the
+  // amount it was quoted on. Same two clicks and 140ms as _cctp.js's lxBrResetWizard, through the design's own
+  // .br-back buttons. The destination stays selected, as on Stellar; step 1 does not show the route panel.
+  // Every caller is finished with the transfer, so busy ends here.
+  function resetAfterDelivery(msg, bad) {
+    busy = false;
     try {
+      clearTimeout(qTimer); qSeq++; QUOTING = false;    // a quote still in flight must not repaint a clean form
       var ai = amtInput(); if (ai) ai.value = '';
+      var ad = $('.br-addr-in'); if (ad) ad.value = '';
       QUOTE = null; BEST = ''; NOTE = { ni: '', om: '', wh: '' }; OMQ = null; WHQ = null;
+      PICKED = ''; PICKED_FOR = ''; LAST_NOTE = '';
+      step2Err('');
       try { paintSourceUsd(); } catch (_) {}
+      try { paintQuote(null, ''); paintSteps(); } catch (_) {}
       try { loadBalances().then(paintSteps); } catch (_) {}
-      try { paintSteps(); setCta(); } catch (_) {}
-      var back = $('.br-step[data-step="3"] .br-back[data-go="2"]') || $('.br-back[data-go="2"]');
+      var back = $('.br-step[data-step="3"] .br-back[data-go="2"]');
       if (back) back.click();
+      setTimeout(function () {
+        try {
+          var b1 = $('.br-step[data-step="2"] .br-back[data-go="1"]');
+          if (b1) b1.click();
+        } catch (_) {}
+      }, 140);
+      if (msg) toast(msg, bad);
     } catch (e) {}
   }
-  function poll(dep, tries) {
-    if (tries > 40) { busy = false; setCta(); return; }
-    fetch(API + '?op=status&depositAddress=' + encodeURIComponent(dep))
-      .then(function (r) { return r.json(); })
-      .then(function (j) {
-        var st = j && j.status;
-        if (st === 'SUCCESS') {
-          say('Delivered'); mark(dep, st); busy = false;
-          setTimeout(function () { setCta(); resetAfterDelivery(); }, 5000);
-          return;
-        }
-        if (st === 'REFUNDED' || st === 'FAILED') {
-          say(st === 'REFUNDED' ? 'Refunded to your NEAR wallet' : 'Failed'); mark(dep, st); busy = false;
-          setTimeout(setCta, 5000); return;
-        }
-        say(st === 'PROCESSING' ? 'Processing…' : 'Confirming…');
-        setTimeout(function () { poll(dep, tries + 1); }, 4000);
-      })
-      .catch(function () { setTimeout(function () { poll(dep, tries + 1); }, 6000); });
+  // send.js's toast, kept up longer: this one is a sentence the reader has to be able to finish.
+  function toast(text, bad) {
+    if (!document.getElementById('lx-toastbad-css')) {
+      var st = document.createElement('style');
+      st.id = 'lx-toastbad-css';
+      st.textContent = '.lx-ctoast-stack{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:99999;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none}'
+        + '.lx-ctoast{background:var(--text,#16171b);color:var(--bg,#fff);padding:11px 18px 11px 14px;border-radius:10px;font-family:"Hanken Grotesk",system-ui,sans-serif;font-size:16px;font-weight:600;display:inline-flex;align-items:center;gap:9px}'
+        + '.lx-ctoast .ci{width:18px;height:18px;border-radius:50%;background:var(--green,#35c07f);color:#fff;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px}'
+        + '.lx-ctoast.bad .ci{background:#e5484d}';
+      (document.head || document.documentElement).appendChild(st);
+    }
+    var stack = $('.lx-ctoast-stack');
+    if (!stack) { stack = document.createElement('div'); stack.className = 'lx-ctoast-stack'; document.body.appendChild(stack); }
+    var t = document.createElement('div');
+    t.className = 'lx-ctoast' + (bad ? ' bad' : '');
+    t.style.whiteSpace = 'normal';
+    t.style.maxWidth = 'min(92vw,520px)';
+    t.style.width = 'max-content';
+    var ic = document.createElement('span'); ic.className = 'ci'; ic.textContent = bad ? '!' : '✓';
+    var tx = document.createElement('span'); tx.textContent = text;
+    t.appendChild(ic); t.appendChild(tx);
+    stack.appendChild(t);
+    setTimeout(function () { if (t.parentNode) t.parentNode.removeChild(t); }, 8000);
+  }
+
+  // ONE READ OF 1CLICK'S STATUS: its word for the transfer, or '' when we could not get one. A 404, a 5xx,
+  // {ok:0}, a page that is not JSON and a read that never answers are all '' -- they say nothing about the
+  // transfer (never-cache-a-failure-as-an-answer), so only a word 1Click really sent can end anything. The
+  // Function has its own 12s limit; this one is for the browser, which can leave a request open indefinitely.
+  function niStatus(dep) {
+    return new Promise(function (done) {
+      var ctl = typeof AbortController === 'function' ? new AbortController() : null;
+      var t = setTimeout(function () { if (ctl) ctl.abort(); done(''); }, NI_READ_MS);
+      fetch(API + '?op=status&depositAddress=' + encodeURIComponent(dep), ctl ? { cache: 'no-store', signal: ctl.signal } : { cache: 'no-store' })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (j) { clearTimeout(t); done(j && typeof j.status === 'string' ? j.status : ''); })
+        .catch(function () { clearTimeout(t); done(''); });
+    });
+  }
+  // THE FORM IS LET GO, THE TRANSFER IS NOT. Once the deposit is on NEAR the solvers deliver with no help from
+  // this page (_cctp.js, RAZA 2026-10-23: "users wont be waiting on here"), so past the wait the row takes over.
+  function handOver(dep, msg, bad) {
+    var rec = txList().filter(function (x) { return x && x.dep === dep; })[0];
+    if (rec) follow(rec.hash, 0);
+    resetAfterDelivery(msg, bad);
+  }
+  // HOW "PROCESSING" OUTLIVED THE TRANSFER (RAZA 2026-11-06: "even after the cross-chain swap is done, it keeps
+  // showing processing"). Only this function writes that word and only its exits clear it, and it had two ways
+  // not to reach one: a status read that never settled ended the chain with busy still true, which froze the
+  // label and every repaint; and 40 tries is 40 timer ticks, which a browser stretches to minutes apiece once
+  // the tab is behind a wallet or an explorer. The 41st then re-armed "Bridge X" on the review step, for money
+  // already sent. So every read is bounded (niStatus), the wait is wall-clock as well as tries, a last read
+  // still happens after a stall, so a reader coming back to a delivered transfer is told so, and giving up ends
+  // on step 1. A read that failed only costs a slower retry.
+  var NI_READ_MS = 15000, NI_WAIT_MS = 180000, FOLLOW_MAX = 7 * 86400000;
+  function poll(dep, tries, t0) {
+    t0 = t0 || Date.now();
+    niStatus(dep).then(function (st) {
+      if (st === 'SUCCESS') {
+        say('Delivered'); mark(dep, st);
+        var rec = txList().filter(function (x) { return x && x.dep === dep; })[0];
+        var place = (rec && NI_CHAIN[rec.chain]) || '';
+        setTimeout(function () {
+          resetAfterDelivery('Delivered to your ' + (place ? place + ' ' : '') + 'address. There is nothing to claim.');
+        }, 5000);
+        return;
+      }
+      // The form stays for another try, as Stellar's does; the balance moves, because the money came back.
+      if (st === 'REFUNDED' || st === 'FAILED') {
+        say(st === 'REFUNDED' ? 'Refunded to your NEAR wallet' : 'Failed'); mark(dep, st);
+        try { loadBalances().then(paintSteps); } catch (_) {}
+        setTimeout(function () { busy = false; setCta(); }, 5000);
+        return;
+      }
+      if (st === 'INCOMPLETE_DEPOSIT') {
+        mark(dep, st);
+        handOver(dep, 'NEAR Intents reports the deposit as incomplete. It is refundable to your NEAR wallet — its status is in Recent transactions.', true);
+        return;
+      }
+      if (tries >= 40 || Date.now() - t0 > NI_WAIT_MS) {
+        handOver(dep, 'Your deposit went through and delivery continues on its own — its status is in Recent transactions.');
+        return;
+      }
+      say(st === 'PROCESSING' ? 'Processing…' : 'Confirming…');
+      setTimeout(function () { poll(dep, tries + 1, t0); }, st ? 4000 : 6000);
+    });
   }
   function mark(dep, st) {
     try {
@@ -2266,8 +2411,8 @@
     try { paintTxs(); } catch (_) {}
     try {
       txList().forEach(function (r) {
-        if (r && r.hash && (r.route === 'om' || r.route === 'wh') && r.status !== 'SUCCESS' && r.status !== 'FAILED'
-            && Date.now() - (r.at || 0) < 7 * 86400000) follow(r.hash, 0);
+        if (r && r.hash && r.status !== 'SUCCESS' && r.status !== 'FAILED' && r.status !== 'REFUNDED'
+            && Date.now() - (r.at || 0) < FOLLOW_MAX) follow(r.hash, 0);
       });
     } catch (_) {}
 
@@ -2348,6 +2493,7 @@
       window.__lxnNiChains = Object.keys(BY_CHAIN);
       window.__lxnNiOrigins = ORIGINS.map(function (o) { return o.symbol; });
       try { paintSourceAsset(); checkFee(); title(wireDestinations()); paintSteps(); setCta(); } catch (_) {}
+      try { paintTxs(); } catch (_) {}
       try { recoverFromChain(); } catch (_) {}
       return loadBalances().then(function () { paintSource(); paintSteps(); });
     });

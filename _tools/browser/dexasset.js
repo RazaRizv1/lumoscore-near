@@ -920,6 +920,7 @@
     // Only now is the gate lifted: the box stays hidden while it holds the design's Aptos prices,
     // and opens the moment it holds this token's own.
     pc.classList.add('lxda');
+    loadCounts(FIT.bucket, t0);
     wireChartHover(pc, { pts: pts, L: L, R: R, t0: t0, tspan: tspan, y: y, K: K, bucket: FIT.bucket, vol: vmax > 0 || pts[0][8] != null });
     watchChartWidth();
   }
@@ -974,10 +975,36 @@
   //   * a candle inside the recent-trades feed is counted from that feed, exact;
   //   * an older candle has no trade count anywhere free (GeckoTerminal's candles carry volume only), so it reads "—"
   //     unless it had no volume, which is a true 0. Dividing volume by a mean trade size would print an invented figure.
+  // THE RECORD THE INDEXER KEEPS (RAZA 2026-11-06: "Yes, record them"): trades per 5 minutes from DexScreener, summed to
+  // this chart's candle. It begins when a pool was first sampled, so an older candle stays "—"; after that a candle with
+  // no row is a true 0. Asked once per pool and candle size, and a failed ask is not stored.
+  var TC = { key: '', c: null, since: 0 };
+  function loadCounts(bucket, t0) {
+    var d = window.__lxnAssetData, pool = d && gtPool(d);
+    if (!pool || !pool.id || !(bucket >= 300000)) return;
+    var key = pool.id + '|' + bucket;
+    if (TC.key === key) return;
+    TC = { key: key, c: null, since: 0 };
+    fetch(IDX + '/tradecounts?pool=' + encodeURIComponent(pool.id) + '&bucket=' + bucket + '&from=' + Math.floor(t0 || 0))
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (TC.key !== key) return;
+        if (!j || !j.ok) { TC.key = ''; return; }
+        TC.c = j.c || {}; TC.since = +j.since || 0;
+      }).catch(function () { if (TC.key === key) TC.key = ''; });
+  }
+  function recordedIn(t, bucket) {
+    if (!TC.c || !(bucket >= 300000)) return null;
+    var k = Math.floor(t / bucket) * bucket;
+    if (t < TC.since && !(k in TC.c)) return null;
+    return TC.c[k] || 0;
+  }
   function tradesTxt(p, S, inUsd, usdPerNear) {
     if (p[8] != null) return Number(p[8]).toLocaleString('en-US');
     var n = tradesIn(p[0], S.bucket);
     if (n != null) return n.toLocaleString('en-US');
+    var rec = recordedIn(p[0], S.bucket);
+    if (rec != null) return rec.toLocaleString('en-US');
     var v = +p[5];
     return (isFinite(v) && !(v > 0)) ? '0' : '—';
   }
