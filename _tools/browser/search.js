@@ -300,6 +300,24 @@
     return out.slice(0, 5);
   }
 
+  // EVERY LIVE POOL, BY ITS ID OR ITS TOKENS (RAZA 2026-11-07, "3514" found nothing). The list above is the top 200; this
+  // is the Pools page's own baked list, fetched once a query asks for it, and it only ever adds rows.
+  var ALL_P = null;
+  function allPools() {
+    if (ALL_P) return ALL_P;
+    ALL_P = fetch('/assets/allpools.json').then(function (r) { return r.ok ? r.json() : null; }).then(function (list) {
+      if (!Array.isArray(list)) { ALL_P = null; return []; }
+      return list.map(function (x) {
+        return { id: x[0], liq: x[3], tokens: (x[4] || []).map(function (t) { return { i: t[0], s: C.cleanSym(t[1]) }; }) };
+      });
+    }, function () { ALL_P = null; return []; });
+    return ALL_P;
+  }
+  function allPoolHits(rows, q) {
+    if (/^[0-9]+$/.test(q)) return rows.filter(function (p) { return String(p.id) === q; });
+    return poolHits({ rows: rows }, q);
+  }
+
   // ---- RECENT SEARCHES -------------------------------------------------------------------------------
   // The design's Recent list (.lx-rechead / .lx-recgrp / .lx-recrow, styled by the inherited sheet): five
   // per kind, shown whenever the box is empty, with Clear. What is stored is the row's DATA, never its
@@ -572,7 +590,7 @@
     var list = $('#spAssetList');
     if (!list) return;
     if (!q) { seq++; if (!recPaint(list)) list.innerHTML = ''; setCount(null); return; }
-    if (q.length < MIN) { note(list, 'Type at least ' + MIN + ' characters.'); setCount(null); return; }
+    if (q.length < MIN && !/^[0-9]+$/.test(q)) { note(list, 'Type at least ' + MIN + ' characters.'); setCount(null); return; }
 
     var mine = ++seq;
     var ql = q.toLowerCase();
@@ -580,7 +598,7 @@
     if (!TOKS) { setCount(null); note(list, 'Searching NEAR…'); }
 
     var exact = exactEligible(ql) ? resolveExact(ql) : null;
-    var wide = wideHits(ql), wideRows = null;
+    var wide = wideHits(ql), wideRows = null, wholePools = allPools(), morePools = [];
     Promise.all([loadTokens(), loadPools()]).then(function (r) {
       if (mine !== seq) return;
       var toks = r[0], pools = r[1], xNow = null;
@@ -590,7 +608,9 @@
         var known = {};
         hits.forEach(function (t) { known[t.i] = 1; });
         var more = (wideRows || []).filter(function (t) { return !known[t.i]; });
-        paint(list, hits.concat(more), phits, xNow, !toks && !pools);
+        var seen = {};
+        phits.forEach(function (p) { seen[p.id] = 1; });
+        paint(list, hits.concat(more), phits.concat(morePools.filter(function (p) { return !seen[p.id]; })).slice(0, 5), xNow, !toks && !pools);
       }
       draw();
       // Still asking the wider index: "nothing matches" would be a guess.
@@ -599,6 +619,11 @@
         if (mine !== seq) return;
         wideRows = rows;
         if (rows.length || !exact) draw();
+      });
+      wholePools.then(function (rows) {
+        if (mine !== seq) return;
+        morePools = allPoolHits(rows, ql);
+        if (morePools.length) draw();
       });
       if (!exact) return;
       if (!list.children.length) note(list, 'Looking up ' + ql + ' on NEAR…');

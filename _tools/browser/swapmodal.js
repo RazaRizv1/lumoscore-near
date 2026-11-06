@@ -401,7 +401,9 @@
     prepare(m);
     var P = parts(m);
     if (!from) from = NEAR;
-    if (!to) to = asset(S().USDC, 'USDC', 6, '');
+    // A page can name its own default To: the LUMOS page opens on LUMOS (browser/nearlumospage.js), as Stellar's does.
+    var dt = window.__lxnSwapTo;
+    if (!to) to = dt ? asset(dt.id, dt.code, dt.dec, dt.logo) : asset(S().USDC, 'USDC', 6, '');
     var u = S().meta(S().USDC);
     if (u && to.id === u.id && !to.logo) to = asset(u.id, u.code, u.dec, u.logo);
     if (P.inIn) P.inIn.value = '';
@@ -419,6 +421,29 @@
     });
     refreshFrom();
   }
+
+  // ---- opened from a My Assets row ------------------------------------------------------------------------
+  // RAZA 2026-11-07: Trade on a holding opens this dialog over the wallet, on that token, as Stellar's does (its
+  // __lxSwapFrom). wallet.js's Swap item has always called this name; nothing defined it, so every press fell through
+  // to the Trade page. The row's token goes on the pay side against NEAR, and NEAR itself against the default USDC.
+  // The class is what the design's own openers set, and watchOpen's reset() runs after it and paints the pair. False
+  // sends the caller to the Trade page: a token with no decimals cannot be priced here.
+  window.__lxnOpenSwap = function (o) {
+    var m = modal(), id = (o && o.issuer) || '';
+    if (!m || !S()) return false;
+    var a = NEAR;
+    if (id) {
+      var h = (((window.__lxnData || {}).held) || []).filter(function (t) { return t.id === id; })[0];
+      if (!h || h.dec == null) return false;
+      S().remember(h.id, h.display, h.dec, h.logo);
+      a = asset(h.id, h.display, h.dec, h.logo);
+    }
+    from = a;
+    to = (a.id === 'near' || a.id === S().WNEAR) ? null : NEAR;
+    m.classList.add('open');
+    document.body.style.overflow = 'hidden';
+    return true;
+  };
 
   // ---- the press ----------------------------------------------------------------------------------------
   // send.js's toast (same element, classes and stylesheet id), with the green mark.

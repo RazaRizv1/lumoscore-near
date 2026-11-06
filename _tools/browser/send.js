@@ -126,7 +126,8 @@
   }
   function cssUrl(u) {
     u = String(u || '');
-    if (!/^data:image\//i.test(u) && !/^https:\/\//i.test(u)) return '';
+    // /assets/ too (RAZA 2026-11-07: "[icon] LUMOS": LUMOS's curated logo is a site path, as in wallet.js's cssUrl).
+    if (!/^data:image\//i.test(u) && !/^https:\/\//i.test(u) && u.indexOf('/assets/') !== 0) return '';
     if (u.indexOf('"') >= 0 || u.indexOf('\\') >= 0 || u.length > 400000) return '';
     u = u.replace(/[\r\n\t]/g, '');
     if (/^data:image\/svg\+xml,/i.test(u)) u = u.replace(/#/g, '%23');
@@ -138,6 +139,12 @@
   }
   // Implicit accounts exist as soon as something is sent to them; a named one must have been created.
   function isImplicit(a) { return /^[0-9a-f]{64}$/.test(a) || /^0x[0-9a-f]{40}$/.test(a); }
+  // A RECIPIENT, STRICTER THAN AN ACCOUNT ID (RAZA 2026-11-07: "aaasdaddada" passed and "3" did not). lxn.validAccount
+  // asks whether a string could be an id at all, and a bare word can: that is a top-level account. Nobody sends to one
+  // by hand, and a typo of a name is exactly a bare word, so here a name needs its suffix (.near, or another top-level
+  // such as .tg, which is why this looks for the dot and not for ".near"). Whether it exists is still asked on click.
+  function validDest(a) { return validAcct(a) && (isImplicit(a) || a.indexOf('.') > 0); }
+  var BAD_DEST = 'That doesn’t look like a valid NEAR account (should end with .near or be a 64-character ID).';
 
   function $(s, r) { return (r || document).querySelector(s); }
   function $$(s, r) { return [].slice.call((r || document).querySelectorAll(s)); }
@@ -171,7 +178,7 @@
 
   function thumbOf(a) {
     if (!a || a.native || a.id === 'wrap.near') return NEAR_LOGO;
-    return cssUrl(a.logo);
+    return cssUrl(a.logo) || (window.lxnCore && window.lxnCore.ICONS ? cssUrl(window.lxnCore.ICONS[a.id]) : '');
   }
   // Scanning is a phone action: on a desktop the camera points at the user. Same UA test the site already
   // uses to decide which page to serve.
@@ -227,7 +234,7 @@
   // Returns true only when an XRP Ledger address was found and written.
   function fillRecipient(rec, raw) {
     var t = String(raw || '').trim().replace(/^near:/i, '').split(/[?\s]/)[0].toLowerCase();
-    if (!validAcct(t)) return false;
+    if (!validDest(t)) return false;
     rec.value = t;
     try { rec.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) {}
     return true;
@@ -344,7 +351,8 @@
       e.preventDefault(); e.stopPropagation();
       if (!navigator.clipboard || !navigator.clipboard.readText) { say('Clipboard unavailable — paste with Ctrl+V.', 'bad'); return; }
       navigator.clipboard.readText().then(function (x) {
-        if (!fillRecipient(rec, x)) { rec.value = String(x || '').trim(); }
+        // A paste that is not an account goes in as typed, so it has to be checked as if it had been typed.
+        if (!fillRecipient(rec, x)) { rec.value = String(x || '').trim(); checkSend(); }
         say('');
         try { rec.focus(); } catch (e2) {}
       }, function () { say('Clipboard blocked — paste with Ctrl+V.', 'bad'); });
@@ -539,6 +547,11 @@
     }
     return err;
   }
+  // RAZA 2026-11-07: "after reserve", the reserve being NEAR's own (storage plus the gas Max leaves). A token keeps none.
+  function overBalance(a) {
+    return 'Amount exceeds your available ' + a.code + ' balance (' + commas(roomStr(a)) + ' ' + a.code
+      + (a.native ? ' after reserve' : '') + ').';
+  }
   function checkSend() {
     var m = sendModal();
     if (!m) return;
@@ -557,14 +570,13 @@
         if (units == null) msg = /\./.test(raw) ? ('That is more decimal places than ' + a.code + ' has (' + a.dec + ').') : 'Enter an amount greater than 0.';
         else if (cmpUnits(units, '0') <= 0) msg = 'Enter an amount greater than 0.';
         else if (cmpUnits(units, toUnits(roomStr(a), a.dec)) > 0) {
-          msg = 'Amount exceeds your available ' + a.code + ' balance (' + commas(roomStr(a)) + ' ' + a.code
-            + (a.native ? ' after the ' + GAS_KEEP + ' NEAR kept for gas and storage' : '') + ').';
+          msg = overBalance(a);
         } else okAmt = true;
       }
     }
     var dest = toIn ? String(toIn.value || '').trim().toLowerCase() : '';
-    var okDest = !!dest && validAcct(dest);
-    if (!msg && dest && !okDest) msg = 'That doesn’t look like a valid NEAR account (a name like alice.near, or a 64-character ID).';
+    var okDest = !!dest && validDest(dest);
+    if (dest && !okDest) msg = msg ? msg + ' ' + BAD_DEST : BAD_DEST;
     err.textContent = msg;
     err.style.display = msg ? '' : 'none';
     if (go && go.getAttribute('data-busy') !== '1') {
@@ -619,6 +631,11 @@
     host.appendChild(im);
   }
 
+  function hueOf(s) {                                   // wallet.js's hue(): a stable colour per ticker
+    var h = 0; s = String(s || '');
+    for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
+    return 'hsl(' + h + ',52%,42%)';
+  }
   function setSendAsset(a) {
     var m = sendModal();
     if (!m || !a) return;
@@ -640,7 +657,14 @@
       var lc = $('.lx-ap-code', lp);
       if (lc) plain(lc, a.code);
       var li = $('.lx-ap-ico', lp);
-      if (li) { plain(li, ''); li.style.setProperty('--lxlogo', 'url("' + thumbOf(a) + '")'); }
+      if (li) {
+        // The letter is ::after's data-l, as on Stellar: this box hides anything else but its --lxlogo.
+        var lu = thumbOf(a);
+        plain(li, '');
+        li.setAttribute('data-l', lu ? '' : String(a.code || '?').charAt(0).toUpperCase());
+        if (lu) li.style.setProperty('--lxlogo', 'url("' + lu + '")');
+        else { li.style.removeProperty('--lxlogo'); li.style.setProperty('background-color', hueOf(a.code), 'important'); }
+      }
     }
 
     var bal = $('.field-meta strong', m);
@@ -764,7 +788,7 @@
   function parseDest(raw) {
     var s = String(raw || '').trim().toLowerCase();
     if (!s) return { err: 'Enter a recipient account.' };
-    if (!validAcct(s)) return { err: 'That is not a valid NEAR account. Use a name like alice.near or a 64-character account.' };
+    if (!validDest(s)) return { err: BAD_DEST };
     return { account: s };
   }
 
@@ -835,8 +859,7 @@
     if (cmpUnits(units, '0') <= 0) { say('Enter an amount greater than 0.', 'bad'); return; }
     // Tokens are checked exactly against the raw balance; NEAR against what is available less the gas keep.
     if (cmpUnits(units, toUnits(roomStr(a), a.dec)) > 0) {
-      say('Amount exceeds your available ' + a.code + ' balance (' + commas(roomStr(a)) + ' ' + a.code
-        + (a.native ? ' after the ' + GAS_KEEP + ' NEAR kept for gas and storage' : '') + ').', 'bad');
+      say(overBalance(a), 'bad');
       return;
     }
     var dest = parseDest(toIn.value);
@@ -950,7 +973,7 @@
 
     // The recipient placeholder shipped as Stellar's: "G... or domain.com*username". On this ledger
     // that is an address format that cannot exist, telling the user to type something invalid.
-    if (toIn) toIn.setAttribute('placeholder', 'name.near or 64-char hex ID');
+    if (toIn) toIn.setAttribute('placeholder', 'name.near');
     var lbl = $('.field-label .meta', m);
     if (lbl) lbl.textContent = 'NEAR account';
 

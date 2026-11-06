@@ -845,11 +845,19 @@
   function limSay(text) { var e = lEl('.lxq-err'); if (e) e.textContent = text || ''; }
   function limNote(text) { var n = lEl('.lxq-note'); if (n) n.textContent = text || ''; }
   function limGo(on, label) {
-    var b = lEl('.lxq-go');
+    var b = lEl('.lxq-go:not(.lxq-make)');
     if (!b) return;
     if (on && lim.busy) on = false;
     if (label) b.textContent = label;
     b.disabled = !on;
+  }
+  // The pair's Create action, the Trade page's on any two tokens. Beside Place, which stays disabled while it shows.
+  function limMake(show, label) {
+    var b = lEl('.lxq-make');
+    if (!b || lim.busy) return;
+    b.style.display = show ? '' : 'none';
+    b.disabled = !show;
+    if (label) b.textContent = label;
   }
   // Which side is the token, and which the quote the price is written in. NEAR is the quote whenever it is
   // on the pair, as ever; between two other tokens, the one being sold is priced in the one being bought.
@@ -879,6 +887,7 @@
       + '<span><span class="lxq-unit"></span> <button type="button" class="lxq-mkt">MARKET</button></span></div>'
       + '<div class="lxq-lin"><input class="lxq-in lxq-price" type="text" inputmode="decimal" placeholder="0.00"></div></div>'
       + '<div class="lxq-note"></div><div class="lxq-err"></div>'
+      + '<button type="button" class="lxq-go lxq-make" style="display:none;margin-bottom:8px">Create order-book pool</button>'
       + '<button type="button" class="lxq-go" disabled>Place limit order</button></div>';
     noAuto(lEl('.lxq-amt'));
     noAuto(lEl('.lxq-price'));
@@ -938,14 +947,20 @@
       if (t.closest('.lxq-mkt')) {
         e.preventDefault(); e.stopImmediatePropagation();
         var pr0 = limPair();
-        if (!pr0 || !lim.pool) { toast('Pick a pair with an order-book pool first.', true); return; }
-        var mkt = D().tokenPriceAt(lim.pool, pr0.token.dec, lim.pool.cur);
-        if (!(mkt > 0)) { toast('The pool did not give a market price.', true); return; }
-        var pe = lEl('.lxq-price');
-        if (pe) pe.value = trunc(String(mkt), mkt < 1 ? 10 : 6);
-        limitSync();
+        if (!pr0) { toast('Choose both assets first.', true); return; }
+        var mkt = 0;
+        if (lim.pool) { try { mkt = D().tokenPriceAt(lim.pool, pr0.token.dec, lim.pool.cur); } catch (er) {} }
+        if (mkt > 0) { limPrice(mkt); return; }
+        // No order-book pool to read: the route's rate, which the Swap tab would trade at now.
+        var mk0 = pr0.token.id + '|' + pr0.quote.id;
+        limRate(pr0).then(function (r) {
+          var pn = limPair();
+          if (!pn || pn.token.id + '|' + pn.quote.id !== mk0) return;
+          if (r > 0) limPrice(r); else toast('No market rate for this pair right now.', true);
+        });
         return;
       }
+      if (t.closest('.lxq-make')) { e.preventDefault(); e.stopImmediatePropagation(); limitCreate(); return; }
       if (t.closest('.lxq-go')) { e.preventDefault(); e.stopImmediatePropagation(); placeLimit(); return; }
       if (!t.closest('.lxq-menu')) closeMenus();
     }, true);
@@ -977,6 +992,81 @@
     el.appendChild(cd); el.appendChild(car);
   }
 
+  // THE MARKET RATE WITHOUT AN ORDER BOOK (RAZA 2026-11-07: "based on market rate when MARKET price is selected"): quote
+  // per token off a route quote for about $20 of the token, before the platform fee, as the order would not pay it. If
+  // the route cannot answer, the two tokens' dollar prices; with neither, 0, and the field stays empty.
+  function limRate(pr) {
+    var tu = isNear(pr.token) ? USD.near : USD[pr.token.id], qu = isNear(pr.quote) ? USD.near : USD[pr.quote.id];
+    var byUsd = (tu > 0 && qu > 0) ? tu / qu : 0, raw = null;
+    try { raw = S().toUnits(trunc(plainNum(tu > 0 ? 20 / tu : 1), pr.token.dec), pr.token.dec); } catch (e) { raw = null; }
+    if (!raw || raw === '0') return Promise.resolve(byUsd);
+    return S().quote(pr.token.id, pr.quote.id, raw).then(function (q) {
+      var out = Number(S().fromUnits(q.out, pr.quote.dec)), net = Number(S().fromUnits(q.net, pr.token.dec));
+      return (out > 0 && net > 0) ? out / net : byUsd;
+    }, function () { return byUsd; });
+  }
+  function limPrice(v) {
+    var pe = lEl('.lxq-price');
+    if (pe) pe.value = v >= 1 ? trunc(String(v), 6) : plainNum(+v.toPrecision(6));
+    limitSync();
+  }
+  // Fills an EMPTY price with the rate, and keeps the rate for the Create action. A rate that could not be had is not kept.
+  function limFill(pr, key) {
+    limRate(pr).then(function (r) {
+      if (lim.poolFor !== key || !(r > 0)) return;
+      lim.rate = r; lim.rateFor = key;
+      var pe = lEl('.lxq-price');
+      if (pe && !String(pe.value || '').trim()) limPrice(r); else limitSync();
+    });
+  }
+  // The plan to open this pair's pool at its current rate, never a typed price; null with no rate to open at.
+  function limPlan(pr) {
+    var key = pr.token.id + '|' + pr.quote.id;
+    if (lim.rateFor !== key || !(lim.rate > 0)) return null;
+    try { return D().planCreate(pr.token.id, pr.token.dec, lim.rate, isNear(pr.quote) ? null : pr.quote.id, pr.quote.dec); } catch (e) { return null; }
+  }
+
+  // The pool, created in the connected wallet (dxalimit.js createPool); then the pair is asked for again and the pane
+  // becomes a normal Limit pane.
+  function limitCreate() {
+    if (lim.busy) return;
+    var pr = limPair(), who = addr(), cp = pr && limPlan(pr), b = lEl('.lxq-make');
+    if (!cp) return;
+    if (!who) { connect(); return; }
+    lim.busy = true;
+    limSay('');
+    if (b) { b.disabled = true; b.textContent = 'Checking…'; }
+    function stop(text) {
+      lim.busy = false;
+      limitSync();
+      if (text) limSay(text);
+    }
+    D().buildCreate(who, cp).then(function (txs) {
+      return S().balance(who, 'near').then(function (have) {
+        var need = S().big(S().SWAP_KEEP);
+        txs.forEach(function (t) { t.actions.forEach(function (x) { need += S().big(x.params.deposit); }); });
+        if (S().big(have) < need) {
+          throw new Error('Creating the pool needs ' + show(need.toString(), 24, 4) + ' NEAR in this wallet, the rest kept for gas, and it has ' + show(String(have), 24, 4) + ' NEAR.');
+        }
+        return txs;
+      });
+    }).then(function (txs) {
+      if (b) b.textContent = 'Confirm in wallet…';
+      return D().sign(txs);
+    }).then(function (res) {
+      var last = res && res[res.length - 1], st = last && last.status;
+      if (st && st.Failure) { stop('Creating the pool failed on chain. Check your wallet activity.'); return; }
+      D().forget(pr.token.id, isNear(pr.quote) ? null : pr.quote.id);
+      lim.pool = undefined; lim.poolFor = '';
+      lim.busy = false;
+      toast('Order-book pool created for ' + pr.token.code + ' / ' + pr.quote.code);
+      limitPool();
+    }).catch(function (e) {
+      var msg = (e && e.message) || '';
+      stop(e && e.lxnWallet ? D().walletErr(e, 'created') : (msg || 'The pool could not be created.'));
+    });
+  }
+
   // The pool behind the chosen pair. A definite answer (pool or none) is kept for the pair; a failed read
   // is NOT an answer and is asked again — one value must not mean both "there is none" and "could not ask".
   function limitPool() {
@@ -993,13 +1083,11 @@
       // and stayed "—", and the order could not be placed until MARKET was found and pressed (RAZA
       // 2026-10-31: "it won't calculate and show me the buying amount of Asset 2"). Only an EMPTY field is
       // filled — a price the user typed is theirs.
-      var pe = lEl('.lxq-price');
-      if (p && pe && !String(pe.value || '').trim()) {
-        var mkt = 0;
-        try { mkt = D().tokenPriceAt(p, pr.token.dec, p.cur); } catch (e) {}
-        if (mkt > 0) pe.value = trunc(String(mkt), mkt < 1 ? 10 : 6);
-      }
+      var pe = lEl('.lxq-price'), mkt = 0;
+      if (p) { try { mkt = D().tokenPriceAt(p, pr.token.dec, p.cur); } catch (e) {} }
+      if (mkt > 0 && pe && !String(pe.value || '').trim()) pe.value = trunc(String(mkt), mkt < 1 ? 10 : 6);
       limitSync();
+      if (!(mkt > 0)) limFill(pr, key);                             // no pool to read: the route's rate instead
     }, function () {
       if (lim.poolFor !== key) return;
       lim.pool = undefined; lim.poolFor = '';
@@ -1020,6 +1108,7 @@
       bv.textContent = !lim.s ? '—' : (r == null ? '—' : (show(r, lim.s.dec, 6) + ' ' + lim.s.code));
     }
 
+    limMake(false);
     var pr = limPair();
     var unit = lEl('.lxq-unit');
     if (unit) unit.textContent = pr ? ((isNear(pr.quote) ? 'NEAR' : pr.quote.code) + ' per ' + pr.token.code) : '';
@@ -1072,12 +1161,16 @@
     }
     if (lim.pool === undefined) { limNote('Checking for a ' + pr.token.code + ' / ' + pr.quote.code + ' pool…'); limSay(''); limGo(false, 'Place limit order'); return; }
     // A classic pool is not an order-book pool: "there is no LUMOS / NEAR pool" read false beside LUMOS/wNEAR 9001 (RAZA 2026-11-04).
-    // The Trade page's Create flow opens a pool against NEAR only, so a pair of two other tokens is not sent there.
+    // NOT AN ERROR, AND NOT A HOP (RAZA 2026-11-07: "Suppress the blocking pool error"). A limit order rests in one DCL
+    // pool and nothing here keeps watch to carry it through wNEAR, so a pair with no pool cannot take one; the numbers
+    // above still work out, the note is calm, and the one real way forward is offered: this pair's own pool.
     if (lim.pool === null) {
-      limNote('');
-      limSay(isNear(pr.quote)
-        ? pr.token.code + ' has no order-book pool yet, so limit orders have nowhere to rest. Its Trade page can create one (Limit tab).'
-        : pr.token.code + ' / ' + pr.quote.code + ' has no order-book pool yet, so limit orders have nowhere to rest. Try this token against NEAR.');
+      var plan = limPlan(pr), qc = isNear(pr.quote) ? 'NEAR' : pr.quote.code;
+      limSay('');
+      limNote(pr.token.code + ' / ' + qc + ' has no order-book pool yet, and a limit order rests in the pair’s own pool. '
+        + (plan ? 'Creating one costs about 0.1 NEAR and opens it at ' + fmtNum(plan.opensAt, plan.opensAt < 1 ? 10 : 6) + ' ' + qc + ', the current rate. ' : '')
+        + 'The Swap tab can trade this pair now.');
+      limMake(!!plan, 'Create order-book pool');
       limGo(false, 'Place limit order');
       return;
     }

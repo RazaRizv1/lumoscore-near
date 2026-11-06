@@ -233,6 +233,55 @@
     return '';
   }
 
+  // THE CURATED TICK AND LOGOS (RAZA 2026-11-07: "render the green verification checkmark badge next to verified
+  // tokens"). The same roster and rule as the Custom Swap menus (qorders.js verified): /lxapi/nearmarket's vf flag, the
+  // one shared request, with NEAR and wNEAR always ticked; its logo stands in for a token whose own metadata has none.
+  // A row drawn before the roster lands is ticked when it does, through data-lxcv. A failed read is not kept.
+  var VSET = {}, ROSTER_LOGO = {}, rosterP = null;
+  function verified(a) { return !!a && (a.id === 'near' || a.id === WNEAR || !!VSET[a.id]); }
+  function logoFor(a) { return (a && (a.logo || ROSTER_LOGO[a.id])) || ''; }
+  function vtick() {
+    if (!document.getElementById('lx-cpvtick')) {
+      var st = document.createElement('style');
+      st.id = 'lx-cpvtick';
+      st.textContent = '#createPoolModal .lx-vtick{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;'
+        + 'margin-left:5px;border-radius:50%;background:var(--green,#35c07f);color:#fff;vertical-align:-2px;flex:0 0 14px}'
+        + '#createPoolModal .lx-vtick svg{width:9px;height:9px;display:block}';
+      (document.head || document.documentElement).appendChild(st);
+    }
+    var s = document.createElement('span');
+    s.className = 'lx-vtick';
+    s.title = 'Curated on LumosCore';
+    s.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+    return s;
+  }
+  function loadRoster() {
+    if (rosterP) return rosterP;
+    var p = window.__lxnMarketP;
+    if (!p) {
+      p = fetch('/lxapi/nearmarket').then(function (r) { return r.json(); })
+        .then(function (d) { return (d && d.ok && d.rows) ? d : null; }, function () { return null; });
+      window.__lxnMarketP = p;
+    }
+    rosterP = p.then(function (d) {
+      if (!d) { rosterP = null; if (window.__lxnMarketP === p) window.__lxnMarketP = null; return; }
+      d.rows.forEach(function (r) {
+        if (!r || !r.i) return;
+        if (r.vf) VSET[r.i] = 1;
+        var lg = String(r.logo || '');
+        if (lg.indexOf('"') < 0 && (lg.indexOf('data:image/') === 0 || lg.indexOf('https://') === 0)) ROSTER_LOGO[r.i] = lg;
+      });
+      paintField(0); paintField(1);
+      $$('#createPoolModal .lx-cpitem').forEach(function (b) {
+        var a = b.__lxnAsset, ic = $('.ad-ico', b), tk = $('.ad-tk', b);
+        if (!a) return;
+        if (ic && !a.logo && logoFor(a)) ic.style.background = 'center / cover no-repeat url("' + logoFor(a) + '")';
+        if (tk && verified(a) && !$('.lx-vtick', tk)) tk.appendChild(vtick());
+      });
+    });
+    return rosterP;
+  }
+
   // ---- the design's two asset fields ------------------------------------------------------------------
   function fields() { var m = modal(); return m ? $$('.asset-field', m) : []; }
   function balEl(f) { return $('.field-foot .balance strong', f) || $('.field-foot > span:first-child', f); }
@@ -240,6 +289,7 @@
   function paintField(i) {
     var f = fields()[i];
     if (!f) return;
+    loadRoster();
     var a = H.pick[i];
     var pk = $('.asset-picker', f);
     if (pk) {
@@ -254,9 +304,12 @@
         if (ico) {
           ico.textContent = '';
           ico.setAttribute('data-logoed', '1');              // keep the logo healer off a real logo
-          ico.style.background = a.logo ? 'center / cover no-repeat url("' + a.logo + '")' : '';
+          ico.style.background = logoFor(a) ? 'center / cover no-repeat url("' + logoFor(a) + '")' : '';
         }
-        if (nm) { nm.textContent = a.code; nm.setAttribute('data-logoed', '1'); nm.style.color = ''; }
+        if (nm) {
+          nm.textContent = a.code; nm.setAttribute('data-logoed', '1'); nm.style.color = '';
+          if (verified(a)) nm.appendChild(vtick());
+        }
       } else {
         pk.classList.add('placeholder');
         if (ico) { ico.removeAttribute('style'); ico.textContent = '?'; ico.setAttribute('data-logoed', '1'); }
@@ -314,10 +367,11 @@
       var ic = document.createElement('span');
       ic.className = 'ad-ico';
       ic.setAttribute('data-logoed', '1');
-      if (a.logo) ic.style.background = 'center / cover no-repeat url("' + a.logo + '")';
+      if (logoFor(a)) ic.style.background = 'center / cover no-repeat url("' + logoFor(a) + '")';
       var meta = document.createElement('span');
       meta.className = 'ad-meta';
       var tk = document.createElement('span'); tk.className = 'ad-tk'; tk.setAttribute('data-logoed', '1'); tk.textContent = a.code;
+      if (verified(a)) tk.appendChild(vtick());
       var nm = document.createElement('span'); nm.className = 'ad-nm'; nm.textContent = a.sub;
       meta.appendChild(tk); meta.appendChild(nm);
       var bal = document.createElement('span'); bal.className = 'ad-bal'; bal.textContent = show(a.bal, a.dec, 4);

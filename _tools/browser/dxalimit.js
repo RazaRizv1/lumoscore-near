@@ -173,9 +173,9 @@
     b.type = 'button';
     b.className = 'lxlim-max';
     b.textContent = 'MAX';
-    // Stellar's order is "Avail: x NEAR  MAX  ≈ $y USD": MAX comes back (a balance arriving, a side switch)
-    // after the dollar figure already exists, so it goes in front of it rather than at the end.
-    row.insertBefore(b, $('.lx-ltusd', row));
+    // Stellar's order is "Avail: x NEAR  ≈ $y USD  MAX" (RAZA 2026-11-07: "Far-Right Placement"): MAX is the row's last
+    // child, and the dollar figure, which can arrive after it, goes in front of it (totalUsd).
+    row.appendChild(b);
   }
   function paint() {
     var p = pane(), a = asset();
@@ -250,7 +250,7 @@
     var f = fields(p), row = f[2] && $('[class*="dxa-trade-frow"]', f[2]);
     if (!row || phone(p)) return;
     var el = $('.lx-ltusd', row);
-    if (!el) { el = document.createElement('span'); el.className = 'lx-ltusd'; el.setAttribute('data-logoed', '1'); row.appendChild(el); }
+    if (!el) { el = document.createElement('span'); el.className = 'lx-ltusd'; el.setAttribute('data-logoed', '1'); row.insertBefore(el, $('.lxlim-max', row)); }
     var d = window.__lxnAssetData, tot = num(input(f[2]) && input(f[2]).value);
     var v = (tot > 0 && d && d.nearUsd > 0) ? tot * d.nearUsd : 0;
     var t = v > 0 ? ('≈ $' + v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' USD') : '';

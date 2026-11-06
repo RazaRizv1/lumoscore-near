@@ -629,10 +629,19 @@
     host.__lxnHov = { pts: pts, PW: PW, TOP: TOP, BOT: BOT, mn: mn, rg: rg, unit: meta.unit, base: meta.base, cand: cand,
       metric: meta.metric, volUsd: meta.volUsd, span: pts[pts.length - 1][0] - pts[0][0] };
     wirePoolHover(host);
+    // THE AXIS READS IN THE POOL'S OWN UNIT (RAZA 2026-11-07: "e.g., "29.38M NEAR"", Stellar's "29.38M XLM"). Rhea's
+    // series is in dollars, so TVL and volume are put in NEAR at today's rate, and stay in dollars while no rate is
+    // known. Stellar's rule for the room: the labels grow left over the plot, so a chart under 450px wide, or a long
+    // token name, prints the unit on the top gridline only.
+    var axK = (meta.pre && USD > 0) ? USD : 1, axPre = axK === 1 ? (meta.pre || '') : '';
+    var axSuf = axK !== 1 ? ' NEAR' : (cand && meta.unit ? ' ' + meta.unit : ''), axW = 0;
+    try { axW = svg.getBoundingClientRect().width || 0; } catch (e) {}
+    var oneU = (axW > 0 && axW < 450) || axSuf.length > 7;
     yLab.slice().sort(function (p, q) { return (parseFloat(p.getAttribute('y')) || 0) - (parseFloat(q.getAttribute('y')) || 0); })
       .forEach(function (t, k, arr) {
-        var at = mn + rg * (1 - k / Math.max(1, arr.length - 1));
-        t.textContent = (meta.pre || '') + (cand ? axisStep(at, rg / Math.max(1, arr.length - 1)) : axisNum(at));
+        var at = (mn + rg * (1 - k / Math.max(1, arr.length - 1))) / axK;
+        t.textContent = axPre + (cand ? axisStep(at, rg / axK / Math.max(1, arr.length - 1)) : axisNum(at))
+          + ((!oneU || k === 0) ? axSuf : '');
       });
     var span = pts[pts.length - 1][0] - pts[0][0];
     allText.filter(function (t) { return yLab.indexOf(t) < 0; })
@@ -1237,27 +1246,20 @@
       copyBtn.setAttribute('data-copy', id);
       copyBtn.setAttribute('data-copy-label', 'Pool ID');
     }
-    // The explorer button opens the pool's DexScreener page -- the one public page per Rhea pool this
-    // build already reads (it is where the 24h volume comes from). A pool DexScreener does not carry has
-    // no such page, so the button is disabled rather than pointed at a guess.
+    // THE EXPLORER BUTTON GOES TO NEARBLOCKS, as the account page's does (RAZA 2026-11-07: "redirects to an incorrect
+    // destination"). A pool is an entry inside one contract, not an account, so NearBlocks has no page per pool; the
+    // page it does have is the pool contract's, the one every classic pool lives in.
     var exp = $('.ph-id button[data-tooltip="View on Explorer"]') || $('.ph-id button:not([data-copy])');
     if (exp && exp.parentNode) {
-      if (row.vol != null) {
-        var ea = document.createElement('a');
-        ea.href = 'https://dexscreener.com/near/refv1-' + encodeURIComponent(id);
-        ea.target = '_blank';
-        ea.rel = 'noopener nofollow';
-        ea.title = 'View on DexScreener';
-        ea.setAttribute('aria-label', 'View pool on DexScreener');
-        ea.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;color:inherit;text-decoration:none';
-        while (exp.firstChild) ea.appendChild(exp.firstChild);
-        exp.parentNode.replaceChild(ea, exp);
-      } else {
-        exp.disabled = true;
-        exp.title = 'No explorer page for this pool';
-        exp.style.opacity = '.4';
-        exp.style.cursor = 'default';
-      }
+      var ea = document.createElement('a');
+      ea.href = 'https://nearblocks.io/address/v2.ref-finance.near';
+      ea.target = '_blank';
+      ea.rel = 'noopener noreferrer';
+      ea.title = 'View on NearBlocks';
+      ea.setAttribute('aria-label', 'View the pool contract on NearBlocks');
+      ea.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;color:inherit;text-decoration:none';
+      while (exp.firstChild) ea.appendChild(exp.firstChild);
+      exp.parentNode.replaceChild(ea, exp);
     }
 
     // POOL PRICE: the second token per the first, the way the pair reads and the way Stellar's header does
@@ -1267,7 +1269,7 @@
     if (row.kind === 'SIMPLE_POOL' && T.length === 2 && a.amount > 0 && b.amount != null) paintRate(b.amount / a.amount, a, b);
 
     // LIQUIDITY: every reserve, the first as the headline and the rest beneath it in the same weight
-    // (Stellar's two-sided cell), then the pool's dollar value from the endpoint's own liquidity figure.
+    // (Stellar's two-sided cell). No line under them (RAZA 2026-11-07: "retaining only the direct constituent asset amounts").
     var liq = statCell('liquidity');
     if (liq && liq.querySelector('.v')) {
       unitVal(liq.querySelector('.v'), num(a.amount, 2), a.name);
@@ -1284,9 +1286,6 @@
           big2.appendChild(u2);
           ls.appendChild(big2);
         });
-        var usdLine = el('span', null, (USD && row.liq != null) ? (usdShort(row.liq * USD) + ' · ' + num(row.liq, 0) + ' NEAR') : '');
-        usdLine.style.cssText = 'font-size:11.5px;color:var(--text-muted);display:block;margin-top:2px';
-        ls.appendChild(usdLine);
       }
     }
 
@@ -1308,15 +1307,15 @@
     });
 
     // THE FOURTH STAT IS PARTICIPANTS, as on Stellar (RAZA 2026-11-05: "Replace the 4th metric card"). The count
-    // comes with the pool: lps is null when no one has counted this pool yet, which is an em dash and never a 0,
-    // and lpa 1 marks a count that is approximate.
+    // comes with the pool: lps is null when no one has counted this pool yet, which is an em dash and never a 0.
+    // The indexer's approximate flag (lpa) is not shown (RAZA 2026-11-07: "renders as a clean exact integer").
     var ap = $('.ph-stat.lx-partstat') || statCell('participant');
     if (ap) {
       var lab = ap.querySelector('.l');
       if (lab) lab.textContent = 'Participants';
       var av = ap.querySelector('.v');
       var lps = row.lps == null || !isFinite(row.lps) ? null : +row.lps;
-      if (av) av.textContent = lps == null ? '—' : ((+row.lpa === 1 ? '~' : '') + lps.toLocaleString('en-US'));
+      if (av) av.textContent = lps == null ? '—' : lps.toLocaleString('en-US');
       var as = ap.querySelector('.s');
       if (as) as.textContent = lps === 1 ? 'liquidity provider' : 'liquidity providers';
     }

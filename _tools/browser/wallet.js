@@ -525,8 +525,17 @@
       if (!t || !t.closest) return;
 
       var go = t.closest('[data-lxgo]');
+      // A Liq Pools row is a link as well, but its buttons keep their own jobs: the kebab has no data-lxgo of its
+      // own, so without this the row would swallow it.
+      if (go && go.tagName === 'TR' && t.closest('button, a')) go = null;
       if (go) {
-        if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
+        if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) {
+          if (go.tagName !== 'TR') return;                 // a <tr> is no link: the browser cannot do this for it
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          window.open(go.getAttribute('data-lxgo'), '_blank', 'noopener');
+          return;
+        }
         e.preventDefault();
         e.stopImmediatePropagation();
         window.location.href = go.getAttribute('data-lxgo');
@@ -568,7 +577,7 @@
       if (cpb) {
         e.preventDefault();
         e.stopImmediatePropagation();
-        copyText(cpb.getAttribute('data-iss') || '');
+        copyText(cpb.getAttribute('data-iss') || '', 'Issuer address copied');
         return;
       }
 
@@ -768,6 +777,7 @@
     var code = parts[0], iss = parts[1] || '';
     var m = document.createElement('div');
     m.className = 'row-menu open lx-rowmenu lx-trademenu';
+    m.setAttribute('data-lxnonav', '1');             // the global label bridge's opt-out, as on Stellar's menu
     m.__lxFor = btn;
     m.setAttribute('data-lxcode', code);
     m.setAttribute('data-lxiss', iss);
@@ -840,7 +850,7 @@
     if (what === 'view') {
       window.location.href = iss ? ('/trade/near/' + encodeURIComponent(iss)) : '/trade/near';
     } else if (what === 'copy') {
-      copyText(iss);
+      copyText(iss, 'Issuer address copied');
     } else if (what === 'explorer') {
       var target = iss || addr();
       if (target) window.open(EXPLORER_ACCT + encodeURIComponent(target), '_blank', 'noopener');
@@ -923,7 +933,7 @@
     return fmt(v, 6);
   }
 
-  function copyText(text) {
+  function copyText(text, said) {
     if (!text) return;
     function fallback() {
       var ta = document.createElement('textarea');
@@ -937,7 +947,7 @@
       if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).catch(fallback);
       else fallback();
     } catch (e) { fallback(); }
-    toast('Copied to clipboard');
+    toast(said || 'Copied to clipboard');
   }
 
   // Stellar's bottom-centre toast, the same element the rest of the site uses.
@@ -1811,7 +1821,7 @@
         }
 
         if (!offers.length) {
-          var d = el('div', 'lx-wcnote', 'No open orders on this account.');
+          var d = el('div', 'lx-wcnote', 'No open orders on the DEX');
           block.appendChild(d);
           reveal(block);
           return;
@@ -2034,10 +2044,14 @@
       });
       if (cnt[1]) cnt[1].textContent = String(n);
     }
-    function fmtAmt(v) {
-      if (v == null || !isFinite(v)) return '—';
-      if (v > 0 && v < 0.0001) return '<0.0001';
-      return v.toLocaleString('en-US', { maximumFractionDigits: v >= 1000 ? 0 : 4 });
+    // Stellar's amt(), as the Open Orders rows above print it (RAZA 2026-11-07: match Stellar's row).
+    function fmtAmt(v) { return (v == null || !isFinite(v)) ? '—' : orderAmt(v); }
+    // "0.30% fee tier · NEAR AMM", Stellar's sub-line. The fee is the pool's own (total_fee, in basis points), asked of
+    // the contract once per row; a pool that did not answer says only what is certain.
+    function feeLine(p) {
+      return C.callView('v2.ref-finance.near', 'get_pool', { pool_id: +p.id }).then(function (x) {
+        p.fee = x && x.total_fee != null ? (+x.total_fee / 100).toFixed(2) + '% fee tier · ' : '';
+      }, function () { p.fee = ''; });
     }
     function slug(syms) {
       return (syms || []).map(function (x) { return String(x || '').toLowerCase().replace(/[^a-z0-9]/g, ''); })
@@ -2048,7 +2062,7 @@
       var rows = res.rows || [];
       if (!rows.length) { empty(res.failed ? 'Could not read your positions — try again in a minute.' : 'No liquidity positions'); setCount(res.failed ? '—' : 0); return; }
       return Promise.all(rows.map(function (p) {
-        return Promise.all(p.ids.map(function (t) { return C.tokenMeta(t).catch(function () { return null; }); })).then(function (ms) {
+        return Promise.all(p.ids.map(function (t) { return C.tokenMeta(t).catch(function () { return null; }); }).concat(feeLine(p))).then(function (ms) {
           p.mine = p.ids.map(function (t, k) { var m = ms[k]; return m && m.d != null ? C.units(p.amounts[k], m.d) * p.fraction : null; });
           return p;
         });
@@ -2062,23 +2076,23 @@
           p.ids.slice(0, 2).forEach(function (t, i) {
             var ic = icos[i];
             if (!ic) return;
+            // Stellar's own mark, .lx-lpico painted from --ic with the letter in ::after: an <img> inside the design's
+            // disc sat 4px smaller inside its border than the row it was being compared with.
             ic.innerHTML = '';
+            ic.removeAttribute('style');
+            ic.classList.add('lx-lpico');
             ic.setAttribute('data-logoed', '1');
             var held = mk.filter(function (h) { return h && h.id === t; })[0];
             // An <img> src, so the site's own /assets/ path is fine too (LUMOS's curated logo is one).
             var own = held && /^\/assets\/[\w\/.-]+$/.test(String(held.logo || '')) ? held.logo : '';
             var src = t === WNEAR ? NEAR_LOGO : (own || (held && cssUrl(held.logo)) || cssUrl((C.ICONS || {})[t]) || '');
-            if (!src) { ic.textContent = String(p.syms[i] || '?').charAt(0).toUpperCase(); ic.style.background = hue(p.syms[i]); return; }
-            var im = document.createElement('img');
-            im.alt = '';
-            im.src = src;
-            im.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;border-radius:50%';
-            ic.appendChild(im);
+            ic.style.setProperty('--ic', src ? 'url("' + src + '")' : hue(p.syms[i]));
+            ic.setAttribute('data-l', src ? '' : String(p.syms[i] || '?').charAt(0).toUpperCase());
           });
           var nm = tr.querySelector('.lp-nm');
           if (nm) plain(nm, p.syms.join(' / '));
           var sb = tr.querySelector('.lp-sb');
-          if (sb) sb.textContent = 'Pool #' + p.id + (p.farm ? ' · farming' : '');
+          if (sb) { sb.textContent = (p.fee || '') + 'NEAR AMM' + (p.farm ? ' · farming' : ''); sb.title = 'Pool #' + p.id; }
           if (td[1]) {
             var s1 = td[1].querySelector('.p1'), s2 = td[1].querySelector('.p2');
             if (s1) s1.textContent = p.share > 0 && p.share < 0.01 ? '<0.01%' : p.share.toFixed(2) + '%';
@@ -2102,6 +2116,10 @@
             if (r2) r2.textContent = 'fees accrue into the pool';
           }
           var href = '/pools/near/' + slug(p.syms) + '/' + encodeURIComponent(p.id);
+          // THE ROW OPENS ITS POOL (RAZA 2026-11-07), as Stellar's does; claimRowActions leaves its buttons alone.
+          tr.setAttribute('data-pool', String(p.id));
+          tr.setAttribute('data-lxgo', href);
+          tr.style.cursor = 'pointer';
           var btns = tr.querySelectorAll('.qa-row-btn');
           if (btns[0]) { btns[0].innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Add'; btns[0].setAttribute('data-lxgo', href); }
           if (btns[1]) { btns[1].innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12"/></svg> Remove'; btns[1].setAttribute('data-lxgo', href + '?act=withdraw'); }
@@ -2122,6 +2140,55 @@
       setCount('—');
     });
   }
+  // ---- the My Assets search ------------------------------------------------------------------------
+  // Stellar's lxAssetFilter (RAZA 2026-11-07: searching "XRP" left GEAR / NEARLY on screen). It lived in lx-walletdata,
+  // stripped here, and the design's own wiring filters only its data-target, the assets table, so Liq Pools had none.
+  // Rows match on the identity cell alone: the whole row would match "1" in every figure. The observer is Stellar's
+  // too: these tables are rewritten by the painters, which drops the inline display set here.
+  function assetFilter() {
+    var box = $('.search-box.inline-filter'), inp = box && $('input', box);
+    if (!inp || inp.__lxnf) return;
+    inp.__lxnf = 1;
+    function bodyOf(t) { return t.querySelector('tbody') || t; }
+    function rowsOf(t) { var r = t.querySelectorAll('tbody tr'); return r.length ? r : t.querySelectorAll(':scope > tr'); }
+    function apply() {
+      var q = (inp.value || '').trim().toLowerCase();
+      ['#assetsTable', '#lpPanel'].forEach(function (sel) {
+        var t = $(sel);
+        if (!t) return;
+        var rows = rowsOf(t), shown = 0;
+        for (var i = 0; i < rows.length; i++) {
+          var r = rows[i];
+          if (r.getAttribute('data-lxempty')) continue;
+          var cell = r.querySelector('td');
+          var hit = !q || ((cell || r).textContent || '').toLowerCase().indexOf(q) >= 0;
+          r.style.display = hit ? '' : 'none';
+          if (hit) shown++;
+        }
+        var tb = bodyOf(t), msg = tb.querySelector('tr[data-lxempty]');
+        if (q && !shown) {
+          if (!msg) {
+            msg = document.createElement('tr');
+            msg.setAttribute('data-lxempty', '1');
+            var td = el('td');
+            td.colSpan = 12;
+            td.style.cssText = 'padding:22px 14px;text-align:center;color:var(--text-muted);font-size:13px';
+            msg.appendChild(td);
+            tb.appendChild(msg);
+          }
+          msg.firstChild.textContent = 'No asset matches “' + inp.value.trim() + '”.';     // typed text, never markup
+          msg.style.display = '';
+        } else if (msg) msg.style.display = 'none';
+      });
+    }
+    inp.addEventListener('input', apply);
+    ['#assetsTable', '#lpPanel'].forEach(function (sel) {
+      var t = $(sel), tb = t && bodyOf(t);
+      if (!tb) return;
+      try { new MutationObserver(function () { if ((inp.value || '').trim()) apply(); }).observe(tb, { childList: true }); } catch (e) {}
+    });
+  }
+
   // ---- the hero chart ------------------------------------------------------------------------------
   //
   // WHAT IT PLOTS: XRP/USD over the chosen timeframe. Not the account's portfolio value — and that is
@@ -2399,6 +2466,7 @@
       // The chart is NEAR's price, not this account's, so it is valid with no wallet connected.
       wireChart();
       clearMockBalances();
+      assetFilter();
     }
 
     var a = addr();

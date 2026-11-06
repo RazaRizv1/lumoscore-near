@@ -296,10 +296,14 @@
   // 1.0001^p raw token_y", token_x being the first of the two ids sorted -- the order the pool id names them in.
   var CREATE_FEE = 2000;                                     // 0.2%, the tier Rhea's main wNEAR pools use (USDC|wrap.near|2000)
   var CREATE_DEPOSIT = '100000000000000000000000';           // 0.1 NEAR, Rhea's own create_pool deposit
-  function planCreate(token, dec, priceNear) {
+  // Against NEAR unless a quote token is named (RAZA 2026-11-07: a limit between two other tokens needs that pair's own
+  // pool): priceNear is then the token's price in that quote, and the opening price the pair's current rate.
+  function planCreate(token, dec, priceNear, quote, decQ) {
     if (!(priceNear > 0) || dec == null) throw new Error('This token has no price to open an order-book pool at.');
-    var ids = [token, WNEAR].sort(), x = ids[0], y = ids[1];
-    var decX = x === WNEAR ? 24 : +dec, decY = y === WNEAR ? 24 : +dec;
+    var Q = quote || WNEAR, dq = quote ? decQ : 24;
+    if (dq == null) throw new Error('The quote token has no decimals.');
+    var ids = [token, Q].sort(), x = ids[0], y = ids[1];
+    var decX = x === Q ? +dq : +dec, decY = y === Q ? +dq : +dec;
     var px = x === token ? priceNear : 1 / priceNear;          // token_x priced in token_y, human units
     var point = getPointByPrice(feeToPointDelta(CREATE_FEE), px, Math.pow(10, decY) / Math.pow(10, decX));
     var at = pointToPrice(decX, decY, point);                  // what the pool will actually open at

@@ -14,7 +14,7 @@
 //
 // THE SIXTH COLUMN IS PARTICIPANTS, as on Stellar (RAZA 2026-11-05: "Replace APR table column with
 // PARTICIPANTS"). Rhea publishes no LP-holder count, so nearpools carries the pool indexer's: lps, null
-// until its background job reaches the pool, and lpa = 1 where the count is approximate. Participants,
+// until its background job reaches the pool. Participants,
 // volume and fees are null where nothing has a figure for the pool -- an em dash, never a zero.
 // Search filters the loaded rows (the endpoint returns every curated pool,
 // so there is no ledger-wide lookup to make); there is no deep walk; My Pools and Create Pool show their
@@ -136,10 +136,11 @@
     return (v == null || !isFinite(v)) ? '—' : Math.round(v).toLocaleString('en-US');
   }
 
-  // A pool's participants as the column and the phone card show them. "~" is a count the indexer could only
-  // approximate; null is a pool it has not reached yet, an em dash and never 0.
+  // A pool's participants as the column and the phone card show them. Null is a pool the indexer has not reached yet,
+  // an em dash and never 0. The indexer's approximate flag (lpa) is not shown (RAZA 2026-11-07: "strip or prevent
+  // leading tilde"): the column reads plain comma-formatted integers.
   function participants(p) {
-    return (p && p.lps != null) ? (p.lpa ? '~' : '') + count(p.lps) : '—';
+    return (p && p.lps != null) ? count(p.lps) : '—';
   }
 
   // A MONEY FIGURE, ABBREVIATED THE WAY STELLAR'S OVERVIEW ABBREVIATES ONE — "$5.32M", "$545.3K".
@@ -936,16 +937,17 @@
   // the counts arrive with the rows (lps), so nothing is left to fill in. Kept as a no-op so the render paths
   // that call it stay identical to the XRPL file.
   // The rows on screen that came from the baked list carry no count: asked of the indexer a page at a time, which also
-  // queues them with its holder job. Each row is asked once; a pool not reached yet stays an em dash.
+  // queues them with its holder job. So do rows the edge's cached list answered null for, as the job has filled in many
+  // since. Each row is asked once; a pool not reached yet stays an em dash.
   function fillParticipants(h, d, shown) {
-    var want = shown.filter(function (r) { return r.lps === undefined && !r.lpAsked; });
+    var want = shown.filter(function (r) { return r.lps == null && !r.lpAsked; });
     if (!want.length) return;
     want.forEach(function (r) { r.lpAsked = 1; });
     fetch('https://near-pool-indexer.usa282.workers.dev/lps?ids=' + want.map(function (r) { return r.id; }).join(','))
       .then(function (r) { return r.json(); })
       .then(function (x) {
         var hit = false;
-        want.forEach(function (r) { var v = x && x.ok && x.c[r.id]; if (v) { r.lps = v[0]; r.lpa = v[1]; hit = true; } });
+        want.forEach(function (r) { var v = x && x.ok && x.c[r.id]; if (v) { r.lps = v[0]; hit = true; } });
         if (hit && VIEW === d) renderPage(h, d, pageNo);
       }).catch(function () {});
   }

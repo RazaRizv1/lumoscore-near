@@ -63,6 +63,64 @@
     });
   }
 
+  // LUMOS'S 24H MOVE (RAZA 2026-11-07: every holding carries the badge but LUMOS). /lxapi/nearmarket takes the 24h change
+  // from DexScreener, which has no market for a pool this small, so the row's figure is null. The figure is still real:
+  // our own pool prices LUMOS, LUMOS in NEAR, so its dollar move is that ratio's move and NEAR's own, compounded. The
+  // ratio is read back 24h: today's reserves (get_pool) with the window's rows of the pool indexer undone, newest
+  // first. A swap's fee stays in the reserves, so its amounts undo it exactly; no swaps means no change in NEAR, and
+  // the badge is then NEAR's move, truly. Anything uncertain (an indexer behind the chain, a window past its 500 rows,
+  // a pool under a day old) is no figure: a blank, never a guess. Nothing is kept, so the next view asks again.
+  var OWN_POOL = { 'lumos.lumoscore.near': 9001 };
+  function ownChange(id, near24) {
+    var C = window.lxnCore, no = OWN_POOL[id], WN = 'wrap.near';
+    return Promise.all([
+      fetch('https://near-pool-indexer.usa282.workers.dev/pool?id=' + no + '&limit=500').then(function (r) { return r.json(); }),
+      C.view({ request_type: 'call_function', finality: 'final', account_id: 'v2.ref-finance.near',
+        method_name: 'get_pool', args_base64: btoa(JSON.stringify({ pool_id: no })) })
+    ]).then(function (r) {
+      var ix = r[0], res = r[1], rows = (ix && ix.ok && ix.rows) || null;
+      var bytes = (res && res.result) || [], txt = '';
+      for (var b = 0; b < bytes.length; b++) txt += String.fromCharCode(bytes[b]);
+      var pool = txt ? JSON.parse(txt) : null, ids = (pool && pool.token_account_ids) || [];
+      if (!rows || ids.indexOf(WN) < 0 || ids.indexOf(id) < 0) return null;
+      if (!(res.block_height - ix.upTo < 6000)) return null;        // about an hour behind: its silence proves nothing
+      var R = {};
+      ids.forEach(function (t, i) { R[t] = Number(pool.amounts[i]); });
+      var now = R[WN] / R[id], since = Date.now() - 86400000;
+      rows = rows.slice().sort(function (x, y) { return y.t - x.t; });
+      if (rows.length >= 500 && rows[rows.length - 1].t >= since) return null;
+      for (var i = 0; i < rows.length && rows[i].t >= since; i++) {
+        var x = rows[i];
+        if (x.kind === 'swap') {
+          if (R[x.ta] == null || R[x.tb] == null) return null;
+          R[x.ta] -= Number(x.aa); R[x.tb] += Number(x.ab);
+        } else {
+          var tk = (x.extra && x.extra.tokens) || [];
+          if (!tk.length) return null;
+          for (var k = 0; k < tk.length; k++) {
+            if (R[tk[k].t] == null) return null;
+            R[tk[k].t] += (x.kind === 'add' ? -1 : 1) * Number(tk[k].a);
+          }
+        }
+        if (!(R[WN] > 0) || !(R[id] > 0)) return null;
+      }
+      return (now / (R[WN] / R[id]) * (1 + near24 / 100) - 1) * 100;
+    });
+  }
+  function fillOwn() {
+    var near = data.t.NEAR, near24 = near ? near[1] : null;
+    if (near24 == null || !window.lxnCore) return;
+    ((window.__lxnData && window.__lxnData.held) || []).forEach(function (h) {
+      var row = data.t[h.id];
+      if (!OWN_POOL[h.id] || !row || row[1] != null) return;
+      ownChange(h.id, near24).then(function (v) {
+        if (v == null || !isFinite(v)) return;
+        row[1] = v;
+        apply();
+      }, function () {});
+    });
+  }
+
   // The two layouts the wallet paints into. Kept in one place so a change to either cannot leave the
   // other silently unfilled -- writing only the desktop one is the most repeated bug in this project.
   function targets() {
@@ -391,6 +449,7 @@
       }
       data = j;
       apply();
+      fillOwn();
 
       // ATTRIBUTION IS CALLED HERE TOO, not only from the end of apply().
       //

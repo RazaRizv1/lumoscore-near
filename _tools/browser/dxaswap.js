@@ -462,6 +462,17 @@
       S().feeReady(sides(p).pay === 'near' ? a.id : 'near').then(function (v) {
         FEE[sides(p).pay === 'near' ? a.id : 'near'] = v;
       });
+      // THE SWAP BUTTON SAYS "Swap" (RAZA 2026-11-07: "Lock the primary CTA button text"). A real click runs the repaint
+      // above BEFORE the design's Buy/Sell handler, which then writes "Place Sell Order" over it, so any text the
+      // design leaves on this button is put back. Connect wallet and the busy labels are setCta's to leave alone.
+      var ctaB = cta(p);
+      if (ctaB && !ctaB.__lxnCtaObs && window.MutationObserver) {
+        ctaB.__lxnCtaObs = new MutationObserver(function () {
+          if (busy || !/^Place /.test(ctaB.textContent || '')) return;
+          if (ctaB.getAttribute('data-lxgate') === '1') ctaB.textContent = 'Connect wallet'; else setCta(p);
+        });
+        ctaB.__lxnCtaObs.observe(ctaB, { childList: true, characterData: true, subtree: true });
+      }
       // lx-feemodal can rebuild its row after this runs; keep claiming it.
       if (!p.__lxnFeeObs && window.MutationObserver) {
         p.__lxnFeeObs = new MutationObserver(function () {
