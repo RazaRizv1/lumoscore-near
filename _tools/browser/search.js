@@ -116,6 +116,9 @@
     var svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><circle cx="20" cy="20" r="20" fill="hsl(' + h + ',60%,50%)"/><text x="20" y="26" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="800" font-size="15" fill="#fff">' + t + '</text></svg>';
     return 'data:image/svg+xml,' + encodeURIComponent(svg);
   }
+  // ANY TOKEN'S LOGO BY ITS CONTRACT (RAZA 2026-11-06: "its appears when typing but not on recent searches"): a recent
+  // stores no logo and only the curated list has one to give back, so an uncurated token came back as its letters.
+  function iconOf(i) { return 'https://near-pool-indexer.usa282.workers.dev/icon?v=2&t=' + encodeURIComponent(i); }
   function icoImg(src, code) {
     var box = el('div', 'sp-ico lx-spico-on');
     box.style.cssText = 'position:relative;overflow:hidden';
@@ -260,7 +263,7 @@
         if (!d || !d.ok || !d.rows) { delete WIDE[q]; return []; }
         return d.rows.filter(function (r) { return r && C.isAccountId(r.i); }).map(function (r) {
           return { i: r.i, n: C.cleanSym(r.n) || short(r.i), nm: C.cleanSym(r.nm), p: null, d: null, cur: false,
-            logo: 'https://near-pool-indexer.usa282.workers.dev/icon?v=2&t=' + encodeURIComponent(r.i) };
+            logo: iconOf(r.i) };
         });
       }, function () { delete WIDE[q]; return []; });
     WIDE[q] = p;
@@ -338,7 +341,7 @@
   function recToken(x) {
     var live = null;
     (TOKS || []).forEach(function (t) { if (t.i === x.i) live = t; });
-    return live || { i: x.i, n: x.n, nm: x.nm, logo: '', p: null, d: null, cur: false };
+    return live || { i: x.i, n: x.n, nm: x.nm, logo: iconOf(x.i), p: null, d: null, cur: false };
   }
   function recPaint(list) {
     var a = recGet();
@@ -425,8 +428,9 @@
       var pi = el('span', 'lx-pi lx-pi-' + (k ? 'b' : 'a'));
       var live = null;
       (TOKS || []).forEach(function (t) { if (t.i === x.i) live = t; });
-      var src = x.i === C.WNEAR ? C.NEAR_LOGO : (okUrl(x.logo) || (live && okUrl(live.logo)) || letterUri(x.s));
-      pi.style.backgroundImage = 'url("' + String(src).split('"').join('%22') + '")';
+      var src = x.i === C.WNEAR ? C.NEAR_LOGO : (okUrl(x.logo) || (live && okUrl(live.logo)) || (x.i ? iconOf(x.i) : letterUri(x.s)));
+      // The letters sit behind it: a token with no logo answers 404, which a background does not report.
+      pi.style.backgroundImage = 'url("' + String(src).split('"').join('%22') + '"), url("' + String(letterUri(x.s)).split('"').join('%22') + '")';
       ico.appendChild(pi);
     });
     a.appendChild(ico);
