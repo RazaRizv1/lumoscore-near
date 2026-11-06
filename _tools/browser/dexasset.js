@@ -1622,6 +1622,22 @@
     if (n.textContent !== text) n.textContent = text;
   }
 
+  // WHEN THE FEEDS REFUSE (RAZA 2026-11-06, FRAX: "Why isnt the chart of this trade-asset page loading"). GeckoTerminal
+  // and CoinGecko are asked by the visitor's own browser and allow a few calls a minute per IP, so a few token pages in a
+  // row leave the chart waiting on "busy". The pool indexer keeps every curated token's hourly price in its own database,
+  // so 1D and 1W draw from that at once, and the retries carry on: a real answer still replaces it. Asking also registers
+  // the token for those snapshots.
+  function pxSeries(d, days, vs) {
+    return fetch(IDX + '/prices?ids=' + encodeURIComponent(d.i)).then(function (r) { return r.json(); }).then(function (j) {
+      var tok = (j && j.ok && j.tok && j.tok[d.i]) || [], near = {}, from = Date.now() - days * 86400000, out = [];
+      ((j && j.near) || []).forEach(function (x) { near[x[0]] = x[1]; });
+      tok.forEach(function (x) {
+        var t = x[0] * 3600000, n = near[x[0]], v = vs === 'USD' ? x[1] : (n > 0 ? x[1] / n : 0);
+        if (t >= from && v > 0) out.push([t, v, v, v, v, NaN, x[1]]);
+      });
+      return out;
+    });
+  }
   function loadChart(asset, label, attempt) {
     var c = chartSvg();
     if (!c) return;
@@ -1649,6 +1665,14 @@
           if (unknown && !lastRawPts) chartNote("No price history yet. This token's pool is too new for the chart's price feed.");
           if (!hopeless && !lastRawPts) chartNote('The price feed did not answer. Reload the page to try again.');
           return;
+        }
+        if (!lastRawPts && at === 0 && (want === '1D' || want === '1W')) {
+          pxSeries(window.__lxnAssetData || {}, want === '1D' ? 1 : 7, vs).then(function (pts) {
+            if (gen !== chGen || lastRawPts || pts.length < 2) return;
+            pts = fitWindow(pts, want);
+            chartNote('');
+            drawChart(pts); paintOhlcStrip(pts); paintChartHead(pts); fitChartHeight();
+          }).catch(function () {});
         }
         if (!lastRawPts && at >= 1) chartNote('The price feed is busy — retrying…');
         setTimeout(function () {
@@ -2441,7 +2465,7 @@
         if (!j || !j.ok) throw new Error('down');
         (a[1] || []).forEach(function (b) {
           if ((j.rows || []).some(function (r) { return String(r.id) === b[0]; })) return;
-          j.rows.push({ id: b[0], liq: b[1], lps: null, lpa: 0, tokens: b[2].map(function (t) { return { i: t[0], s: t[1] }; }) });
+          j.rows.push({ id: b[0], liq: b[1], lps: null, lpa: 0, tokens: b[2].map(function (t) { return { i: t[0], s: t[1], logo: t[0] === WNEAR ? '' : IDX + '/icon?t=' + encodeURIComponent(t[0]) }; }) });
         });
         PL.list = mergePools(d, j); PL.err = false;
         poolsReady();

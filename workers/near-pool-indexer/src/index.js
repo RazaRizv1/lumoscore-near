@@ -415,10 +415,14 @@ async function lpBatch(db, v) {
   await db.batch(st);
   return { big: v.pool, finished: run + v.st, fail };
 }
-async function lpJob(env) {
+async function lpJob(env, bigTurn) {
   const db = env.DB, now = Date.now();
-  const open = await db.prepare('SELECT pool, list, pos, run, st, fail FROM lpv LIMIT 1').first();
-  if (open) return lpBatch(db, open);
+  // The two crons take turns (RAZA 2026-11-06: "most of the pools dont have anything in ... participants"): one minute
+  // carries on a big pool, the next reads the small ones, so a 4,000-account pool cannot hold up every pool behind it.
+  if (bigTurn) {
+    const open = await db.prepare('SELECT pool, list, pos, run, st, fail FROM lpv LIMIT 1').first();
+    return open ? lpBatch(db, open) : { big: 'none' };
+  }
   let spent = 0, done = 0;
   const due = await db.prepare('SELECT pool FROM lpn WHERE at < ?1 ORDER BY at LIMIT 12').bind(now - LP_EVERY_MS).all();
   for (const row of due.results || []) {
@@ -445,7 +449,7 @@ async function lpJob(env) {
         db.prepare('INSERT OR REPLACE INTO lpv (pool, list, pos, run, st, fail) VALUES (?1, ?2, 0, 0, ?3, 0)').bind(id, JSON.stringify(toRead), staked.size),
         db.prepare('UPDATE lpn SET n = COALESCE(n, ?1), a = CASE WHEN n IS NULL THEN 1 ELSE a END WHERE pool = ?2').bind(n + toRead.length, id),
       ]);
-      return { lp: done, parked: id, of: toRead.length };
+      continue;
     }
     {
       if (spent + toRead.length > LP_BUDGET) { await db.prepare('UPDATE lpn SET at = 0 WHERE pool = ?1').bind(id).run(); break; }
@@ -470,7 +474,8 @@ async function lps(url, env) {
   for (let i = 0; i < ids.length; i += 90) {
     const part = ids.slice(i, i + 90);
     const r = await db.prepare('SELECT pool, n, a FROM lpn WHERE pool IN (' + part.map((_, k) => '?' + (k + 1)).join(',') + ')').bind(...part).all();
-    for (const x of r.results || []) { have.add(x.pool); if (x.n != null) c[x.pool] = [x.n, x.a]; }
+    // A pool with liquidity has holders, so 0 only means none of them are on the lists we can read: unknown, not none.
+    for (const x of r.results || []) { have.add(x.pool); if (x.n) c[x.pool] = [x.n, x.a]; }
   }
   const add = ids.filter((id) => !have.has(id));
   if (add.length) {
@@ -598,6 +603,65 @@ async function tradeCounts(url, env) {
   return json({ ok: true, since: w ? w.first : now, c }, 120);
 }
 
+// ---- token logos ----------------------------------------------------------------------------------------------
+// RAZA 2026-11-06: "most of the pools arent even showing their logos". A token outside the curated list has its logo
+// only in its own contract's metadata, and 50 rows asking FastNEAR from a visitor's browser met 429 at once. So each
+// logo is read here once, kept in D1 for good and served as an image the browser then caches: the page writes one
+// <img src>, and no visitor spends an RPC call. Names and icons are attacker-held: only image types pass, and an SVG
+// is sent under a CSP that forbids everything, so it can only ever be a picture.
+const ICON_TYPES = /^data:(image[/](?:png|jpe?g|webp|gif|svg[+]xml))[;,]/i, ICON_MAX = 200000;
+function iconBytes(u) {
+  const m = ICON_TYPES.exec(u), c = u.indexOf(',');
+  if (!m || c < 0 || u.length > ICON_MAX) return null;
+  const head = u.slice(0, c), body = u.slice(c + 1);
+  try {
+    if (/;base64/i.test(head)) { const b = atob(body.replace(/[^A-Za-z0-9+/=]/g, '')); const o = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) o[i] = b.charCodeAt(i); return { type: m[1], o }; }
+    return { type: m[1], o: new TextEncoder().encode(decodeURIComponent(body)) };
+  } catch (e) { return null; }
+}
+// Launch sites store the icon as a bare IPFS hash (meme-cooking's Qm..., gra-fun's bafy....jpg), not an image, and the
+// original can be 800 KB. ipfs.io, dweb.link and w3s.link answer 429 at once; Filebase answers, and wsrv.nl resizes it to
+// 64px and caches it (1.2 KB, measured). A hash nobody pins any more times out, and the page keeps its letter.
+function ipfsUrl(u) {
+  const m = /^(?:ipfs:[/][/](?:ipfs[/])?)?(Qm[1-9A-HJ-NP-Za-km-z]{44}|baf[a-z2-7]{50,})(?:[./][A-Za-z0-9._/-]{1,80})?$/.exec(String(u || '').trim());
+  return m ? 'https://wsrv.nl/?url=ipfs.filebase.io/ipfs/' + m[1] + '&w=64&h=64&fit=cover&output=webp' : '';
+}
+// aurora is NEAR's bridged ETH and its contract publishes no icon at all.
+const ICON_KNOWN = { aurora: 'https://coin-images.coingecko.com/coins/images/279/large/ethereum.png' };
+async function icon(url, env) {
+  const t = String(url.searchParams.get('t') || '').trim().toLowerCase();
+  const none = (age) => new Response('', { status: 404, headers: { 'cache-control': 'public, max-age=' + age, 'access-control-allow-origin': '*' } });
+  if (!TOKEN_ID.test(t)) return none(86400);
+  if (ICON_KNOWN[t]) return Response.redirect(ICON_KNOWN[t], 302);
+  const db = env.DB;
+  const row = await db.prepare('SELECT u FROM icn WHERE t = ?1').bind(t).first();
+  let u = row ? row.u : null;
+  if (u === null) {
+    let m;
+    try {
+      const r = await rpc('query', { request_type: 'call_function', finality: 'final', account_id: t, method_name: 'ft_metadata', args_base64: 'e30=' });
+      m = JSON.parse(new TextDecoder().decode(new Uint8Array((r && r.result) || [])));
+    } catch (e) { return none(60); }                  // could not ask: not "no logo", so nothing is stored
+    u = String((m && m.icon) || '');
+    if (u.length > ICON_MAX) u = '';
+    if (!/^(data:image|https:)/i.test(u) && !ipfsUrl(u)) {   // publishes none we can use: DexScreener's image for it, if it has one
+      u = '';
+      try {
+        const d = await fetch('https://api.dexscreener.com/tokens/v1/near/' + encodeURIComponent(t), { headers: Object.assign({ accept: 'application/json' }, UA) });
+        const hit = d.ok ? ((await d.json()) || []).find((p) => p && p.info && p.info.imageUrl && String((p.baseToken || {}).address) === t) : null;
+        if (hit) u = String(hit.info.imageUrl);
+      } catch (e) {}
+    }
+    await db.prepare('INSERT OR REPLACE INTO icn (t, u) VALUES (?1, ?2)').bind(t, u).run();
+  }
+  if (/^https:[/][/]/i.test(u)) return Response.redirect(u, 302);
+  if (ipfsUrl(u)) return Response.redirect(ipfsUrl(u), 302);
+  const b = u ? iconBytes(u) : null;
+  if (!b) return none(604800);
+  return new Response(b.o, { headers: { 'content-type': b.type, 'cache-control': 'public, max-age=2592000', 'access-control-allow-origin': '*',
+    'x-content-type-options': 'nosniff', 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox" } });
+}
+
 // ---- read --------------------------------------------------------------------------------------------
 function json(body, maxAge) {
   return new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json; charset=utf-8',
@@ -641,7 +705,7 @@ export default {
       return;
     }
     if (event.cron !== '* * * * *') {                     // participants only: its own invocation, its own budget
-      ctx.waitUntil(lpJob(env).then((r) => console.log('lps', JSON.stringify(r)), (e) => console.error('lp job failed', e && e.message)));
+      ctx.waitUntil(lpJob(env, event.cron === '1-59/2 * * * *').then((r) => console.log('lps', JSON.stringify(r)), (e) => console.error('lp job failed', e && e.message)));
       ctx.waitUntil(netJob(env).then((r) => console.log('net', JSON.stringify(r)), (e) => console.error('net job failed', e && e.message)));
       return;
     }
@@ -657,6 +721,9 @@ export default {
     }
     if (url.pathname === '/who') {
       try { return await who(url, env); } catch (e) { return json({ ok: false, error: 'read failed' }, 0); }
+    }
+    if (url.pathname === '/icon') {
+      try { return await icon(url, env); } catch (e) { return new Response('', { status: 404 }); }
     }
     if (url.pathname === '/tradecounts') {
       try { return await tradeCounts(url, env); } catch (e) { return json({ ok: false, error: 'read failed' }, 0); }

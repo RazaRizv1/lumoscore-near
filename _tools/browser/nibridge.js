@@ -1619,14 +1619,15 @@
       }
       return '<span style="' + ST_CSS + '">Waiting for Wormhole’s guardians (~15 min)</span>';
     }
+    // A delivered transfer says nothing here, as on Stellar (RAZA 2026-11-06: "it says Delivered below the bridge. please
+    // remove it"). Only a row that still needs the reader's attention carries a line.
+    if (r.status === 'SUCCESS') return '';
     if (r.route === 'om') {
-      return '<span style="' + ST_CSS + '">' + (r.status === 'SUCCESS' ? 'Delivered' : r.status === 'FAILED' ? 'Failed'
-        : 'Omni is delivering it') + '</span>';
+      return '<span style="' + ST_CSS + '">' + (r.status === 'FAILED' ? 'Failed' : 'Omni is delivering it') + '</span>';
     }
     // WHAT THE HAND-OVER LINE PROMISES IS HERE (RAZA 2026-11-06): "its status is in Recent transactions"
     // needs a NEAR Intents row to carry one, and it carried none. A row follow() stopped watching a week
     // ago is left blank rather than still claiming to be delivering.
-    if (r.status === 'SUCCESS') return '<span style="' + ST_CSS + '">Delivered</span>';
     if (r.status === 'REFUNDED') return '<span style="' + ST_CSS + '">Refunded</span>';
     if (r.status === 'FAILED') return '<span style="' + ST_CSS + '">Failed</span>';
     if (r.status === 'INCOMPLETE_DEPOSIT') return '<span style="' + ST_CSS + '">Deposit incomplete — refundable</span>';
@@ -1992,8 +1993,11 @@
           }).catch(function () {});
         }
         record(r, src, dest, me, to);
-        say('Sent — confirming…');
-        poll(r.q.depositAddress, 0);
+        // THE SOURCE TRANSACTION ENDS THE PAGE'S PART (RAZA 2026-11-06: "you dont have to wait until the destination
+        // receives it"). The deposit is on NEAR and the solvers deliver with no help from here, so the form is let go at
+        // once and the Recent transactions row follows the delivery.
+        var place = placeLabel(destChain());
+        handOver(r.q.depositAddress, 'Your deposit is on NEAR and the rest happens without you. You can close this — it will still arrive at your ' + (place ? place + ' ' : '') + 'address.');
       })
       .catch(function (e) {
         busy = false;
@@ -2111,7 +2115,7 @@
   // WHERE IT HAS GOT TO. Omni until its relayers finish; Wormhole until the guardians sign (then it is the
   // reader's to claim) and on until a claim lands, from here or anywhere else. Every 20 s for an hour, and
   // resumed on the next visit for anything under a week old that has not finished. NEAR Intents joins them
-  // (RAZA 2026-11-06): once poll() has let the form go, its row keeps moving here.
+  // (RAZA 2026-11-06): once the form is let go, its row keeps moving here.
   var FOLLOWING = {};
   function follow(hash, tries) {
     var rec = txFind(hash);
@@ -2174,6 +2178,39 @@
   // amount it was quoted on. Same two clicks and 140ms as _cctp.js's lxBrResetWizard, through the design's own
   // .br-back buttons. The destination stays selected, as on Stellar; step 1 does not show the route panel.
   // Every caller is finished with the transfer, so busy ends here.
+  // THE SAME DIALOG STELLAR AND XRPL SHOW (RAZA 2026-11-06: "That's not how we show on Stellar and XRPL when cross-chain
+  // swap is confirmed"): their .lx-prog overlay on the bridge card, whose stylesheet this page already carries, in the
+  // state Stellar's lxBrProgUpdate leaves it once delivery begins. Everything is written with textContent.
+  function sentDialog(msg, bad) {
+    var host = $('.br-card');
+    if (!host) return;
+    var el = document.getElementById('lx-prog');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'lx-prog';
+      el.className = 'lx-prog';
+      el.setAttribute('data-logoed', '1');
+      el.innerHTML = '<div class="lx-prog-card"><div class="lx-prog-h"></div><ul class="lx-prog-list"></ul>'
+        + '<div class="lx-prog-msg"></div><button class="lx-prog-x" type="button">Done</button></div>';
+      host.appendChild(el);
+      el.querySelector('.lx-prog-x').addEventListener('click', function () { el.style.display = 'none'; });
+    }
+    var place = placeLabel(destChain()), list = el.querySelector('.lx-prog-list');
+    el.querySelector('.lx-prog-h').textContent = bad ? 'This transfer needs a look' : 'Sent — delivery is automatic';
+    el.querySelector('.lx-prog-msg').textContent = msg;
+    list.innerHTML = '';
+    list.style.display = bad ? 'none' : '';
+    if (!bad) [['Deposit from NEAR', 'done'], ['Deliver on ' + (place || 'the destination'), 'active']].forEach(function (x) {
+      var li = document.createElement('li'), dot = document.createElement('span'), a = document.createElement('span'),
+        b = document.createElement('span'), lab = document.createElement('span');
+      dot.className = 'lx-pdot'; a.className = 'lx-spin'; b.className = 'lx-tick'; lab.className = 'lx-plab';
+      lab.textContent = x[0];
+      dot.appendChild(a); dot.appendChild(b); li.appendChild(dot); li.appendChild(lab);
+      li.className = x[1];
+      list.appendChild(li);
+    });
+    el.style.display = 'flex';
+  }
   function resetAfterDelivery(msg, bad) {
     busy = false;
     try {
@@ -2194,7 +2231,7 @@
           if (b1) b1.click();
         } catch (_) {}
       }, 140);
-      if (msg) toast(msg, bad);
+      if (msg) sentDialog(msg, bad);
     } catch (e) {}
   }
   // send.js's toast, kept up longer: this one is a sentence the reader has to be able to finish.
@@ -2243,47 +2280,7 @@
     if (rec) follow(rec.hash, 0);
     resetAfterDelivery(msg, bad);
   }
-  // HOW "PROCESSING" OUTLIVED THE TRANSFER (RAZA 2026-11-06: "even after the cross-chain swap is done, it keeps
-  // showing processing"). Only this function writes that word and only its exits clear it, and it had two ways
-  // not to reach one: a status read that never settled ended the chain with busy still true, which froze the
-  // label and every repaint; and 40 tries is 40 timer ticks, which a browser stretches to minutes apiece once
-  // the tab is behind a wallet or an explorer. The 41st then re-armed "Bridge X" on the review step, for money
-  // already sent. So every read is bounded (niStatus), the wait is wall-clock as well as tries, a last read
-  // still happens after a stall, so a reader coming back to a delivered transfer is told so, and giving up ends
-  // on step 1. A read that failed only costs a slower retry.
-  var NI_READ_MS = 15000, NI_WAIT_MS = 180000, FOLLOW_MAX = 7 * 86400000;
-  function poll(dep, tries, t0) {
-    t0 = t0 || Date.now();
-    niStatus(dep).then(function (st) {
-      if (st === 'SUCCESS') {
-        say('Delivered'); mark(dep, st);
-        var rec = txList().filter(function (x) { return x && x.dep === dep; })[0];
-        var place = (rec && NI_CHAIN[rec.chain]) || '';
-        setTimeout(function () {
-          resetAfterDelivery('Delivered to your ' + (place ? place + ' ' : '') + 'address. There is nothing to claim.');
-        }, 5000);
-        return;
-      }
-      // The form stays for another try, as Stellar's does; the balance moves, because the money came back.
-      if (st === 'REFUNDED' || st === 'FAILED') {
-        say(st === 'REFUNDED' ? 'Refunded to your NEAR wallet' : 'Failed'); mark(dep, st);
-        try { loadBalances().then(paintSteps); } catch (_) {}
-        setTimeout(function () { busy = false; setCta(); }, 5000);
-        return;
-      }
-      if (st === 'INCOMPLETE_DEPOSIT') {
-        mark(dep, st);
-        handOver(dep, 'NEAR Intents reports the deposit as incomplete. It is refundable to your NEAR wallet — its status is in Recent transactions.', true);
-        return;
-      }
-      if (tries >= 40 || Date.now() - t0 > NI_WAIT_MS) {
-        handOver(dep, 'Your deposit went through and delivery continues on its own — its status is in Recent transactions.');
-        return;
-      }
-      say(st === 'PROCESSING' ? 'Processing…' : 'Confirming…');
-      setTimeout(function () { poll(dep, tries + 1, t0); }, st ? 4000 : 6000);
-    });
-  }
+  var NI_READ_MS = 15000, FOLLOW_MAX = 7 * 86400000;
   function mark(dep, st) {
     try {
       var list = JSON.parse(localStorage.getItem(TX_KEY) || '[]');

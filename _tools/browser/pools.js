@@ -64,7 +64,9 @@
   function logoOf(t) {
     if (!t) return '';
     if (t.logo) return t.logo;
-    return t.i === 'wrap.near' ? NEAR_LOGO : '';
+    if (t.i === 'wrap.near') return NEAR_LOGO;
+    // Any token without one, curated or not: the indexer serves what its contract publishes (RAZA 2026-11-06).
+    return t.i ? 'https://near-pool-indexer.usa282.workers.dev/icon?t=' + encodeURIComponent(t.i) : '';
   }
   function logoEl(name, logo, size) {
     var s = size || 32;
@@ -891,6 +893,7 @@
     buildPager(h, d, pages);
     if (!paged) wirePhoneGrow(h);
     fillParticipants(h, d, rows.slice(from, to));
+    fillVolume(h, d, rows.slice(from, to));
   }
 
   // Appends the next chunk when the reader nears the end of the list. APPENDS rather than re-renders:
@@ -1173,6 +1176,26 @@
       .catch(function () { noteHost(h, 'Pool data is unavailable right now.'); });
   }
 
+  // VOL AND FEES FOR THE ROWS THE BAKED LIST BROUGHT (RAZA 2026-11-06: "most of the pools dont have anything in Vol, Fees"),
+  // a page at a time. 0 is a real answer; a failed ask stays a dash and is asked again on the next visit to the page.
+  function fillVolume(h, d, shown) {
+    var want = shown.filter(function (r) { return r.vol === null && !r.volAsked && /^[0-9]+$/.test(String(r.id)); });
+    if (!want.length || !(USD > 0)) return;
+    want.forEach(function (r) { r.volAsked = 1; });
+    fetch('/lxapi/nearpoolvol?ids=' + want.map(function (r) { return r.id; }).join(','))
+      .then(function (r) { return r.json(); })
+      .then(function (x) {
+        if (!x || !x.ok) { want.forEach(function (r) { r.volAsked = 0; }); return; }
+        want.forEach(function (r) {
+          var v = x.c[r.id];
+          if (v == null) return;
+          r.vol = v / USD;
+          r.fees = r.fee != null ? r.vol * r.fee / 100 : null;
+        });
+        if (VIEW === d) renderPage(h, d, pageNo);
+      }).catch(function () { want.forEach(function (r) { r.volAsked = 0; }); });
+  }
+
   // EVERY LIVE POOL ON NEAR (RAZA 2026-11-06: "its supposed to show all the pools of near network"). The curated rows
   // paint first with live figures; the rest arrive from the whole-chain list baked at build (_tools/_nearpoolcounts.js)
   // and join behind them, which keeps a thousand small pools from holding the page. Their reserves are as of the build,
@@ -1190,7 +1213,10 @@
         if (seen[b[0]]) return;
         if (b[3] > 0) sum += b[3];
         add.push({ id: b[0], kind: b[1], fee: b[2] / 100, liq: b[3], vol: null, fees: null, apr: null, trades: null,
-          tokens: b[4].map(function (t) { return { i: t[0], s: t[1], v: t[2], logo: logos[t[0]] || '' }; }) });
+          tokens: b[4].map(function (t) {
+            // The indexer serves any token's own logo (RAZA 2026-11-06: "most of the pools arent even showing their logos").
+            return { i: t[0], s: t[1], v: t[2], logo: logos[t[0]] || (t[0] === 'wrap.near' ? '' : 'https://near-pool-indexer.usa282.workers.dev/icon?t=' + encodeURIComponent(t[0])) };
+          }) });
       });
       if (!add.length) return;
       var keep = pageNo;

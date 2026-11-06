@@ -1227,20 +1227,6 @@
         history.replaceState(history.state, '', want + location.search + location.hash);
     } catch (e) {}
     $$('.crumb a[data-lxback]').forEach(function (bk) { bk.setAttribute('href', '/pools/near'); });
-    // A POOL OUTSIDE THE CURATED LIST (reached from a search of all Rhea pools, or a shared link): it opens, as
-    // any Stellar pool does, but says plainly that LumosCore does not vouch for its tokens. A new Rhea pool can
-    // be a honeypot -- a token that cannot be sold back.
-    $$('.lx-uncurnote').forEach(function (n) { n.remove(); });
-    if (row.listed === false) {
-      $$('.pool-header').forEach(function (hd) {
-        var n = el('div', 'lx-uncurnote', 'Not curated by LumosCore. Check each token contract before trading or adding liquidity: '
-          + 'a token can be built so that it cannot be sold back.');
-        n.setAttribute('data-logoed', '1');
-        n.style.cssText = 'margin-top:14px;padding:10px 14px;border-radius:10px;font-size:13px;font-weight:600;line-height:1.45;'
-          + 'color:var(--warning,#f59e0b);background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25)';
-        hd.appendChild(n);
-      });
-    }
 
     // The pool's identity line: its Rhea id, which the copy button copies, and nothing else, as Stellar's reads
     // (RAZA 2026-11-05: "Remove extra metadata tags").
