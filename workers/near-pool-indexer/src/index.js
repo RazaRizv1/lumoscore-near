@@ -642,7 +642,8 @@ async function netstats(env) {
 // the first of them, marked ok = 2: right for a candle of an hour or more, not for a shorter one, which stays a gap.
 const TR_PAIRS = 'https://api.dexscreener.com/latest/dex/pairs/near/';
 const TR_GT = 'https://api.geckoterminal.com/api/v2/networks/near/pools/multi/';
-const TR_MS = 300000, TR_KEEP_MS = 30 * 86400000, TR_WATCH = 300;
+// 32 days: the whole of the chart's 1M range, whose oldest candle starts 30 days back and is read a day later.
+const TR_MS = 300000, TR_KEEP_MS = 32 * 86400000, TR_WATCH = 300, TR_DAY = 288, TR_DAY_MS = 86400000, TR_ROLL_KEEP = 1100;
 const TR_ID = /^[A-Za-z0-9._:-]{3,120}$/;
 // [[pool, trades in its last 5 minutes, in its last hour], ...] for up to 30 pools, or null when no source would answer.
 const trSaw = {};                                    // the last status from each source, for /status
@@ -657,6 +658,29 @@ async function trBatch(part) {
   const g = await get(TR_GT + encodeURIComponent(part.join(',')));
   if (!g) return null;
   return (g.data || []).map((p) => { const t = (p.attributes || {}).transactions || {}; return [(p.attributes || {}).address, sum(t.m5), sum(t.h1)]; });
+}
+// THE DAILY ROLLUP (RAZA 2026-11-07: "Trades 3,003 ... on old candles"). No free source has NEAR's past counts, so a day's
+// count must outlive its 5-minute windows or the 1Y chart would never fill in. One UTC day per run, the oldest not yet
+// rolled, an hour and ten after it closed so the rolling-hour repair has landed. A day counts only if all 288 windows
+// were read; one that was not is kept as ok 0 and reads as a gap for good. A pool first watched during the day has no
+// row for it. At most one meta read on most runs.
+async function trRoll(db, b) {
+  const row = await db.prepare("SELECT v FROM meta WHERE k = 'trroll'").first();
+  let d = row ? +row.v + 1 : null;
+  if (d == null) {
+    const h = await db.prepare('SELECT MIN(b) AS b FROM trr').first();
+    if (!h || h.b == null) return [];
+    d = Math.floor(h.b / TR_DAY);
+  }
+  if ((d + 1) * TR_DAY + 14 > b) return [];
+  const lo = d * TR_DAY, hi = lo + TR_DAY;
+  const n = await db.prepare('SELECT COUNT(*) AS n FROM trr WHERE b >= ?1 AND b < ?2 AND ok > 0').bind(lo, hi).first();
+  const ok = n && n.n === TR_DAY ? 1 : 0;
+  const st = [db.prepare('INSERT OR REPLACE INTO trm (d, ok) VALUES (?1, ?2)').bind(d, ok), setMeta(db, 'trroll', String(d)),
+    db.prepare('DELETE FROM trd WHERE d < ?1').bind(d - TR_ROLL_KEEP), db.prepare('DELETE FROM trm WHERE d < ?1').bind(d - TR_ROLL_KEEP)];
+  if (ok) st.push(db.prepare('INSERT OR REPLACE INTO trd (pool, d, n) SELECT c.pool, ?1, SUM(c.n) FROM trc c JOIN trw w ON w.pool = c.pool WHERE c.b >= ?2 AND c.b < ?3 AND w.first <= ?4 GROUP BY c.pool')
+    .bind(d, lo, hi, lo * TR_MS));
+  return st;
 }
 async function trJob(env) {
   // The window just closed: the sample is the five minutes before now, so its row belongs to their start.
@@ -695,13 +719,15 @@ async function trJob(env) {
     const old = Math.floor((now - TR_KEEP_MS) / TR_MS);
     st.push(db.prepare('DELETE FROM trc WHERE b < ?1').bind(old), db.prepare('DELETE FROM trr WHERE b < ?1').bind(old));
   }
+  st.push(...await trRoll(db, b));
   // The last run, read through /status: a run that fetched nothing must not look like a quiet five minutes.
   st.push(setMeta(db, 'trlast', JSON.stringify({ at: now, rows: st.length, good, bad, saw: trSaw })));
   await db.batch(st);
   return { tr: st.length, of: ids.length };
 }
 // GET /tradecounts?pool=&bucket=<ms>&from=<ms> -> { ok, since, c: { candleStartMs: trades }, gaps: [candleStartMs] }: a
-// candle in gaps holds a window no run read. Before since nothing is known. Asking registers the pool.
+// candle in gaps holds a window no run read. Before since nothing is known. Asking registers the pool. A bucket of a day
+// or more reads days older than the windows from the rollup; every other day there is a gap.
 async function tradeCounts(url, env) {
   const pool = String(url.searchParams.get('pool') || ''), bucket = +url.searchParams.get('bucket'), from = +url.searchParams.get('from') || 0;
   if (!TR_ID.test(pool) || !(bucket >= TR_MS)) return json({ ok: false, error: 'bad request' }, 0);
@@ -712,15 +738,28 @@ async function tradeCounts(url, env) {
   const c = {};
   for (const x of r.results || []) { const k = Math.floor(x.b * TR_MS / bucket) * bucket; c[k] = (c[k] || 0) + x.n; }
   const fromB = Math.floor(from / TR_MS), nowB = Math.floor(now / TR_MS);
-  const [runs, head] = await Promise.all([
+  const [runs, head, dayHead] = await Promise.all([
     db.prepare(bucket >= 3600000 ? 'SELECT b FROM trr WHERE ok > 0 AND b >= ?1 LIMIT 9000' : 'SELECT b FROM trr WHERE ok = 1 AND b >= ?1 LIMIT 9000').bind(fromB).all(),
-    db.prepare('SELECT MIN(b) AS b FROM trr').first()]);
+    db.prepare('SELECT MIN(b) AS b FROM trr').first(),
+    db.prepare('SELECT MIN(d) AS d FROM trm').first()]);
   // The first whole window both this pool and the coverage record were watching; with no record yet, nothing is known.
-  const headMs = head && head.b != null ? head.b * TR_MS : Infinity;
-  const startMs = Math.ceil(Math.max(w ? w.first : now, headMs) / TR_MS) * TR_MS;
+  // The rollup keeps that start once the oldest windows are pruned.
+  const heads = [head && head.b != null ? head.b * TR_MS : Infinity, dayHead && dayHead.d != null ? dayHead.d * TR_DAY_MS : Infinity];
+  const startMs = Math.ceil(Math.max(w ? w.first : now, Math.min(heads[0], heads[1])) / TR_MS) * TR_MS;
   const seen = new Set((runs.results || []).map((x) => x.b)), gaps = new Set();
+  // Days whose windows are gone: the first day the windows still hold whole. Only a bucket of a day or more reads them.
+  const firstKept = bucket >= TR_DAY_MS ? Math.floor((now - TR_KEEP_MS) / TR_DAY_MS) + 1 : 0;
+  if (firstKept && isFinite(startMs)) {
+    const fromD = Math.max(Math.floor(from / TR_DAY_MS), Math.ceil(startMs / TR_DAY_MS));
+    const [days, done] = await Promise.all([
+      db.prepare('SELECT d, n FROM trd WHERE pool = ?1 AND d >= ?2 AND d < ?3').bind(pool, fromD, firstKept).all(),
+      db.prepare('SELECT d FROM trm WHERE ok = 1 AND d >= ?1 AND d < ?2').bind(fromD, firstKept).all()]);
+    for (const x of days.results || []) { const k = Math.floor(x.d * TR_DAY_MS / bucket) * bucket; c[k] = (c[k] || 0) + x.n; }
+    const whole = new Set((done.results || []).map((x) => x.d));
+    for (let d = fromD; d < firstKept; d++) if (!whole.has(d)) gaps.add(Math.floor(d * TR_DAY_MS / bucket) * bucket);
+  }
   // nowB - 1 is the window this very cron is reading, and it has a whole candle's grace: a late run is not yet a gap.
-  if (isFinite(startMs)) for (let k = Math.max(fromB, startMs / TR_MS); k < nowB - 1; k++) {
+  if (isFinite(startMs)) for (let k = Math.max(fromB, startMs / TR_MS, firstKept * TR_DAY); k < nowB - 1; k++) {
     if (!seen.has(k)) gaps.add(Math.floor(k * TR_MS / bucket) * bucket);
   }
   return json({ ok: true, since: isFinite(startMs) ? startMs : now, c, gaps: [...gaps] }, 120);

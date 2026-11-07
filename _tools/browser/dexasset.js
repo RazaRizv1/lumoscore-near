@@ -986,8 +986,9 @@
   // "Aggregate correctly"): one that began before the record, or holds a window the sampler could not read (DexScreener
   // refused 46% of them: 154 of 286 on USDC's busiest pool), would be a partial sum, not the count, so it is a dash.
   // since and gaps come from the indexer; an older indexer sends no gaps, and with no coverage nothing is a count.
-  // TC_KEEP: the indexer drops windows after 30 days, so an older candle with no row is unknown, not 0.
-  var TC = { key: '', c: null, since: 0, ask: 0, gaps: null }, TC_EVEN = [300000, 900000, 3600000, 14400000, 86400000], TC_KEEP = 30 * 86400000;
+  // TC_KEEP: the indexer drops windows after 32 days, so an older shorter candle with no row is unknown, not 0. A day
+  // outlives that in the indexer's daily rollup, and its gaps say which days were complete.
+  var TC = { key: '', c: null, since: 0, ask: 0, gaps: null }, TC_EVEN = [300000, 900000, 3600000, 14400000, 86400000], TC_KEEP = 32 * 86400000;
   function loadCounts(bucket, t0, again) {
     var d = window.__lxnAssetData, pool = d && gtPool(d);
     if (!pool || !pool.id || !(bucket > 0)) return;
@@ -1012,7 +1013,7 @@
   }
   // The windows that start inside [t, t + bucket): one on a candle the record lines up with, each window in one candle.
   function recordedIn(t, bucket) {
-    if (!TC.c || !TC.gaps || !(bucket > 0) || t < TC.since || t < Date.now() - TC_KEEP) return null;
+    if (!TC.c || !TC.gaps || !(bucket > 0) || t < TC.since || (TC.ask < 86400000 && t < Date.now() - TC_KEEP)) return null;
     var b = TC.ask, n = 0;
     for (var k = Math.ceil(t / b) * b; k < t + bucket; k += b) {
       if (TC.gaps[k]) return null;

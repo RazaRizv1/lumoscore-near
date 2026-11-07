@@ -1166,33 +1166,37 @@
     if (!(Number(px) > 0)) { limSay(''); limGo(false, 'Place limit order'); return; }
     if (!ord) { limSay('That amount and price are too small to rest an order.'); limGo(false, 'Place limit order'); return; }
 
-    // THE ONE-TIME RHEA STORAGE, CHECKED BEFORE THE BUTTON LIGHTS (RAZA 2026-11-03): an account's first order
-    // needs 0.5 NEAR deposited with Rhea's DCL contract, which pays for keeping its orders on chain and can be
-    // withdrawn. It used to surface only after the press, as 'Not enough NEAR for this order and the storage'.
-    // Only while storage_balance_of says the account has none (lim.reg), and always in native NEAR, whatever is sold:
-    // the contract's storage_balance_bounds min is 0.5, and the 0.2 is SWAP_KEEP, what HOT refuses to sign below.
-    if (lim.regFor !== addr()) {
-      var regWho = lim.regFor = addr(); lim.reg = undefined;
-      D().registered(regWho).then(function (v) { if (lim.regFor === regWho) { lim.reg = v; limitSync(); } }, function () {});
+    // WHAT THIS ORDER NEEDS IN NATIVE NEAR, PART BY PART, FROM THE CHAIN (RAZA 2026-11-07: "Dynamic Fee Calculation"). All of
+    // it is paid in NEAR whatever is sold. 0.2 is SWAP_KEEP, what HOT refuses to sign below. Storage is read for this
+    // account on each pair (lim.reg: false none, or its balance; undefined, unread, claims nothing and the press re-reads):
+    // 0.5 is the contract's storage_balance_bounds min, once, or a 0.1 top-up when under one order's room. The opening is
+    // attached in full, so the wallet must hold it, though the contract sends about 0.09 back in the same transaction.
+    var regKey = addr() + '|' + pr.token.id + '|' + pr.quote.id;
+    if (lim.regFor !== regKey) {
+      lim.regFor = regKey; lim.reg = undefined;
+      D().storageOf(D().DCL, addr()).then(function (v) { if (lim.regFor === regKey) { lim.reg = v || false; limitSync(); } }, function () {});
     }
-    if (lim.reg === false && H.bal.near != null) {
-      var needN = S().big('500000000000000000000000') + S().big(S().SWAP_KEEP) + (ord.sell === D().WNEAR ? S().big(ord.spendRaw) : BigInt(0));
-      if (needN > S().big(H.bal.near)) {
-        limSay('Your first limit order needs ' + show(needN.toString(), 24, 4) + ' native NEAR: 0.5 order-book storage, withdrawable later, 0.2 for gas'
-          + (ord.sell === D().WNEAR ? ', and the order' : '') + '. You have ' + show(H.bal.near, 24, 4) + ' NEAR.');
-        limGo(false, 'Place limit order');
-        return;
-      }
+    var needR = S().big(S().SWAP_KEEP), parts = [];
+    if (lim.reg === false) {
+      needR += S().big('500000000000000000000000');
+      parts.push('0.5 first-time order-book storage');
+    } else if (lim.reg && S().big(lim.reg.available) < S().big(D().ORDER_STORAGE)) {
+      needR += S().big(D().STORAGE_TOPUP);
+      parts.push(show(D().STORAGE_TOPUP, 24, 4) + ' order-book storage top-up');
     }
-    // The opening, before the wallet: its deposit, the first-order storage and the order if it is NEAR, 0.2 NEAR kept for gas.
-    if (open && H.bal.near != null) {
-      var needO = S().big(openRaw) + S().big(S().SWAP_KEEP) + (lim.reg === false ? S().big('500000000000000000000000') : BigInt(0))
-        + (ord.sell === D().WNEAR ? S().big(ord.spendRaw) : BigInt(0));
-      if (needO > S().big(H.bal.near)) {
-        limSay('Opening this order book and placing the order needs ' + show(needO.toString(), 24, 4) + ' NEAR in this wallet, gas kept included. You have ' + show(H.bal.near, 24, 4) + ' NEAR.');
-        limGo(false, 'Place limit order');
-        return;
-      }
+    if (open) {
+      needR += S().big(openRaw);
+      parts.push(show(openRaw, 24, 4) + ' to open this pair’s book (mostly refunded)');
+    }
+    if (ord.sell === D().WNEAR) {
+      needR += S().big(ord.spendRaw);
+      parts.push(show(ord.spendRaw, 24, 4) + ' for the order');
+    }
+    parts.push('0.2 kept for gas');
+    if (H.bal.near != null && needR > S().big(H.bal.near)) {
+      limSay('Needs ' + show(needR.toString(), 24, 4) + ' native NEAR: ' + parts.join(', ') + '. You have ' + show(H.bal.near, 24, 4) + ' NEAR.');
+      limGo(false, 'Place limit order');
+      return;
     }
     var room = roomRaw(lim.s);
     if (room == null) { limSay(balWhy(lim.s) + '.'); limGo(false, 'Place limit order'); return; }
@@ -1229,15 +1233,20 @@
     limSay('');
     limGo(false, 'Checking storage…');
     function stop(text) { lim.busy = false; limitSync(); if (text) limSay(text); }
-    D().prereqs(who, ord).then(function (pre) {
+    // Asked of the chain once more at the press: someone may have opened this pair's pool since the pane read it.
+    (open ? D().poolFor(pr.token.id, isNear(pr.quote) ? null : pr.quote.id, pr.quote.dec) : Promise.resolve(null)).then(function (p) {
+      if (p) {
+        lim.pool = p; open = null;
+        ord = D().plan(p, pr.token.dec, pr.side, px, tokAmt);
+        if (!ord) throw new Error('That amount and price are too small to rest an order.');
+      }
+      return D().prereqs(who, ord);
+    }).then(function (pre) {
       return Promise.all([S().balance(who, 'near'), open ? D().buildCreate(who, open) : []]).then(function (got) {
-        var haveRaw = got[0], made = got[1], have = S().big(haveRaw), need = S().big(pre.storage);
+        var haveRaw = got[0], made = got[1], have = S().big(haveRaw), need = S().big(pre.storage) + S().big(S().SWAP_KEEP);
         if (ord.sell === D().WNEAR) need += S().big(ord.spendRaw);
-        if (open) {
-          need += S().big(S().SWAP_KEEP);
-          made.forEach(function (t) { t.actions.forEach(function (x) { need += S().big(x.params.deposit); }); });
-        }
-        if (need > have) throw new Error('Not enough NEAR for this order and the storage it needs (' + show(need.toString(), 24, 4) + ' NEAR).');
+        made.forEach(function (t) { t.actions.forEach(function (x) { need += S().big(x.params.deposit); }); });
+        if (need > have) throw new Error('Needs ' + show(need.toString(), 24, 4) + ' native NEAR, 0.2 kept for gas included. You have ' + show(String(haveRaw), 24, 4) + ' NEAR.');
         // Each transaction has one receiver, so opening and ordering are several, in this order, signed as one batch: the
         // wallet's single approval (neardcl.js sign). A wallet that sends them apart still sends the pool first.
         var txs = made.concat(D().buildPlace(who, ord, pre));
@@ -1256,6 +1265,7 @@
         return;
       }
       lim.busy = false;
+      lim.regFor = '';                                           // the deposit just landed, or the room just shrank
       toast('Limit order placed');
       reread();
       var ae = lEl('.lxq-amt'); if (ae) ae.value = '';

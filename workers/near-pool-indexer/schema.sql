@@ -30,6 +30,10 @@ CREATE TABLE IF NOT EXISTS trc (pool TEXT NOT NULL, b INTEGER NOT NULL, n INTEGE
 CREATE TABLE IF NOT EXISTS trw (pool TEXT PRIMARY KEY, first INTEGER NOT NULL, seen INTEGER NOT NULL);
 -- One row per sampling run, b = the window it read: ok 1 when every batch answered. No row, or ok 0: a window nobody saw.
 CREATE TABLE IF NOT EXISTS trr (b INTEGER PRIMARY KEY, ok INTEGER NOT NULL);
+-- Daily rollup of trc, kept after its windows are gone (trRoll). trm: each UTC day rolled, ok 1 = every window read.
+-- trd: that complete day's trades per pool, non-zero only. At most 300 rows a day, three years kept.
+CREATE TABLE IF NOT EXISTS trm (d INTEGER PRIMARY KEY, ok INTEGER NOT NULL) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS trd (pool TEXT NOT NULL, d INTEGER NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (pool, d)) WITHOUT ROWID;
 -- Token logos as the contract publishes them (icon()); u '' = the token publishes none.
 CREATE TABLE IF NOT EXISTS icn (t TEXT PRIMARY KEY, u TEXT NOT NULL);
 -- pools no list knows the holders of, worked through in liquidity order; lpc is who was found, recounted with the rest

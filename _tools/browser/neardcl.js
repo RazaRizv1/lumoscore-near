@@ -197,6 +197,8 @@
     });
     POOL[key] = p;
     p.catch(function () { if (POOL[key] === p) delete POOL[key]; });
+    // "No pool" is kept for no one: anybody can open one, a moment later (RAZA 2026-11-07: the requirement read per pair).
+    p.then(function (v) { if (!v && POOL[key] === p) delete POOL[key]; }, function () {});
     return p;
   }
   function describe(r, token, q, qd) {
