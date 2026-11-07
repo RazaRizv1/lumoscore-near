@@ -304,12 +304,10 @@
     var px = a ? (isNear(a) ? USD.near : USD[a.id]) : 0;
     if (!(amount > 0) || !(px > 0)) return '';
     var v = amount * px;
-    return '≈ $' + (v >= 1 ? v.toFixed(2) : v >= 0.01 ? v.toFixed(4) : v >= 0.001 ? v.toPrecision(2) : subZero(v));
-  }
-  // 0.0₆53, never "$5.3e-7" (RAZA 2026-11-07): the count of leading zeros as a subscript, pooldetail.js's subZero.
-  function subZero(v) {
-    var ex = v.toExponential(1).split('e'), zeros = -parseInt(ex[1], 10) - 1, SUB = '₀₁₂₃₄₅₆₇₈₉';
-    return '0.0' + String(zeros).split('').map(function (ch) { return SUB.charAt(+ch); }).join('') + ex[0].split('.').join('');
+    // Plain decimals to two significant digits, "$0.00000053" and "$0.0090", never an exponent (RAZA 2026-11-07).
+    if (v >= 1) return '≈ $' + v.toFixed(2);
+    if (v >= 0.01) return '≈ $' + v.toFixed(4);
+    return '≈ $' + v.toFixed(Math.min(20, 1 - Math.floor(Math.log(v) / Math.LN10)));
   }
   var CUR = [];
   function curated() { return CUR; }
@@ -545,7 +543,7 @@
     var my = ++spot.seq;
     var one;
     try { one = S().toUnits('1', f.dec); } catch (e) { return; }
-    S().quote(f.id, t.id, one).then(function (q) {
+    S().quote(f.id, t.id, one, function () { return my === spot.seq; }).then(function (q) {
       if (my !== spot.seq) return;
       var got = Number(S().fromUnits(q.out, t.dec));
       if (!(got > 0)) return;
@@ -566,7 +564,7 @@
     try { raw = S().toUnits(trunc(typed, f.dec), f.dec); } catch (e) { clearQuote(); return; }
     if (!raw || raw === '0') { clearQuote(); return; }
     setGo(false, 'Quoting…');
-    S().quote(f.id, t.id, raw).then(function (q) {
+    S().quote(f.id, t.id, raw, function () { return my === sw.seq; }).then(function (q) {
       if (my !== sw.seq) return;
       sw.quote = q;
       var out = $('#swapAmtOut'); if (out) plain(out, show(q.out, t.dec, 6));
@@ -612,7 +610,9 @@
       var out = $('#swapAmtOut'); if (out) plain(out, '');
       var det = $('#swapModal .lx-swapd'); if (det) det.style.display = 'none';
       showRate(spotTxt());
-      swapSay((e && e.noroute) ? ('No route between ' + f.code + ' and ' + t.code + ' on NEAR right now.') : ((e && e.message) || 'No quote right now.'));
+      // Busy after every quiet retry is a soft note; only a real "no route" is the red line (RAZA 2026-11-07).
+      if (e && e.busy) swapSay('Still waiting for NEAR. Try again in a moment.', true);
+      else swapSay((e && e.noroute) ? ('No route between ' + f.code + ' and ' + t.code + ' on NEAR right now.') : ((e && e.message) || 'No quote right now.'));
       setGo(false, 'Swap');
     });
   }
@@ -1169,6 +1169,8 @@
     // THE ONE-TIME RHEA STORAGE, CHECKED BEFORE THE BUTTON LIGHTS (RAZA 2026-11-03): an account's first order
     // needs 0.5 NEAR deposited with Rhea's DCL contract, which pays for keeping its orders on chain and can be
     // withdrawn. It used to surface only after the press, as 'Not enough NEAR for this order and the storage'.
+    // Only while storage_balance_of says the account has none (lim.reg), and always in native NEAR, whatever is sold:
+    // the contract's storage_balance_bounds min is 0.5, and the 0.2 is SWAP_KEEP, what HOT refuses to sign below.
     if (lim.regFor !== addr()) {
       var regWho = lim.regFor = addr(); lim.reg = undefined;
       D().registered(regWho).then(function (v) { if (lim.regFor === regWho) { lim.reg = v; limitSync(); } }, function () {});
@@ -1176,9 +1178,8 @@
     if (lim.reg === false && H.bal.near != null) {
       var needN = S().big('500000000000000000000000') + S().big(S().SWAP_KEEP) + (ord.sell === D().WNEAR ? S().big(ord.spendRaw) : BigInt(0));
       if (needN > S().big(H.bal.near)) {
-        limSay('Your first limit order on NEAR needs 0.5 NEAR of order-book storage, plus 0.2 NEAR kept for gas'
-          + (ord.sell === D().WNEAR ? ' and the order itself' : '') + '. The order book holds the 0.5 to keep your orders on chain; you can withdraw it later. You have '
-          + show(H.bal.near, 24, 4) + ' NEAR.');
+        limSay('Your first limit order needs ' + show(needN.toString(), 24, 4) + ' native NEAR: 0.5 order-book storage, withdrawable later, 0.2 for gas'
+          + (ord.sell === D().WNEAR ? ', and the order' : '') + '. You have ' + show(H.bal.near, 24, 4) + ' NEAR.');
         limGo(false, 'Place limit order');
         return;
       }

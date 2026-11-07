@@ -389,9 +389,9 @@
       else if (!ok && has && has.parentNode) has.parentNode.removeChild(has);
     });
   }
-  // THE LINE UNDER THE NAME (RAZA 2026-11-07, ticket 296): Stellar prints the issuer's home domain, and the nearest true
-  // thing here is the curated list's website (/lxapi/nearmarket's w). A token with none shows its contract, shortened:
-  // a name like "gear.near" would be invented. The copy button beside it still copies the contract.
+  // THE LINE UNDER THE NAME (RAZA 2026-11-07, tickets 296 and 304): Stellar's .lx-hd domain, then .lx-iss, then the copy
+  // button. Its home domain's nearest true thing here is the curated list's website (/lxapi/nearmarket's w). A token with
+  // none has an empty .lx-hd, which the sheet hides: a name like "gear.near" would be invented.
   var DOM = {};
   function domainOf(u) {
     try {
@@ -400,12 +400,40 @@
       return x.hostname.indexOf('www.') === 0 ? x.hostname.slice(4) : x.hostname;
     } catch (e) { return ''; }
   }
-  function issuerText(id) { return DOM[id] || short(id); }
   function applyDomains() {
     [].forEach.call(document.querySelectorAll('[data-lxdom]'), function (e) {
-      var t = issuerText(e.getAttribute('data-lxdom'));
-      if (e.textContent !== t) e.textContent = t;
+      var t = DOM[e.getAttribute('data-lxdom')] || '';
+      if (e.textContent !== t) { e.textContent = t; e.title = t; }
     });
+  }
+  // Shared by the table row and the phone's card; claimRowActions serves the copy button on both.
+  function issuerLine(name, tok) {
+    var asb = el('span', 'lx-asb');
+    asb.setAttribute('data-vk', name + '|' + tok.id);
+    // One line at any width: Stellar's sheet lets this wrap, and "tinkerunion.com" dropped the contract onto a second
+    // line and made its row twice as tall. A long domain gives way instead; its hover has it whole.
+    asb.style.cssText = 'display:inline-flex;align-items:center;gap:7px;flex-wrap:nowrap;max-width:100%;min-width:0';
+    var hd = el('span', 'lx-hd', DOM[tok.id] || '');
+    hd.setAttribute('data-lxdom', tok.id);
+    hd.setAttribute('data-logoed', '1');
+    hd.title = DOM[tok.id] || '';
+    hd.style.cssText = 'flex:0 1 auto;min-width:0;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+    asb.appendChild(hd);
+    var iss = el('span', 'lx-iss', short(tok.id));
+    iss.setAttribute('data-logoed', '1');
+    iss.title = tok.id;
+    iss.style.flex = 'none';
+    iss.style.whiteSpace = 'nowrap';
+    asb.appendChild(iss);
+    var cp = el('button', 'lx-isscopy');
+    cp.type = 'button';
+    cp.setAttribute('data-iss', tok.id);
+    cp.setAttribute('aria-label', 'Copy issuer address');
+    cp.title = 'Copy issuer address';
+    cp.innerHTML = ICON_COPY;
+    cp.style.flex = 'none';
+    asb.appendChild(cp);
+    return asb;
   }
   market().then(function (d) {
     if (!d) return;
@@ -448,23 +476,11 @@
     // `.b2`, and the actions carry their icons and a third, icon-only button.
     var sb = el('div', 'sb');
     if (!tok) {
-      sb.appendChild(el('span', 'lx-asb-t', 'NEAR Protocol · native'));
+      var nat = el('span', 'lx-asb-t', 'NEAR Protocol · native');
+      nat.style.whiteSpace = 'nowrap';
+      sb.appendChild(nat);
     } else {
-      var asb = el('span', 'lx-asb');
-      asb.setAttribute('data-vk', name + '|' + tok.id);
-      var iss = el('span', 'lx-iss', issuerText(tok.id));
-      iss.setAttribute('data-lxdom', tok.id);
-      iss.setAttribute('data-logoed', '1');
-      iss.title = tok.id;
-      asb.appendChild(iss);
-      var cp = el('button', 'lx-isscopy');
-      cp.type = 'button';
-      cp.setAttribute('data-iss', tok.id);
-      cp.setAttribute('aria-label', 'Copy token contract');
-      cp.title = 'Copy token contract';
-      cp.innerHTML = ICON_COPY;
-      asb.appendChild(cp);
-      sb.appendChild(asb);
+      sb.appendChild(issuerLine(name, tok));
     }
     meta.appendChild(sb);
     aid.appendChild(meta);
@@ -1034,8 +1050,8 @@
     // about every holding. Same rule, same node shape, so applyTicks() reaches both.
     markVerified(nr, tok);
     meta.appendChild(nr);
-    var csub = el('div', 'asset-sub', tok ? issuerText(tok.id) : (sub || ''));
-    if (tok) csub.setAttribute('data-lxdom', tok.id);
+    var csub = el('div', 'asset-sub', tok ? null : (sub || ''));
+    if (tok) csub.appendChild(issuerLine(name, tok));
     meta.appendChild(csub);
     top.appendChild(meta);
     var bal = el('div', 'asset-balance-block');
@@ -1084,7 +1100,9 @@
       + '#assetList .asset-row .qa-row-btn.icon-only{flex:0 0 38px;width:38px;padding:8px 0}'
       // Same red trash glyph the desktop row gets, which is scoped to #assetsTable over there.
       + '#assetList .asset-row .qa-row-btn.lx-rmtrust svg{stroke:var(--red,#ea3943)}'
-      + '#assetList .asset-row .qa-row-btn svg{width:15px;height:15px;flex:0 0 auto}';
+      + '#assetList .asset-row .qa-row-btn svg{width:15px;height:15px;flex:0 0 auto}'
+      // A card has 142px beside the balance at 375: the domain whole, or the contract, with the copy button either way.
+      + '#assetList .lx-hd:not(:empty)~.lx-iss{display:none}';
     document.head.appendChild(st);
   }
 

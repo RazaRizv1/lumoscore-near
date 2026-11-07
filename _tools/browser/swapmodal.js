@@ -329,7 +329,7 @@
     paintQuote(P);
     setCta(P);
     var f = from, t = to;
-    S().quote(f.id, t.id, raw).then(function (x) {
+    S().quote(f.id, t.id, raw, function () { return my === seq; }).then(function (x) {
       if (my !== seq) return;
       x.ok = true;
       q = x;
@@ -377,7 +377,12 @@
     if (!m || busy) return;
     var old = $('.lxw-astmenu');
     if (old) { var same = old.__side === side; old.parentNode.removeChild(old); if (same) return; }
-    (side === 'from' ? heldList() : curatedList()).then(function (list) {
+    // The tick (RAZA 2026-11-07, ticket 305) is Send's: a contract on the curated list, wNEAR, and the coin itself. The
+    // list is /lxapi/nearmarket's on both pages and both sides; if it could not be read, no row claims a tick.
+    Promise.all([side === 'from' ? heldList() : curatedList(), curatedList()]).then(function (got) {
+      var list = got[0], V = { near: 1 };
+      V[S().WNEAR] = 1;
+      got[1].forEach(function (a) { V[a.id] = 1; });
       var other = side === 'from' ? to : from;
       list = list.filter(function (a) { return !other || a.id !== other.id; });
       if (!list.length) return;
@@ -399,8 +404,15 @@
           + 'justify-content:center;font-size:10px;font-weight:800;background:linear-gradient(135deg,#2a2a35,#1a1a23)';
         icon(ic, a);
         var nm = document.createElement('span');
-        nm.style.cssText = 'flex:1;font-weight:700';
+        nm.style.cssText = 'flex:1;font-weight:700;display:inline-flex;align-items:center;gap:4px';
         plain(nm, a.code);
+        if (V[a.id]) {
+          var vt = document.createElement('span');
+          vt.className = 'lx-am-vt';
+          vt.title = 'Curated on LumosCore';
+          vt.innerHTML = '<svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+          nm.appendChild(vt);
+        }
         r.appendChild(ic); r.appendChild(nm);
         r.addEventListener('click', function (e) {
           e.preventDefault(); e.stopPropagation();

@@ -233,13 +233,15 @@
     setCta(p);
     var have = bal.raw[s.pay];
     say(p, me() && have != null ? short(p, raw, have) : '');
-    S().quote(s.pay, s.get, raw).then(function (qq) {
+    S().quote(s.pay, s.get, raw, function () { return my === seq; }).then(function (qq) {
       if (my !== seq) return;
       applyQuote(p, qq);
     }, function (e) {
       if (my !== seq) return;
       clearQuote(p);
-      say(p, (e && e.message) || 'Could not get a quote right now.');
+      // Busy after every quiet retry is a soft note; only a real refusal is the red line.
+      if (e && e.busy) say(p, 'Still waiting for NEAR. Try again in a moment.', true);
+      else say(p, (e && e.message) || 'Could not get a quote right now.');
     });
   }
 

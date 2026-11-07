@@ -68,7 +68,7 @@
   var USDC = '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1';
   var USDT = 'usdt.tether-token.near';
   var HUBS = [WNEAR, USDC, USDT];                     // the token two-hop routes pass through
-  var RPC = 'https://free.rpc.fastnear.com';
+  var RPCS = ['https://free.rpc.fastnear.com', 'https://near.drpc.org'];
   var TGAS = '000000000000';
   var MAX_TX_GAS = 300;                               // TGas per transaction
   // THE SWAP CALL GETS 180 TGas, NOT "WHATEVER IS LEFT UP TO 300". The transaction used to add up to exactly
@@ -102,31 +102,73 @@
   }
 
   // ---- reads -----------------------------------------------------------------------------------------
+  // A BUSY RPC IS NOT A DEAD ROUTE (RAZA 2026-11-07: "NEAR is busy right now" on AURORA to ZEC). A quote between two
+  // tokens with no shared pool is 13 to 30 view calls, all at once, on one free host from the visitor's own IP: calm
+  // it answers in a second, and a 429 on a few of them read as a failed quote. So: at most RPC_MAX at a time; a host
+  // that refuses cools off and the other takes over; three tries each with growing pauses; and after RPC_TRIP calls
+  // have failed outright within 10s, no more are sent for 8s, so a real outage cannot become a retry storm.
+  var RPC_MAX = 4, RPC_TRIP = 6, rpcLive = 0, rpcWait = [], rpcCool = [0, 0], rpcFails = 0, rpcRecent = [], rpcOpenAt = 0;
+  function rpcSlot() {
+    return new Promise(function (res) {
+      if (rpcLive < RPC_MAX) { rpcLive++; res(); } else rpcWait.push(res);
+    });
+  }
+  function rpcFree() {
+    var next = rpcWait.shift();
+    if (next) next(); else rpcLive--;
+  }
+  function rpcHost() {
+    var now = Date.now();
+    if (now >= rpcCool[0]) return 0;
+    if (now >= rpcCool[1]) return 1;
+    return rpcCool[0] <= rpcCool[1] ? 0 : 1;
+  }
+  function rpcFailed() {
+    var now = Date.now();
+    rpcFails++;
+    rpcRecent = rpcRecent.filter(function (t) { return now - t < 10000; });
+    rpcRecent.push(now);
+    if (rpcRecent.length >= RPC_TRIP) { rpcOpenAt = now + 8000; rpcRecent = []; }
+  }
   function view(params, attempt) {
-    var ctl = null;
-    try { ctl = new AbortController(); } catch (e) {}
-    var timer = setTimeout(function () { try { ctl && ctl.abort(); } catch (e) {} }, 15000);
-    return fetch(RPC, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 'lxs', method: 'query', params: params }),
-      signal: ctl ? ctl.signal : undefined
-    }).then(function (r) {
-      clearTimeout(timer);
-      if (r.status === 429 || r.status >= 500) { var e1 = new Error('NEAR RPC busy (' + r.status + ')'); e1.transient = 1; throw e1; }
-      return r.json();
-    }, function (e) {
-      clearTimeout(timer);
-      var e0 = new Error((e && e.name === 'AbortError') ? 'NEAR did not answer in time' : 'NEAR RPC unreachable');
-      e0.transient = 1; throw e0;
-    }).then(function (j) {
-      var err = j && j.error;
-      if (err) { var e = new Error(String((err.cause && err.cause.name) || err.message || 'RPC error')); e.code = (err.cause && err.cause.name) || ''; throw e; }
-      if (j && j.result && j.result.error) { var e2 = new Error(String(j.result.error)); e2.code = 'CALL'; throw e2; }
-      return j.result;
+    attempt = attempt || 0;
+    if (Date.now() < rpcOpenAt) { var shut = new Error('NEAR RPC busy'); shut.transient = 1; rpcFails++; return Promise.reject(shut); }
+    return rpcSlot().then(function () {
+      var at = rpcHost(), ctl = null;
+      try { ctl = new AbortController(); } catch (e) {}
+      var timer = setTimeout(function () { try { ctl && ctl.abort(); } catch (e) {} }, 8000);
+      return fetch(RPCS[at], {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 'lxs', method: 'query', params: params }),
+        signal: ctl ? ctl.signal : undefined
+      }).then(function (r) {
+        clearTimeout(timer);
+        if (r.status === 429 || r.status >= 500) { var e1 = new Error('NEAR RPC busy (' + r.status + ')'); e1.transient = 1; throw e1; }
+        return r.json();
+      }, function (e) {
+        clearTimeout(timer);
+        var e0 = new Error((e && e.name === 'AbortError') ? 'NEAR did not answer in time' : 'NEAR RPC unreachable');
+        e0.transient = 1; throw e0;
+      }).then(function (j) {
+        var err = j && j.error;
+        if (err) {
+          var e = new Error(String((err.cause && err.cause.name) || err.message || 'RPC error'));
+          e.code = (err.cause && err.cause.name) || '';
+          if (/timeout|too many|rate limit|overload|unavailable|no_synced/i.test(e.message)) e.transient = 1;
+          throw e;
+        }
+        if (j && j.result && j.result.error) { var e2 = new Error(String(j.result.error)); e2.code = 'CALL'; throw e2; }
+        return j.result;
+      }).then(function (v) { rpcFree(); return v; }, function (e) {
+        rpcFree();
+        if (e && e.transient) rpcCool[at] = Date.now() + 3000 * (attempt + 1);
+        throw e;
+      });
     }).catch(function (e) {
-      if (!(e && e.transient) || (attempt || 0) >= 2) throw e;
-      return new Promise(function (r) { setTimeout(r, 700 + 900 * (attempt || 0)); })
-        .then(function () { return view(params, (attempt || 0) + 1); });
+      if (!(e && e.transient)) throw e;
+      if (attempt >= 2) { rpcFailed(); throw e; }
+      return new Promise(function (r) { setTimeout(r, 500 * (attempt + 1) + Math.random() * 300); })
+        .then(function () { return view(params, attempt + 1); });
     });
   }
   function callView(contract, method, args) {
@@ -209,7 +251,7 @@
       });
       offP[id].catch(function () { delete offP[id]; });         // a failure is not an answer
     }
-    return offP[id].catch(function () { return []; });
+    return offP[id].catch(function () { rpcFails++; return []; });
   }
   function poolsBetween(rows, a, b, k) {
     return rows.filter(function (r) {
@@ -263,6 +305,8 @@
     return p;
   }
 
+  function busyErr() { var e = new Error('NEAR is busy right now. Try again in a moment.'); e.busy = 1; return e; }
+
   // THE TWO-HOP ROUTE WHEN THE LEGS LIVE ON DIFFERENT CONTRACTS (RAZA 2026-11-05: AURORA -> QTC read "No route between
   // AURORA and QTC on NEAR right now"). AURORA's market is a classic pool (5469, AURORA/wNEAR, $60K) and QTC has no
   // classic pool at all, only DCL (QTC/wNEAR 1%, QTC/USDC 0.2%), so poolsBetween found no second leg and DCL was only
@@ -308,7 +352,7 @@
     return chain.then(function () {
       if (whole && split && big(split.out) * BigInt(100) > big(whole.out) * BigInt(101)) return split;
       // "No route" only from pools that answered: a busy RPC says so instead.
-      if (!whole && !split && asked.failed) throw new Error('NEAR is busy right now. Try again in a moment.');
+      if (!whole && !split && asked.failed) throw busyErr();
       return whole || split;
     });
   }
@@ -318,7 +362,8 @@
   function route(fromId, toId, amtRaw) {
     var a = contractOf(fromId), b = contractOf(toId);
     if (a === b) return Promise.resolve(null);
-    return pools().then(function (cur) {
+    var fails0 = rpcFails;                                     // a read that failed under this route can hide a pool
+    return pools().catch(function () { throw busyErr(); }).then(function (cur) {
       return Promise.all([poolsWith(cur, a), poolsWith(cur, b)]).then(function (x) { return cur.concat(x[0], x[1]); });
     }).then(function (rows) {
       var tries = [];
@@ -353,6 +398,9 @@
         if (d && (!best || big(d.out) * BigInt(100) > big(best.out) * BigInt(101))) best = d;
         return best || hubRoute(rows, a, b, amtRaw);
       });
+    }).then(function (r) {
+      if (!r && rpcFails !== fails0) throw busyErr();          // "no route" only when every read answered
+      return r;
     });
   }
   // The same pools, re-asked hop by hop (spot price and the final refresh use this). A split route's second leg
@@ -365,7 +413,24 @@
 
   // THE QUOTE. amountRaw is what the user pays; Rhea receives amountRaw - fee, and every output figure is
   // for that net amount. Price impact = execution vs spot, spot being the same route quoted at a tiny size.
-  function quote(fromId, toId, amountRaw) {
+  // A BUSY ANSWER IS ASKED AGAIN, QUIETLY: three more rounds over about 14 seconds, while the caller's button says
+  // "Quoting…". e.noroute is an answer and is not. live(), when given, is the caller's "is this still the amount on
+  // screen?": once it is not, the rounds stop, so only the latest typed amount spends RPC calls.
+  function quote(fromId, toId, amountRaw, live) {
+    var at = 0;
+    function go() {
+      return quoteOnce(fromId, toId, amountRaw).catch(function (e) {
+        if (!(e && e.busy) || at >= 3 || (live && !live())) throw e;
+        var wait = [1500, 4000, 8000][at++];
+        return new Promise(function (res) { setTimeout(res, wait); }).then(function () {
+          if (live && !live()) throw e;
+          return go();
+        });
+      });
+    }
+    return go();
+  }
+  function quoteOnce(fromId, toId, amountRaw) {
     var fee = feeOf(amountRaw);
     var net = (big(amountRaw) - big(fee)).toString();
     if (big(net) <= BigInt(0)) return Promise.reject(new Error('That amount is too small to swap.'));

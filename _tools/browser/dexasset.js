@@ -1027,7 +1027,8 @@
     var rec = recordedIn(p[0], S.bucket);
     if (rec != null) return rec.toLocaleString('en-US');
     var v = +p[5];
-    return (isFinite(v) && !(v > 0)) ? '0' : '—';
+    // RAZA 2026-11-07: a candle before the record began can never be known, so it has no Trades row rather than a dash.
+    return (isFinite(v) && !(v > 0)) ? '0' : null;
   }
   function tipEl(cls, text) {
     var e = el('div', cls, text);
@@ -1095,10 +1096,13 @@
         tip.appendChild(row);
       }
       // Trades in this candle (RAZA 2026-11-01: "I don't see the number of trades"), Stellar's row under Volume.
-      var trow = el('div', 'lxrow');
-      trow.appendChild(tipEl('l', 'Trades'));
-      trow.appendChild(tipEl('p', tradesTxt(p, S, inUsd, usdPerXrp)));
-      tip.appendChild(trow);
+      var trTxt = tradesTxt(p, S, inUsd, usdPerXrp);
+      if (trTxt != null) {
+        var trow = el('div', 'lxrow');
+        trow.appendChild(tipEl('l', 'Trades'));
+        trow.appendChild(tipEl('p', trTxt));
+        tip.appendChild(trow);
+      }
       tip.style.opacity = 1;
       var tw = tip.offsetWidth, th = tip.offsetHeight, tx = lx + 14;
       if (tx + tw > hr.width) tx = lx - tw - 14;
@@ -1549,6 +1553,7 @@
           return Promise.all(jobs).then(function (r) {
             var pts = bucketise(r[0], vs === 'USD' ? null : r[1], R.days);
             if (pts.length < 2) throw new Error('short');
+            pts.stopgap = 1;                                     // chartUpgrade: real candles replace it when they come
             return pts;
           });
         });
@@ -1610,7 +1615,9 @@
     var end = Math.max(Date.now(), pts[pts.length - 1][0]), start = end - win;
     var prev = null, inside = [];
     for (var k = 0; k < pts.length; k++) { if (pts[k][0] < start) prev = pts[k]; else inside.push(pts[k]); }
-    var flat = function (t, p) { return [t, p[1], p[1], p[1], p[1], 0, p[6], 0, p[8] != null ? 0 : undefined]; };
+    // A flat point in a series that carries volume is a true quiet stretch; in one without (CoinGecko's) it says nothing.
+    var quiet = (isFinite(pts[0][5]) || pts[0][8] != null) ? 0 : NaN;
+    var flat = function (t, p) { return [t, p[1], p[1], p[1], p[1], quiet, p[6], quiet, p[8] != null ? 0 : undefined]; };
     var seq = prev ? [flat(start, prev)].concat(inside) : inside;
     if (seq.length < 2) { FIT = { t0: pts[0][0], t1: pts[pts.length - 1][0], bucket: bucket }; return pts; }
     var out = [seq[0]];
@@ -1664,6 +1671,21 @@
       return out;
     });
   }
+  // THE VOLUME ROW AND BARS COME BACK (RAZA 2026-11-07, Oct 20 on 1M: Price, then Trades, no Volume). A refused
+  // GeckoTerminal call leaves CoinGecko's line, which has no candle volume to bind, and it used to stay that way until
+  // the reader changed range. Asked twice more, quietly; the chart is redrawn only if this range is still on screen.
+  function chartUpgrade(want, vs, gen, at) {
+    if (at >= 2) return;
+    setTimeout(function () {
+      var d = window.__lxnAssetData;
+      if (gen !== chGen || !d) return;
+      gtSeries(d, CH_SRC[want] || CH_SRC['1D'], vs, want).then(function (pts) {
+        if (gen !== chGen || pts.length < 2) return;
+        pts = fitWindow(pts, want);
+        drawChart(pts); paintOhlcStrip(pts); paintChartHead(pts); fitChartHeight();
+      }, function () { chartUpgrade(want, vs, gen, at + 1); });
+    }, [20000, 60000][at]);
+  }
   function loadChart(asset, label, attempt) {
     var c = chartSvg();
     if (!c) return;
@@ -1674,6 +1696,7 @@
     seriesFor(want, vs)
       .then(function (pts) {
         if (gen !== chGen) return;                       // a later range or unit button won
+        if (pts.stopgap) chartUpgrade(want, vs, gen, 0);
         pts = fitWindow(pts, want);
         chartNote('');
         drawChart(pts); paintOhlcStrip(pts); paintChartHead(pts); fitChartHeight();
