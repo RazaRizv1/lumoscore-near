@@ -304,7 +304,12 @@
     var px = a ? (isNear(a) ? USD.near : USD[a.id]) : 0;
     if (!(amount > 0) || !(px > 0)) return '';
     var v = amount * px;
-    return '≈ $' + (v >= 1 ? v.toFixed(2) : v >= 0.01 ? v.toFixed(4) : v.toPrecision(2));
+    return '≈ $' + (v >= 1 ? v.toFixed(2) : v >= 0.01 ? v.toFixed(4) : v >= 0.001 ? v.toPrecision(2) : subZero(v));
+  }
+  // 0.0₆53, never "$5.3e-7" (RAZA 2026-11-07): the count of leading zeros as a subscript, pooldetail.js's subZero.
+  function subZero(v) {
+    var ex = v.toExponential(1).split('e'), zeros = -parseInt(ex[1], 10) - 1, SUB = '₀₁₂₃₄₅₆₇₈₉';
+    return '0.0' + String(zeros).split('').map(function (ch) { return SUB.charAt(+ch); }).join('') + ex[0].split('.').join('');
   }
   var CUR = [];
   function curated() { return CUR; }
@@ -579,9 +584,7 @@
       // prints it verbatim. Wrapping it read "≈ ~0.003 NEAR NEAR".
       detail('net', S().NET_FEE_EST);
       detail('min', show(q.min, t.dec, 6) + ' ' + t.code);
-      // Two swaps, not one (nearswap.js viaHub): said before the press, because the second can fail on its own.
-      if (q.split) swapSay('This pair swaps in two steps through ' + q.split.code + ', two approvals. If the second step fails, you keep the ' + q.split.code + '.', true);
-      else if (q.impact != null && q.impact >= 1) swapSay('Price impact ' + fmtNum(q.impact, 2) + '% — this trade moves the pool.', true);
+      if (q.impact != null && q.impact >= 1) swapSay('Price impact ' + fmtNum(q.impact, 2) + '% — this trade moves the pool.', true);
       else swapSay('');
       // EVERY MONEY CHECK THE PRESS WILL MAKE AGAIN, including the one that cannot be made: an unknown
       // balance keeps the button down and says which it is, rather than offering a press that fails at
@@ -845,19 +848,11 @@
   function limSay(text) { var e = lEl('.lxq-err'); if (e) e.textContent = text || ''; }
   function limNote(text) { var n = lEl('.lxq-note'); if (n) n.textContent = text || ''; }
   function limGo(on, label) {
-    var b = lEl('.lxq-go:not(.lxq-make)');
+    var b = lEl('.lxq-go');
     if (!b) return;
     if (on && lim.busy) on = false;
     if (label) b.textContent = label;
     b.disabled = !on;
-  }
-  // The pair's Create action, the Trade page's on any two tokens. Beside Place, which stays disabled while it shows.
-  function limMake(show, label) {
-    var b = lEl('.lxq-make');
-    if (!b || lim.busy) return;
-    b.style.display = show ? '' : 'none';
-    b.disabled = !show;
-    if (label) b.textContent = label;
   }
   // Which side is the token, and which the quote the price is written in. NEAR is the quote whenever it is
   // on the pair, as ever; between two other tokens, the one being sold is priced in the one being bought.
@@ -887,7 +882,6 @@
       + '<span><span class="lxq-unit"></span> <button type="button" class="lxq-mkt">MARKET</button></span></div>'
       + '<div class="lxq-lin"><input class="lxq-in lxq-price" type="text" inputmode="decimal" placeholder="0.00"></div></div>'
       + '<div class="lxq-note"></div><div class="lxq-err"></div>'
-      + '<button type="button" class="lxq-go lxq-make" style="display:none;margin-bottom:8px">Create order-book pool</button>'
       + '<button type="button" class="lxq-go" disabled>Place limit order</button></div>';
     noAuto(lEl('.lxq-amt'));
     noAuto(lEl('.lxq-price'));
@@ -960,7 +954,6 @@
         });
         return;
       }
-      if (t.closest('.lxq-make')) { e.preventDefault(); e.stopImmediatePropagation(); limitCreate(); return; }
       if (t.closest('.lxq-go')) { e.preventDefault(); e.stopImmediatePropagation(); placeLimit(); return; }
       if (!t.closest('.lxq-menu')) closeMenus();
     }, true);
@@ -1010,11 +1003,12 @@
     if (pe) pe.value = v >= 1 ? trunc(String(v), 6) : plainNum(+v.toPrecision(6));
     limitSync();
   }
-  // Fills an EMPTY price with the rate, and keeps the rate for the Create action. A rate that could not be had is not kept.
+  // Fills an EMPTY price with the rate, and keeps the rate to open the pair's pool at. lim.rate 0 is "asked, no rate".
   function limFill(pr, key) {
     limRate(pr).then(function (r) {
-      if (lim.poolFor !== key || !(r > 0)) return;
-      lim.rate = r; lim.rateFor = key;
+      if (lim.poolFor !== key) return;
+      lim.rate = r > 0 ? r : 0; lim.rateFor = key;
+      if (!(r > 0)) { limitSync(); return; }
       var pe = lEl('.lxq-price');
       if (pe && !String(pe.value || '').trim()) limPrice(r); else limitSync();
     });
@@ -1026,45 +1020,18 @@
     try { return D().planCreate(pr.token.id, pr.token.dec, lim.rate, isNear(pr.quote) ? null : pr.quote.id, pr.quote.dec); } catch (e) { return null; }
   }
 
-  // The pool, created in the connected wallet (dxalimit.js createPool); then the pair is asked for again and the pane
-  // becomes a normal Limit pane.
-  function limitCreate() {
-    if (lim.busy) return;
-    var pr = limPair(), who = addr(), cp = pr && limPlan(pr), b = lEl('.lxq-make');
-    if (!cp) return;
-    if (!who) { connect(); return; }
-    lim.busy = true;
-    limSay('');
-    if (b) { b.disabled = true; b.textContent = 'Checking…'; }
-    function stop(text) {
-      lim.busy = false;
+  // NEAR the opening will attach, the token registrations included: read once a pair, and only an answer is kept.
+  function limOpenCost(pr, cp) {
+    var key = pr.token.id + '|' + pr.quote.id;
+    if (lim.openFor === key) return;
+    lim.openFor = key; lim.openRaw = null;
+    D().buildCreate(addr() || 'lumoscore.near', cp).then(function (txs) {
+      if (lim.openFor !== key) return;
+      var sum = BigInt(0);
+      txs.forEach(function (t) { t.actions.forEach(function (x) { sum += S().big(x.params.deposit); }); });
+      lim.openRaw = sum.toString();
       limitSync();
-      if (text) limSay(text);
-    }
-    D().buildCreate(who, cp).then(function (txs) {
-      return S().balance(who, 'near').then(function (have) {
-        var need = S().big(S().SWAP_KEEP);
-        txs.forEach(function (t) { t.actions.forEach(function (x) { need += S().big(x.params.deposit); }); });
-        if (S().big(have) < need) {
-          throw new Error('Creating the pool needs ' + show(need.toString(), 24, 4) + ' NEAR in this wallet, the rest kept for gas, and it has ' + show(String(have), 24, 4) + ' NEAR.');
-        }
-        return txs;
-      });
-    }).then(function (txs) {
-      if (b) b.textContent = 'Confirm in wallet…';
-      return D().sign(txs);
-    }).then(function (res) {
-      var last = res && res[res.length - 1], st = last && last.status;
-      if (st && st.Failure) { stop('Creating the pool failed on chain. Check your wallet activity.'); return; }
-      D().forget(pr.token.id, isNear(pr.quote) ? null : pr.quote.id);
-      lim.pool = undefined; lim.poolFor = '';
-      lim.busy = false;
-      toast('Order-book pool created for ' + pr.token.code + ' / ' + pr.quote.code);
-      limitPool();
-    }).catch(function (e) {
-      var msg = (e && e.message) || '';
-      stop(e && e.lxnWallet ? D().walletErr(e, 'created') : (msg || 'The pool could not be created.'));
-    });
+    }, function () { if (lim.openFor === key) lim.openFor = ''; });
   }
 
   // The pool behind the chosen pair. A definite answer (pool or none) is kept for the pair; a failed read
@@ -1108,7 +1075,6 @@
       bv.textContent = !lim.s ? '—' : (r == null ? '—' : (show(r, lim.s.dec, 6) + ' ' + lim.s.code));
     }
 
-    limMake(false);
     var pr = limPair();
     var unit = lEl('.lxq-unit');
     if (unit) unit.textContent = pr ? ((isNear(pr.quote) ? 'NEAR' : pr.quote.code) + ' per ' + pr.token.code) : '';
@@ -1161,26 +1127,29 @@
     }
     if (lim.pool === undefined) { limNote('Checking for a ' + pr.token.code + ' / ' + pr.quote.code + ' pool…'); limSay(''); limGo(false, 'Place limit order'); return; }
     // A classic pool is not an order-book pool: "there is no LUMOS / NEAR pool" read false beside LUMOS/wNEAR 9001 (RAZA 2026-11-04).
-    // NOT AN ERROR, AND NOT A HOP (RAZA 2026-11-07: "Suppress the blocking pool error"). A limit order rests in one DCL
-    // pool and nothing here keeps watch to carry it through wNEAR, so a pair with no pool cannot take one; the numbers
-    // above still work out, the note is calm, and the one real way forward is offered: this pair's own pool.
+    // ONE PRESS OPENS THE BOOK AND PLACES THE ORDER (RAZA 2026-11-07: "Remove Order-Book Creation UI"). A limit order rests
+    // in the pair's own DCL pool and nothing here can carry it through wNEAR, so a pair with no pool gets one, at the
+    // current rate, in the same wallet approval as the order (placeLimit); the row below says so before anyone signs.
+    // With no rate there is nothing honest to open it at, and the pair cannot take an order.
+    var open = null, askedRate = lim.rateFor === pr.token.id + '|' + pr.quote.id;
     if (lim.pool === null) {
-      var plan = limPlan(pr), qc = isNear(pr.quote) ? 'NEAR' : pr.quote.code;
-      limSay('');
-      limNote(pr.token.code + ' / ' + qc + ' has no order-book pool yet, and a limit order rests in the pair’s own pool. '
-        + (plan ? 'Creating one costs about 0.1 NEAR and opens it at ' + fmtNum(plan.opensAt, plan.opensAt < 1 ? 10 : 6) + ' ' + qc + ', the current rate. ' : '')
-        + 'The Swap tab can trade this pair now.');
-      limMake(!!plan, 'Create order-book pool');
-      limGo(false, 'Place limit order');
-      return;
+      open = limPlan(pr);
+      if (!open) {
+        limSay('');
+        limNote(askedRate ? 'This pair has no market rate to open an order book at.' : 'Reading this pair’s market rate…');
+        limGo(false, 'Place limit order');
+        return;
+      }
+      limOpenCost(pr, open);
     }
+    var book = lim.pool || open.book;
 
     // The tick the order really rests at, and -- since NEAR limit orders carry the LumosCore fee (RAZA
     // 2026-11-01; neardcl.js) -- what that fee is, because it comes on top of the amount typed.
     var bits = [];
     var ord = null;
     if (tokAmt && Number(tokAmt) > 0) {
-      try { ord = D().plan(lim.pool, pr.token.dec, pr.side, px, tokAmt); } catch (e) { ord = null; }
+      try { ord = D().plan(book, pr.token.dec, pr.side, px, tokAmt); } catch (e) { ord = null; }
       if (ord && ord.rests > 0) {
         bits.push('Filled when 1 ' + pr.token.code + ' reaches ' + fmtNum(ord.rests, ord.rests < 1 ? 10 : 6) + ' NEAR (the pool’s nearest tick).');
       }
@@ -1188,7 +1157,9 @@
       if (ord && ord.feeBps > 0) bits.push('Trading fee ' + (ord.feeBps / 100) + '%: ' + show(ord.feeRaw, lim.s.dec, 7) + ' ' + lim.s.code + ', on top of the amount.');
     }
     // RAZA 2026-11-03: no note under the price ("Filled when … Trading fee …"); the wallet shows the fee transfer.
-    limNote('');
+    // The one row: what opening costs, attached in full, most of it sent straight back (neardcl.js CREATE_DEPOSIT).
+    var openRaw = open ? (lim.openFor === pr.token.id + '|' + pr.quote.id && lim.openRaw) || open.deposit : null;
+    limNote(open ? 'Opens this pair’s order book · ' + show(openRaw, 24, 4) + ' NEAR, about 0.09 refunded' : '');
 
     if (!addr()) { limSay(''); limGo(true, 'Connect wallet'); return; }
     if (!(Number(amt) > 0)) { limSay(''); limGo(false, 'Place limit order'); return; }
@@ -1212,6 +1183,16 @@
         return;
       }
     }
+    // The opening, before the wallet: its deposit, the first-order storage and the order if it is NEAR, 0.2 NEAR kept for gas.
+    if (open && H.bal.near != null) {
+      var needO = S().big(openRaw) + S().big(S().SWAP_KEEP) + (lim.reg === false ? S().big('500000000000000000000000') : BigInt(0))
+        + (ord.sell === D().WNEAR ? S().big(ord.spendRaw) : BigInt(0));
+      if (needO > S().big(H.bal.near)) {
+        limSay('Opening this order book and placing the order needs ' + show(needO.toString(), 24, 4) + ' NEAR in this wallet, gas kept included. You have ' + show(H.bal.near, 24, 4) + ' NEAR.');
+        limGo(false, 'Place limit order');
+        return;
+      }
+    }
     var room = roomRaw(lim.s);
     if (room == null) { limSay(balWhy(lim.s) + '.'); limGo(false, 'Place limit order'); return; }
     if (S().big(ord.spendRaw) > S().big(room)) {                    // the order plus its fee
@@ -1226,25 +1207,39 @@
   function placeLimit() {
     if (lim.busy) return;
     var pr = limPair(), who = addr();
-    if (!pr || !who || !lim.pool) return;
+    var open = pr && lim.pool === null ? limPlan(pr) : null, book = lim.pool || (open && open.book);
+    if (!pr || !who || !book) return;
     var amt = String((lEl('.lxq-amt') || {}).value || '').trim();
     var px = String((lEl('.lxq-price') || {}).value || '').trim();
     var ord = null;
     // The same conversion limitSync makes: "You sell" is the sold asset, the planner wants the token amount.
     var A = Number(amt), P = Number(px);
     var tokAmt = (A > 0 && P > 0) ? (pr.side === 'sell' ? amt : trunc(plainNum(A / P), pr.token.dec)) : '';
-    try { ord = D().plan(lim.pool, pr.token.dec, pr.side, px, tokAmt); } catch (e) { ord = null; }
+    try { ord = D().plan(book, pr.token.dec, pr.side, px, tokAmt); } catch (e) { ord = null; }
     if (!ord) { limSay('That amount and price are too small to rest an order.'); return; }
+    // The pair's pool is now the chain's to say: asked again, whatever came of the batch.
+    function reread() {
+      if (!open) return;
+      D().forget(pr.token.id, isNear(pr.quote) ? null : pr.quote.id);
+      lim.pool = undefined; lim.poolFor = '';
+      limitPool();
+    }
     lim.busy = true;
     limSay('');
     limGo(false, 'Checking storage…');
     function stop(text) { lim.busy = false; limitSync(); if (text) limSay(text); }
     D().prereqs(who, ord).then(function (pre) {
-      return S().balance(who, 'near').then(function (haveRaw) {
-        var have = S().big(haveRaw), need = S().big(pre.storage);
+      return Promise.all([S().balance(who, 'near'), open ? D().buildCreate(who, open) : []]).then(function (got) {
+        var haveRaw = got[0], made = got[1], have = S().big(haveRaw), need = S().big(pre.storage);
         if (ord.sell === D().WNEAR) need += S().big(ord.spendRaw);
-        if (need > have) throw new Error('Not enough NEAR for this order and the storage it needs (' + show(pre.storage, 24, 4) + ' NEAR).');
-        var txs = D().buildPlace(who, ord, pre);
+        if (open) {
+          need += S().big(S().SWAP_KEEP);
+          made.forEach(function (t) { t.actions.forEach(function (x) { need += S().big(x.params.deposit); }); });
+        }
+        if (need > have) throw new Error('Not enough NEAR for this order and the storage it needs (' + show(need.toString(), 24, 4) + ' NEAR).');
+        // Each transaction has one receiver, so opening and ordering are several, in this order, signed as one batch: the
+        // wallet's single approval (neardcl.js sign). A wallet that sends them apart still sends the pool first.
+        var txs = made.concat(D().buildPlace(who, ord, pre));
         limGo(false, 'Confirm in wallet…');
         window.__lxnLastLimit = { order: ord, txs: txs };
         return D().sign(txs);
@@ -1256,10 +1251,12 @@
         stop(v.why === 'refunded'
           ? 'The order book did not accept the order, so nothing is resting — your ' + lim.s.code + ' came back.'
           : 'The order failed on chain. Check your wallet activity.');
+        reread();
         return;
       }
       lim.busy = false;
       toast('Limit order placed');
+      reread();
       var ae = lEl('.lxq-amt'); if (ae) ae.value = '';
       var pe = lEl('.lxq-price'); if (pe) pe.value = '';
       H.bal[lim.s.id] = null;
@@ -1267,6 +1264,7 @@
     }).catch(function (e) {
       var msg = (e && e.message) || '';
       stop(e && e.lxnWallet ? D().walletErr(e, 'placed') : (msg || 'The order could not be placed.'));
+      reread();
     });
   }
 

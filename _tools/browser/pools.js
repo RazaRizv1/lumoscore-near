@@ -142,6 +142,23 @@
   function participants(p) {
     return (p && p.lps != null) ? count(p.lps) : '—';
   }
+  // WHILE THE COUNT IS STILL BEING ASKED, A SHIMMER, NOT A DASH (RAZA 2026-11-07: "rather than prematurely displaying
+  // missing data dashes"). A pool with liquidity has holders, so an unknown count is never written as 0: it ends as the
+  // dash once fillParticipants has its answer.
+  function partCell(node, p) {
+    node.textContent = '';
+    if (!p || p.lps != null || p.lpDone) { node.textContent = participants(p); return node; }
+    if (!document.getElementById('lx-partwait-css')) {
+      var st = document.createElement('style');
+      st.id = 'lx-partwait-css';
+      st.textContent = '.lx-partwait{display:inline-block;width:34px;height:12px;border-radius:4px;vertical-align:middle;'
+        + 'background:linear-gradient(90deg,rgba(128,128,128,.12),rgba(128,128,128,.28),rgba(128,128,128,.12));background-size:200% 100%;'
+        + 'animation:lxPartWait 1.3s linear infinite}@keyframes lxPartWait{from{background-position:200% 0}to{background-position:-200% 0}}';
+      document.head.appendChild(st);
+    }
+    node.appendChild(el('span', 'lx-partwait'));
+    return node;
+  }
 
   // A MONEY FIGURE, ABBREVIATED THE WAY STELLAR'S OVERVIEW ABBREVIATES ONE — "$5.32M", "$545.3K".
   // K is one decimal and M upward are two, which is the same ladder the Trade table and the asset
@@ -410,7 +427,7 @@
     tr.appendChild(usdCell(p.vol));
     tr.appendChild(usdCell(p.fees));
     // Participants, centred under its heading as on the live Stellar table -- see the header note.
-    var partTd = el('td', null, participants(p));
+    var partTd = partCell(el('td'), p);
     partTd.style.textAlign = 'center';
     tr.appendChild(partTd);
     // WEIGHTS OFF THE LIVE STELLAR ROW: the liquidity headline and the participant count are 700 there,
@@ -476,7 +493,9 @@
     // sub-line the reference does not have.
     stats.appendChild(stat('Liquidity', usdText(p.liq), composition(p)));
     stats.appendChild(stat('Vol (today)', usdText(p.vol)));   // main's phone label, as the note above records
-    stats.appendChild(stat('Participants', participants(p)));  // the third stat, as the table's sixth column
+    var partS = stat('Participants', '');                      // the third stat, as the table's sixth column
+    partCell(partS.querySelector('.v'), p);
+    stats.appendChild(partS);
     a.appendChild(stats);
     return a;
   }
@@ -943,13 +962,14 @@
     var want = shown.filter(function (r) { return r.lps == null && !r.lpAsked; });
     if (!want.length) return;
     want.forEach(function (r) { r.lpAsked = 1; });
+    // Every asked row is drawn again, a count or its dash. A failed ask ends the shimmer too: unknown, not 0.
+    var end = function () { want.forEach(function (r) { r.lpDone = 1; }); if (VIEW === d) renderPage(h, d, pageNo); };
     fetch('https://near-pool-indexer.usa282.workers.dev/lps?ids=' + want.map(function (r) { return r.id; }).join(','))
       .then(function (r) { return r.json(); })
       .then(function (x) {
-        var hit = false;
-        want.forEach(function (r) { var v = x && x.ok && x.c[r.id]; if (v) { r.lps = v[0]; hit = true; } });
-        if (hit && VIEW === d) renderPage(h, d, pageNo);
-      }).catch(function () {});
+        want.forEach(function (r) { var v = x && x.ok && x.c[r.id]; if (v) r.lps = v[0]; });
+        end();
+      }).catch(end);
   }
 
   // THE HEADINGS lumoscore.com USES, read off its live table (RAZA 2026-09-15):

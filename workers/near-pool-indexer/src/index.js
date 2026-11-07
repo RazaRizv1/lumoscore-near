@@ -632,30 +632,76 @@ async function netstats(env) {
 // (txns.m5) is stored per pool. Sampled once per window, so each sample is that window. Forward only: a candle from
 // before a pool was first sampled has no count (`since` says when that was), and a sampled window with no row is a
 // true 0. Only non-zero windows are written, and they are kept 30 days.
+// A WINDOW NOBODY SAW IS NOT A QUIET ONE (RAZA 2026-11-07: "Aggregate correctly"). DexScreener answers Cloudflare's shared
+// IPs 429 in whole runs: USDC's busiest pool had rows for 154 of its 286 windows, and every miss read as 0, so hourly
+// figures ran about half the truth. Each batch now retries once, then asks GeckoTerminal's own rolling m5, and each run
+// records whether it read everything (trr). /tradecounts names the candles holding an unread window (gaps), and starts
+// `since` at the first run recorded this way, because the windows before it cannot be told from quiet ones.
+// Both sources 429 about half of all runs, and one unread window would blank every hourly candle, so each good run also
+// reads the rolling hour: what it holds beyond the windows on record belongs to the unread ones of that hour. It goes in
+// the first of them, marked ok = 2: right for a candle of an hour or more, not for a shorter one, which stays a gap.
 const TR_PAIRS = 'https://api.dexscreener.com/latest/dex/pairs/near/';
+const TR_GT = 'https://api.geckoterminal.com/api/v2/networks/near/pools/multi/';
 const TR_MS = 300000, TR_KEEP_MS = 30 * 86400000, TR_WATCH = 300;
 const TR_ID = /^[A-Za-z0-9._:-]{3,120}$/;
+// [[pool, trades in its last 5 minutes, in its last hour], ...] for up to 30 pools, or null when no source would answer.
+const trSaw = {};                                    // the last status from each source, for /status
+async function trBatch(part) {
+  const get = (u) => fetch(u, { headers: Object.assign({ accept: 'application/json' }, UA) }).then((r) => { trSaw[u.indexOf('gecko') > 0 ? 'gt' : 'ds'] = r.status; return r.ok ? r.json() : null; }).catch(() => null);
+  const sum = (tx) => (+(tx || {}).buys || 0) + (+(tx || {}).sells || 0);
+  for (let k = 0; k < 2; k++) {
+    if (k) await new Promise((res) => setTimeout(res, 2000));
+    const j = await get(TR_PAIRS + part.join(','));
+    if (j) return (j.pairs || []).map((p) => [p.pairAddress, sum((p.txns || {}).m5), sum((p.txns || {}).h1)]);
+  }
+  const g = await get(TR_GT + encodeURIComponent(part.join(',')));
+  if (!g) return null;
+  return (g.data || []).map((p) => { const t = (p.attributes || {}).transactions || {}; return [(p.attributes || {}).address, sum(t.m5), sum(t.h1)]; });
+}
 async function trJob(env) {
-  const db = env.DB, now = Date.now(), b = Math.floor(now / TR_MS);
+  // The window just closed: the sample is the five minutes before now, so its row belongs to their start.
+  const db = env.DB, now = Date.now(), b = Math.floor(now / TR_MS) - 1;
   const w = await db.prepare('SELECT pool FROM trw ORDER BY seen DESC LIMIT ?1').bind(TR_WATCH).all();
-  const ids = (w.results || []).map((r) => r.pool), st = [], bad = [];
-  let good = 0;
+  const ids = (w.results || []).map((r) => r.pool), st = [], seen = [];
+  let good = 0, bad = 0;
   for (let i = 0; i < ids.length; i += 30) {
-    const r = await fetch(TR_PAIRS + ids.slice(i, i + 30).join(','), { headers: Object.assign({ accept: 'application/json' }, UA) });
-    if (!r.ok) { bad.push(r.status); continue; }
+    const got = await trBatch(ids.slice(i, i + 30));
+    if (!got) { bad++; continue; }
     good++;
-    for (const p of ((await r.json()).pairs || [])) {
-      const tx = (p.txns || {}).m5 || {}, n = (+tx.buys || 0) + (+tx.sells || 0);
-      if (n > 0 && p.pairAddress) st.push(db.prepare('INSERT OR REPLACE INTO trc (pool, b, n) VALUES (?1, ?2, ?3)').bind(p.pairAddress, b, n));
+    for (const [pool, n, h] of got) {
+      if (!pool) continue;
+      seen.push([pool, n, h]);
+      if (n > 0) st.push(db.prepare('INSERT OR REPLACE INTO trc (pool, b, n) VALUES (?1, ?2, ?3)').bind(pool, b, n));
     }
   }
-  if (b % 12 === 0) st.push(db.prepare('DELETE FROM trc WHERE b < ?1').bind(Math.floor((now - TR_KEEP_MS) / TR_MS)));
+  st.push(db.prepare('INSERT OR REPLACE INTO trr (b, ok) VALUES (?1, ?2)').bind(b, bad || !good ? 0 : 1));
+  if (good && !bad) {
+    const lo = b - 11, [runs, head, sums] = await Promise.all([
+      db.prepare('SELECT b FROM trr WHERE b >= ?1 AND ok > 0').bind(lo).all(),
+      db.prepare('SELECT MIN(b) AS b FROM trr').first(),
+      db.prepare('SELECT pool, SUM(n) AS s FROM trc WHERE b >= ?1 AND b < ?2 GROUP BY pool').bind(lo, b).all()]);
+    const have = new Set((runs.results || []).map((x) => x.b)), holes = [];
+    for (let k = Math.max(lo, head && head.b != null ? head.b : b); k < b; k++) if (!have.has(k)) holes.push(k);
+    if (holes.length) {
+      const was = new Map((sums.results || []).map((x) => [x.pool, x.s]));
+      for (const [pool, n, h] of seen) {
+        const miss = h - n - (was.get(pool) || 0);
+        if (miss > 0) st.push(db.prepare('INSERT OR REPLACE INTO trc (pool, b, n) VALUES (?1, ?2, ?3)').bind(pool, holes[0], miss));
+      }
+      for (const k of holes) st.push(db.prepare('INSERT OR REPLACE INTO trr (b, ok) VALUES (?1, 2)').bind(k));
+    }
+  }
+  if (b % 12 === 0) {
+    const old = Math.floor((now - TR_KEEP_MS) / TR_MS);
+    st.push(db.prepare('DELETE FROM trc WHERE b < ?1').bind(old), db.prepare('DELETE FROM trr WHERE b < ?1').bind(old));
+  }
   // The last run, read through /status: a run that fetched nothing must not look like a quiet five minutes.
-  st.push(setMeta(db, 'trlast', JSON.stringify({ at: now, rows: st.length, good, bad })));
+  st.push(setMeta(db, 'trlast', JSON.stringify({ at: now, rows: st.length, good, bad, saw: trSaw })));
   await db.batch(st);
   return { tr: st.length, of: ids.length };
 }
-// GET /tradecounts?pool=&bucket=<ms>&from=<ms> -> { ok, since, c: { candleStartMs: trades } }. Asking registers the pool.
+// GET /tradecounts?pool=&bucket=<ms>&from=<ms> -> { ok, since, c: { candleStartMs: trades }, gaps: [candleStartMs] }: a
+// candle in gaps holds a window no run read. Before since nothing is known. Asking registers the pool.
 async function tradeCounts(url, env) {
   const pool = String(url.searchParams.get('pool') || ''), bucket = +url.searchParams.get('bucket'), from = +url.searchParams.get('from') || 0;
   if (!TR_ID.test(pool) || !(bucket >= TR_MS)) return json({ ok: false, error: 'bad request' }, 0);
@@ -665,7 +711,19 @@ async function tradeCounts(url, env) {
   const r = await db.prepare('SELECT b, n FROM trc WHERE pool = ?1 AND b >= ?2 LIMIT 9000').bind(pool, Math.floor(from / TR_MS)).all();
   const c = {};
   for (const x of r.results || []) { const k = Math.floor(x.b * TR_MS / bucket) * bucket; c[k] = (c[k] || 0) + x.n; }
-  return json({ ok: true, since: w ? w.first : now, c }, 120);
+  const fromB = Math.floor(from / TR_MS), nowB = Math.floor(now / TR_MS);
+  const [runs, head] = await Promise.all([
+    db.prepare(bucket >= 3600000 ? 'SELECT b FROM trr WHERE ok > 0 AND b >= ?1 LIMIT 9000' : 'SELECT b FROM trr WHERE ok = 1 AND b >= ?1 LIMIT 9000').bind(fromB).all(),
+    db.prepare('SELECT MIN(b) AS b FROM trr').first()]);
+  // The first whole window both this pool and the coverage record were watching; with no record yet, nothing is known.
+  const headMs = head && head.b != null ? head.b * TR_MS : Infinity;
+  const startMs = Math.ceil(Math.max(w ? w.first : now, headMs) / TR_MS) * TR_MS;
+  const seen = new Set((runs.results || []).map((x) => x.b)), gaps = new Set();
+  // nowB - 1 is the window this very cron is reading, and it has a whole candle's grace: a late run is not yet a gap.
+  if (isFinite(startMs)) for (let k = Math.max(fromB, startMs / TR_MS); k < nowB - 1; k++) {
+    if (!seen.has(k)) gaps.add(Math.floor(k * TR_MS / bucket) * bucket);
+  }
+  return json({ ok: true, since: isFinite(startMs) ? startMs : now, c, gaps: [...gaps] }, 120);
 }
 
 // ---- token logos ----------------------------------------------------------------------------------------------

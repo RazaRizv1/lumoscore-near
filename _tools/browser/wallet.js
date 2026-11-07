@@ -389,12 +389,34 @@
       else if (!ok && has && has.parentNode) has.parentNode.removeChild(has);
     });
   }
+  // THE LINE UNDER THE NAME (RAZA 2026-11-07, ticket 296): Stellar prints the issuer's home domain, and the nearest true
+  // thing here is the curated list's website (/lxapi/nearmarket's w). A token with none shows its contract, shortened:
+  // a name like "gear.near" would be invented. The copy button beside it still copies the contract.
+  var DOM = {};
+  function domainOf(u) {
+    try {
+      var x = new URL(String(u || ''));
+      if (x.protocol !== 'https:' && x.protocol !== 'http:') return '';
+      return x.hostname.indexOf('www.') === 0 ? x.hostname.slice(4) : x.hostname;
+    } catch (e) { return ''; }
+  }
+  function issuerText(id) { return DOM[id] || short(id); }
+  function applyDomains() {
+    [].forEach.call(document.querySelectorAll('[data-lxdom]'), function (e) {
+      var t = issuerText(e.getAttribute('data-lxdom'));
+      if (e.textContent !== t) e.textContent = t;
+    });
+  }
   market().then(function (d) {
     if (!d) return;
     var s = {};
-    d.rows.forEach(function (t) { if (t && t.i) s[t.i] = 1; });
+    d.rows.forEach(function (t) {
+      if (t && t.i) s[t.i] = 1;
+      if (t && t.i && t.w && domainOf(t.w)) DOM[t.i] = domainOf(t.w);
+    });
     VSET = s;
     applyTicks();
+    applyDomains();
   });
   // ---- rows, per design ---------------------------------------------------------------------------
   function tableRow(name, sub, right, rightSub, frozen, tok) {
@@ -430,7 +452,9 @@
     } else {
       var asb = el('span', 'lx-asb');
       asb.setAttribute('data-vk', name + '|' + tok.id);
-      var iss = el('span', 'lx-iss', short(tok.id));
+      var iss = el('span', 'lx-iss', issuerText(tok.id));
+      iss.setAttribute('data-lxdom', tok.id);
+      iss.setAttribute('data-logoed', '1');
       iss.title = tok.id;
       asb.appendChild(iss);
       var cp = el('button', 'lx-isscopy');
@@ -1010,7 +1034,9 @@
     // about every holding. Same rule, same node shape, so applyTicks() reaches both.
     markVerified(nr, tok);
     meta.appendChild(nr);
-    meta.appendChild(el('div', 'asset-sub', sub || ''));
+    var csub = el('div', 'asset-sub', tok ? issuerText(tok.id) : (sub || ''));
+    if (tok) csub.setAttribute('data-lxdom', tok.id);
+    meta.appendChild(csub);
     top.appendChild(meta);
     var bal = el('div', 'asset-balance-block');
     bal.appendChild(el('div', 'v1', right));
@@ -2096,7 +2122,13 @@
           if (td[1]) {
             var s1 = td[1].querySelector('.p1'), s2 = td[1].querySelector('.p2');
             if (s1) s1.textContent = p.share > 0 && p.share < 0.01 ? '<0.01%' : p.share.toFixed(2) + '%';
-            if (s2) s2.textContent = p.usd != null ? '≈ $' + p.usd.toLocaleString('en-US', { maximumFractionDigits: 2 }) : '';
+            // Stellar's "5.77 LP tokens" (RAZA 2026-11-07, ticket 299): Rhea's classic and stable shares carry 24 decimals.
+            // The dollars stay on hover. An order-book position has no LP token, so no line.
+            var lpv = p.lp ? C.units(p.lp, 24) : 0;
+            if (s2) {
+              s2.textContent = lpv > 0 ? orderAmt(lpv) + ' LP tokens' : '';
+              s2.title = p.usd != null ? '≈ $' + p.usd.toLocaleString('en-US', { maximumFractionDigits: 2 }) : '';
+            }
           }
           if (td[2]) { td[2].textContent = '—'; td[2].title = 'Rhea does not publish a per-position APR'; }
           if (td[3]) {
@@ -2490,6 +2522,8 @@
         paintOrders(a);
         paintLpPositions(data);
         applyPins();
+        // A repaint (after a Send) rebuilds the rows blank; the prices already in hand go straight back on.
+        try { if (window.__lxnPricesApply) window.__lxnPricesApply(); } catch (e3) {}
     }).catch(function (e) {
       var gone = e && (e.code === 'UNKNOWN_ACCOUNT' || /UNKNOWN_ACCOUNT|does not exist/i.test(e.message || ''));
       activityNote(gone ? 'No activity on this account yet.' : 'Could not load activity for this account.');

@@ -295,6 +295,8 @@
   // The pool opens at the token's CURRENT price, never a typed one: init_point is a point where "1 raw token_x =
   // 1.0001^p raw token_y", token_x being the first of the two ids sorted -- the order the pool id names them in.
   var CREATE_FEE = 2000;                                     // 0.2%, the tier Rhea's main wNEAR pools use (USDC|wrap.near|2000)
+  // Attached in full, so the wallet must hold it, but the contract keeps only the new pool's storage and sends the rest
+  // straight back: 0.09114 of the 0.1 on create_pool 9zfuVi1y… (read off the chain, 2026-11-07).
   var CREATE_DEPOSIT = '100000000000000000000000';           // 0.1 NEAR, Rhea's own create_pool deposit
   // Against NEAR unless a quote token is named (RAZA 2026-11-07: a limit between two other tokens needs that pair's own
   // pool): priceNear is then the token's price in that quote, and the opening price the pair's current rate.
@@ -307,8 +309,12 @@
     var px = x === token ? priceNear : 1 / priceNear;          // token_x priced in token_y, human units
     var point = getPointByPrice(feeToPointDelta(CREATE_FEE), px, Math.pow(10, decY) / Math.pow(10, decX));
     var at = pointToPrice(decX, decY, point);                  // what the pool will actually open at
-    return { x: x, y: y, fee: CREATE_FEE, point: point, pool: poolIdFor(x, y, CREATE_FEE),
-      opensAt: x === token ? at : 1 / at, deposit: CREATE_DEPOSIT };
+    var id = poolIdFor(x, y, CREATE_FEE);
+    // book: the pool as poolFor will describe it once created, so an order can be planned against it first.
+    return { x: x, y: y, fee: CREATE_FEE, point: point, pool: id,
+      opensAt: x === token ? at : 1 / at, deposit: CREATE_DEPOSIT,
+      book: describe({ pool_id: id, token_x: x, token_y: y, fee: CREATE_FEE, point_delta: feeToPointDelta(CREATE_FEE),
+        current_point: point, liquidity: '0', liquidity_x: '0' }, token, Q, +dq) };
   }
   // The transactions for plan c, after reading which tokens still need DCL registered on them.
   function buildCreate(me, c) {

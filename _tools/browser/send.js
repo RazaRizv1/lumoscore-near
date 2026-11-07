@@ -508,7 +508,7 @@
     (d.held || []).forEach(function (t) {
       if (t.dec == null || t.balance == null) return;     // metadata unknown: cannot build an exact amount
       out.push({
-        code: t.display, id: t.id, dec: t.dec, raw: t.raw, logo: t.logo,
+        code: t.display, id: t.id, dec: t.dec, raw: t.raw, logo: t.logo, curated: !!t.curated,
         balance: t.balance, spendable: t.balance
       });
     });
@@ -591,46 +591,6 @@
 
   function sendModal() { return $('#modalSend'); }
 
-  // A REAL LOGO (RAZA 2026-09-15: "Wallet → Swap popup, most of the logos are incorrect"). The page's logo healer paints any
-  // one-letter badge from a ticker lookup that knows nothing about XRP Ledger issuers — XYIELD came out as a letter, LUMOS
-  // as a stock flame. An <img> child is the one thing the healer leaves alone, so the token's own thumbnail goes in one.
-  function icoImg(host, a) {
-    host.textContent = '';
-    host.setAttribute('data-logoed', '1');
-    host.style.background = 'transparent';
-    host.style.overflow = 'hidden';
-    host.style.padding = '0';
-    var im = document.createElement('img');
-    im.alt = '';
-    im.src = thumbOf(a);
-    // FEED THE CHANNEL THE SHARED CSS ACTUALLY READS.
-    //
-    // The swap modal's picker is .lx-ap-ico, and the wallet stylesheet -- authored on the Stellar
-    // side, shared because /wallet serves both chains -- takes its logo from a custom property and
-    // hides anything else:
-    //     .lx-ap-ico{background-image:var(--lxlogo,none)!important}
-    //     .lx-ap-ico img{display:none!important}
-    // So the <img> below was inserted, loaded (48x48, confirmed), and rendered at 0x0 behind a
-    // display:none that an inline style cannot outrank -- a stylesheet !important beats an inline
-    // declaration. RAZA 2026-10-11: "No logos shown on swap popup on mobile."
-    //
-    // Nothing else is affected: .lx-ap-ico is the ONLY rule reading --lxlogo, so setting it on the
-    // other hosts this function serves (.a-ico, .dxa-pl-ico) is inert, and their imgs keep showing
-    // as they already do. Both channels carry the same url, so there is nothing to disagree about.
-    //
-    // The quote guard is the url(") trap this project has hit before: a quote inside the value would
-    // close the CSS string early. Our own endpoint encodes its parameters, so this is belt only.
-    try {
-      var lu = thumbOf(a);
-      if (lu && lu.indexOf('"') < 0 && lu.indexOf("'") < 0) {
-        host.style.setProperty('--lxlogo', 'url("' + lu + '")');
-      }
-    } catch (e) {}
-    im.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;border-radius:50%';
-    im.onerror = function () { if (im.parentNode) im.parentNode.removeChild(im); plain(host, a.code.charAt(0).toUpperCase()); };
-    host.appendChild(im);
-  }
-
   function hueOf(s) {                                   // wallet.js's hue(): a stable colour per ticker
     var h = 0; s = String(s || '');
     for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
@@ -679,62 +639,115 @@
     checkSend();
   }
 
-  // The asset menu. Built from the design's own field styling and anchored under the picker button,
-  // because the design ships a button with a chevron and no menu behind it.
+  // The asset menu: Stellar's, class for class (RAZA 2026-11-07, ticket 298). .lx-asset-menu, .lx-am-item and the rest ship
+  // in the inherited sheet, so the rows, the type, the search box and the balance column are its own; only the tick's
+  // rule differs, because NEAR's "curated" is the wallet's (a contract on the Trade roster, plus wNEAR and the coin itself,
+  // as Stellar ticks XLM). Fixed on body, as there, so the dialog's scroll cannot clip it.
+  var TICK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+  function trimDp(s) {
+    if (s.indexOf('.') < 0) return s;
+    while (s.charAt(s.length - 1) === '0') s = s.slice(0, -1);
+    return s.charAt(s.length - 1) === '.' ? s.slice(0, -1) : s;
+  }
+  // Stellar's amAbb. Floored under 1,000 rather than rounded: this column must not name more than the Balance line does.
+  function amAbb(a) {
+    var v = Number(roomStr(a));
+    if (v >= 1e9) return trimDp((v / 1e9).toFixed(2)) + 'B';
+    if (v >= 1e6) return trimDp((v / 1e6).toFixed(2)) + 'M';
+    if (v >= 1e3) return trimDp((v / 1e3).toFixed(1)) + 'K';
+    return v < 1 ? fmt(v, 6) : fmt(Math.floor(v * 100) / 100, 2);
+  }
   function openAssetMenu(btn) {
     var m = sendModal();
     if (!m) return;
-    var old = $('.lxw-astmenu', m);
+    var old = $('.lxw-astmenu');
     if (old) { old.parentNode.removeChild(old); return; }        // second click closes
 
-    var list = held().filter(function (a) { return a.spendable > 0 && !a.frozen; });
-    if (!list.length) return;
+    var all = held().filter(function (a) { return a.spendable > 0 && !a.frozen; });
+    if (!all.length) return;
 
     var menu = document.createElement('div');
-    menu.className = 'lxw-astmenu';
-    menu.style.cssText = 'position:absolute;z-index:40;right:0;top:calc(100% + 6px);min-width:210px;'
-      + 'max-height:260px;overflow:auto;background:var(--surface,#14141b);border:1px solid var(--border,#2a2a35);'
-      + 'border-radius:11px;padding:5px;box-shadow:0 12px 30px rgba(0,0,0,.45)';
-    list.forEach(function (a) {
-      var row = document.createElement('button');
-      row.type = 'button';
-      row.className = 'lxw-astrow';
-      row.style.cssText = 'display:flex;width:100%;gap:9px;align-items:center;padding:8px 9px;background:none;'
-        + 'border:0;border-radius:8px;cursor:pointer;color:inherit;text-align:left;font:inherit';
-      var ic = document.createElement('span');
-      ic.style.cssText = 'width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;'
-        + 'justify-content:center;font-size:10px;font-weight:800;background:linear-gradient(135deg,#2a2a35,#1a1a23)';
-      icoImg(ic, a);
-      var nm = document.createElement('span');
-      nm.style.cssText = 'flex:1;font-weight:700';
-      plain(nm, a.code);
-      var bl = document.createElement('span');
-      bl.style.cssText = 'opacity:.7;font-size:12px';
-      bl.textContent = fmt(a.spendable, 4);
-      row.appendChild(ic); row.appendChild(nm); row.appendChild(bl);
-      row.addEventListener('click', function (e) {
-        e.preventDefault(); e.stopPropagation();
-        setSendAsset(a);
-        if (menu.parentNode) menu.parentNode.removeChild(menu);
+    menu.className = 'lxw-astmenu lx-asset-menu lx-hassearch';
+    var sw = document.createElement('div');
+    sw.className = 'lx-am-searchwrap';
+    sw.innerHTML = '<svg class="lx-am-searchic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>';
+    var si = document.createElement('input');
+    si.className = 'lx-am-search';
+    si.placeholder = 'Search your assets…';
+    sw.appendChild(si);
+    menu.appendChild(sw);
+    var list = document.createElement('div');
+    list.className = 'lx-am-list';
+    menu.appendChild(list);
+    function close() {
+      if (menu.parentNode) menu.parentNode.removeChild(menu);
+      document.removeEventListener('click', away, true);
+    }
+    function away(e) { if (!menu.contains(e.target) && !btn.contains(e.target)) close(); }
+    function draw(rows) {
+      list.innerHTML = '';
+      rows.forEach(function (a) {
+        var row = document.createElement('button');
+        row.type = 'button';
+        row.className = 'lx-am-item';
+        var ic = document.createElement('span');
+        ic.className = 'lx-am-ic';
+        ic.setAttribute('data-logoed', '1');
+        var u = thumbOf(a), letter = function () { plain(ic, String(a.code || '?').charAt(0).toUpperCase()); ic.style.background = hueOf(a.code); };
+        if (u) {
+          var im = document.createElement('img');
+          im.alt = '';
+          im.src = u;
+          im.onerror = function () { if (im.parentNode) im.parentNode.removeChild(im); letter(); };
+          ic.appendChild(im);
+        } else letter();
+        var nm = document.createElement('span');
+        nm.className = 'lx-am-code';
+        plain(nm, a.code);
+        if (a.native || a.curated || a.id === 'wrap.near') {
+          var vt = document.createElement('span');
+          vt.className = 'lx-am-vt';
+          vt.title = 'Curated on LumosCore';
+          vt.innerHTML = TICK;
+          nm.appendChild(vt);
+        }
+        var bl = document.createElement('span');
+        bl.className = 'lx-am-bal';
+        plain(bl, amAbb(a));
+        row.appendChild(ic); row.appendChild(nm); row.appendChild(bl);
+        row.addEventListener('click', function (e) {
+          e.preventDefault(); e.stopPropagation();
+          setSendAsset(a);
+          close();
+        });
+        list.appendChild(row);
       });
-      menu.appendChild(row);
-    });
-
-    var host = btn.parentNode;
-    if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
-    host.appendChild(menu);
-
-    // Closing on an outside click is registered on the NEXT frame. Binding it synchronously means the
-    // very click that opened this menu is still propagating, reaches document, and closes it again —
-    // which on a phone looks exactly like "the dropdown shuts the first time you tap it".
-    requestAnimationFrame(function () {
-      function away(e) {
-        if (menu.contains(e.target) || btn.contains(e.target)) return;
-        if (menu.parentNode) menu.parentNode.removeChild(menu);
-        document.removeEventListener('click', away, true);
+      if (!rows.length) {
+        var none = document.createElement('div');
+        none.className = 'lx-am-empty';
+        none.textContent = 'No matches';
+        list.appendChild(none);
       }
-      document.addEventListener('click', away, true);
+    }
+    draw(all);
+    si.addEventListener('input', function () {
+      var q = si.value.trim().toLowerCase();
+      draw(q ? all.filter(function (a) { return String(a.code || '').toLowerCase().indexOf(q) >= 0; }) : all);
     });
+    menu.addEventListener('keydown', function (e) { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
+
+    document.body.appendChild(menu);
+    menu.style.position = 'fixed';
+    menu.style.zIndex = '100000';
+    var r = btn.getBoundingClientRect(), vh = window.innerHeight || 800, vw = window.innerWidth || 360;
+    var mh = menu.offsetHeight || 0, mw = menu.offsetWidth || 230, top = r.bottom + 6;
+    if (top + mh > vh - 8) { var ab = r.top - 6 - mh; top = ab >= 8 ? ab : Math.max(8, vh - 8 - mh); }
+    menu.style.top = Math.round(top) + 'px';
+    menu.style.left = Math.round(Math.max(8, Math.min(r.right - mw, vw - mw - 8))) + 'px';
+    setTimeout(function () { try { si.focus(); } catch (e) {} }, 30);
+    // Bound after this click: it is still propagating, reaches document, and would close the menu it just opened --
+    // which on a phone looks exactly like "the dropdown shuts the first time you tap it".
+    setTimeout(function () { document.addEventListener('click', away, true); }, 0);
   }
 
   // STELLAR'S FAILURE TOAST (RAZA 2026-09-17: "When Wallet → send trx is canceled, you need to show the same message that

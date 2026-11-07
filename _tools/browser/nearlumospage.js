@@ -47,6 +47,9 @@
     ['rNEAR', 'lst.rhealab.near'],
     ['USDT.e', 'dac17f958d2ee523a2206206994597c13d831ec7.factory.bridge.near']
   ];
+  // RAZA 2026-11-07, ticket 293: Stellar's popover, NEAR's fact. ft_total_supply reads 1B with no locked 9B, so Stellar's
+  // own sentence would be false here. Shown only while the contract's figure is that 1B.
+  var SUPPLY_NOTE = '1B LUMOS is the fixed supply on NEAR.';
   var TICK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
   var GLOBE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>';
 
@@ -102,6 +105,22 @@
       return s;
     }
     return (T && T.v24 != null && u) ? T.v24 * u : null;
+  }
+  // The 24h change in volume, from pool 9001's own record, in NEAR. Null unless that record really reaches back 48 hours
+  // and the earlier day traded: no previous figure, no percentage (RAZA 2026-11-07, ticket 293: "+159.0% past 24h").
+  function volChange() {
+    if (!rawPool) return null;
+    var rows = rawPool.rows || [], now = Date.now(), a = now - 864e5, b = now - 1728e5, reach = +rawPool.from || 0;
+    if (rows.length >= 500) reach = rows.reduce(function (m, r) { return Math.min(m, r.t); }, now);
+    if (!(reach > 0) || reach > b) return null;
+    var cur = 0, prev = 0;
+    rows.forEach(function (r) {
+      if (r.kind !== 'swap' || r.t < b) return;
+      var near = r.ta === WNEAR ? units(r.aa, 24) : (r.tb === WNEAR ? units(r.ab, 24) : 0);
+      if (r.t >= a) cur += near; else prev += near;
+    });
+    if (!(prev > 0) || (T && T.v24 > 0 && !(cur > 0))) return null;
+    return (cur - prev) / prev * 100;
   }
   function holderCount() { return H && H.count != null ? +H.count : null; }
   function poolList() {
@@ -210,10 +229,10 @@
       var t = (card.textContent || '').toUpperCase(), val = q('.val', card), sub = q('.sub', card) || q('.small-sub', card);
       var money = q('.lc-money', card) || val, done = false;
       if (t.indexOf('MARKET CAP') >= 0) {
-        if (p > 0 && sup) { setMoney(money, abbrUsd(p * sup)); setText(sub, 'on ' + abbrNum(sup) + ' circulating'); done = true; }
+        if (p > 0 && sup) { setMoney(money, abbrUsd(p * sup)); capSub(sub, 'on ' + abbrNum(sup) + ' circulating', Math.round(sup) === 1e9); done = true; }
         else if (tFail) { setMoney(money, '—'); setText(sub, ''); done = true; }
       } else if (t.indexOf('HOLDERS') >= 0) {
-        if (hc != null) { setText(val, num(hc)); setText(sub, 'holding a balance'); done = true; }
+        if (hc != null) { setText(val, num(hc)); setText(sub, 'holding a balance'); if (sub) sub.classList.add('up'); done = true; }
         else if (hFail || H) { setText(val, '—'); setText(sub, ''); done = true; }
       } else if (t.indexOf('POOLS') >= 0) {
         if (poolsKnown()) {
@@ -223,11 +242,27 @@
         }
         else if (pFail || oFail) { setText(val, '—'); setText(sub, ''); done = true; }
       } else if (t.indexOf('VOLUME') >= 0) {
-        if (v != null) { setMoney(money, abbrUsd(v)); setText(sub, 'LUMOS/NEAR market'); done = true; }
+        if (v != null) {
+          var vc = volChange();
+          setMoney(money, abbrUsd(v));
+          setText(sub, vc != null ? (vc >= 0 ? '+' : '−') + Math.abs(vc).toFixed(1) + '% past 24h' : 'LUMOS/NEAR market');
+          if (sub) { sub.classList.toggle('up', vc != null && vc >= 0); sub.classList.toggle('down', vc != null && vc < 0); }
+          done = true;
+        }
         else if (tFail) { setMoney(money, '—'); setText(sub, ''); done = true; }
       }
       if (done) card.classList.add('lxlt');
     });
+  }
+  // The figure and the circled i, Stellar's two spans: its stylesheet draws the popover from data-tip on hover.
+  function capSub(sub, text, note) {
+    if (!sub) return;
+    var n = q('.lx-supnum', sub);
+    if (!n) { sub.textContent = ''; n = document.createElement('span'); n.className = 'lx-supnum'; sub.appendChild(n); }
+    setText(n, text);
+    var i = q('.lx-supinfo', sub);
+    if (note && !i) { i = logoed(document.createElement('span')); i.className = 'lx-supinfo'; i.setAttribute('data-tip', SUPPLY_NOTE); i.textContent = 'i'; sub.appendChild(i); }
+    else if (!note && i) sub.removeChild(i);
   }
   function activeCount() { return poolList().filter(function (x) { return x.live; }).length; }
   function overview() {
@@ -452,16 +487,13 @@
     par.insertBefore(ub, sb);
     if (grid) par.insertBefore(grid, sb);
   }
-  // Ticket 270: the Ecosystem LP Rewards list, under the utility cards.
+  // Tickets 270 and 292: Stellar has no ranked list. Its Ecosystem LP Rewards section is this utility card, so the list
+  // lives inside it, under the card's own heading and copy, above "View partner pools". The rows are the ticket's.
   function ecoList() {
     if (q('#lxnEco')) return;
-    var grid = q('.utility-grid') || q('.util-grid');
-    if (!grid || !grid.parentNode) return;
-    var box = document.createElement('section'); box.id = 'lxnEco';
-    var h = document.createElement('h3'); h.textContent = 'Ecosystem LP Rewards';
-    var p = document.createElement('p');
-    p.textContent = 'Verified tokens for LUMOS pools on NEAR, in order. Rewards are not live on NEAR yet.';
-    var list = document.createElement('div'); list.className = 'lxn-eco-list';
+    var card = q('.util-card.eco');
+    if (!card) return;
+    var list = document.createElement('div'); list.id = 'lxnEco'; list.className = 'lxn-eco-list';
     ECO.forEach(function (e, i) {
       var a = document.createElement('a'); a.className = 'lxn-eco-row'; a.href = '/trade/near/' + encodeURIComponent(e[1]);
       var rk = logoed(document.createElement('span')); rk.className = 'lxn-eco-rk'; rk.textContent = '#' + (i + 1);
@@ -476,14 +508,13 @@
       a.appendChild(rk); a.appendChild(ic); a.appendChild(tx);
       list.appendChild(a);
     });
-    box.appendChild(h); box.appendChild(p); box.appendChild(list);
-    grid.parentNode.insertBefore(box, grid.nextSibling);
+    card.insertBefore(list, q('.u-link', card));
     // The curated list's logo, else the indexer's; a logo that will not load leaves the row's ticker to say it.
     var C = window.lxnCore;
     (C && C.market ? C.market() : Promise.resolve(null)).then(function (d) {
       var by = {};
       ((d && d.rows) || []).forEach(function (r) { if (r && r.i) by[r.i] = r.logo; });
-      qa('.lxn-eco-ic', box).forEach(function (ic) {
+      qa('.lxn-eco-ic', list).forEach(function (ic) {
         var id = ic.getAttribute('data-lxeco'), im = document.createElement('img');
         im.alt = ''; im.src = by[id] || (IDX + '/icon?v=2&t=' + encodeURIComponent(id));
         im.onerror = function () { if (im.parentNode) im.parentNode.removeChild(im); };

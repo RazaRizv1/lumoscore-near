@@ -236,8 +236,6 @@
     S().quote(s.pay, s.get, raw).then(function (qq) {
       if (my !== seq) return;
       applyQuote(p, qq);
-      // Two swaps, not one (nearswap.js viaHub): said before the press, because the second can fail on its own.
-      if (qq.split && !(me() && have != null && short(p, raw, have))) say(p, splitNote(qq), true);
     }, function (e) {
       if (my !== seq) return;
       clearQuote(p);
@@ -279,10 +277,6 @@
         + ', and a NEAR swap keeps 0.2 NEAR back for network fees';
     }
     return '';
-  }
-
-  function splitNote(qq) {
-    return 'This pair swaps in two steps through ' + qq.split.code + ', two approvals. If the second step fails, you keep the ' + qq.split.code + '.';
   }
 
   // ---- signing ------------------------------------------------------------------------------------

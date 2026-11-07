@@ -107,17 +107,21 @@
       return (now / (R[WN] / R[id]) * (1 + near24 / 100) - 1) * 100;
     });
   }
-  function fillOwn() {
+  // Three more tries, a few seconds apart (RAZA 2026-11-07, ticket 295): this page spends its first seconds on FastNEAR,
+  // so a refused read here was a blank badge until the next reload. A blank after these is an honest blank.
+  function fillOwn(n) {
+    n = n || 0;
     var near = data.t.NEAR, near24 = near ? near[1] : null;
     if (near24 == null || !window.lxnCore) return;
     ((window.__lxnData && window.__lxnData.held) || []).forEach(function (h) {
       var row = data.t[h.id];
       if (!OWN_POOL[h.id] || !row || row[1] != null) return;
+      function again() { if (n < 3) setTimeout(function () { fillOwn(n + 1); }, 4000 * (n + 1)); }
       ownChange(h.id, near24).then(function (v) {
-        if (v == null || !isFinite(v)) return;
+        if (v == null || !isFinite(v)) { again(); return; }
         row[1] = v;
         apply();
-      }, function () {});
+      }, again);
     });
   }
 
@@ -149,14 +153,15 @@
     var t = targets();
     if (!t.length) return;
 
-    // The wallet paints XRP first (when present), then held tokens in the same order as this array,
-    // so index maps to row. Reading the name out of the DOM instead would tie this to display text.
-    var seq = [];
-    if (xrp) seq.push({ xrp: true });
-    for (var i = 0; i < held.length; i++) seq.push(held[i]);
+    // By each row's own key, data-lxkey, never by position: Pin to top reorders the rows, and the old index walk then
+    // printed one token's price on another's row. seq stays in holdings order for the total below.
+    var seq = [], byKey = {};
+    if (xrp) { seq.push({ xrp: true }); byKey.NEAR = seq[0]; }
+    for (var i = 0; i < held.length; i++) { seq.push(held[i]); byKey[held[i].id] = held[i]; }
 
-    for (var j = 0; j < t.length && j < seq.length; j++) {
-      var item = seq[j], cell = t[j];
+    for (var j = 0; j < t.length; j++) {
+      var cell = t[j], item = byKey[cell.row.getAttribute('data-lxkey')];
+      if (!item) continue;
       var usd = null, ch7 = null;
 
       var ch24 = null, pxXrp = null;

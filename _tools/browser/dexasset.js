@@ -979,19 +979,21 @@
   // this chart's candle. It begins when a pool was first sampled, so an older candle stays "—"; after that a candle with
   // no row is a true 0. Asked once per pool and candle size, and a failed ask is not stored.
   // WHY IT READ "—" ON EVERY RANGE (RAZA 2026-11-07: "displays a dash placeholder ... across all timeframe selections").
-  // Three holes. The candle length was guessed from the gaps between points, so CoinGecko's closing point (seconds from
-  // the one before) or a quiet pool's gaps gave a length the record could not answer: under 5 minutes it was never asked
-  // at all. It is now each series' real candle (fitWindow), and a candle the record's clock does not line up with is
-  // summed from the 5-minute windows it covers. And one refused ask left the dash until the next redraw. The third is
-  // true and stays: the record only began when the pool was first asked, so a year chart's older candles are unknown.
+  // The candle length was guessed from the gaps between points, so CoinGecko's closing point (seconds from the one
+  // before) or a quiet pool's gaps gave a length the record could not answer: under 5 minutes it was never asked at all.
+  // It is now each series' real candle (fitWindow), and a candle the record's clock does not line up with is summed from
+  // the 5-minute windows it covers. A candle reads a number only when EVERY window in it was sampled (RAZA 2026-11-07:
+  // "Aggregate correctly"): one that began before the record, or holds a window the sampler could not read (DexScreener
+  // refused 46% of them: 154 of 286 on USDC's busiest pool), would be a partial sum, not the count, so it is a dash.
+  // since and gaps come from the indexer; an older indexer sends no gaps, and with no coverage nothing is a count.
   // TC_KEEP: the indexer drops windows after 30 days, so an older candle with no row is unknown, not 0.
-  var TC = { key: '', c: null, since: 0, ask: 0 }, TC_EVEN = [300000, 900000, 3600000, 14400000, 86400000], TC_KEEP = 30 * 86400000;
+  var TC = { key: '', c: null, since: 0, ask: 0, gaps: null }, TC_EVEN = [300000, 900000, 3600000, 14400000, 86400000], TC_KEEP = 30 * 86400000;
   function loadCounts(bucket, t0, again) {
     var d = window.__lxnAssetData, pool = d && gtPool(d);
     if (!pool || !pool.id || !(bucket > 0)) return;
     var ask = TC_EVEN.indexOf(bucket) >= 0 ? bucket : 300000, key = pool.id + '|' + ask;
     if (TC.key === key) return;
-    TC = { key: key, c: null, since: 0, ask: ask };
+    TC = { key: key, c: null, since: 0, ask: ask, gaps: null };
     var failed = function () {
       if (TC.key !== key) return;
       TC.key = '';
@@ -1002,17 +1004,20 @@
       .then(function (j) {
         if (TC.key !== key) return;
         if (!j || !j.ok) { failed(); return; }
-        TC.c = j.c || {}; TC.since = +j.since || 0;
+        if (!Array.isArray(j.gaps)) { TC.c = {}; TC.since = Infinity; return; }
+        var gs = {};
+        j.gaps.forEach(function (g) { gs[g] = 1; });
+        TC.c = j.c || {}; TC.since = +j.since || Infinity; TC.gaps = gs;
       }).catch(failed);
   }
   // The windows that start inside [t, t + bucket): one on a candle the record lines up with, each window in one candle.
   function recordedIn(t, bucket) {
-    if (!TC.c || !(bucket > 0) || t < Date.now() - TC_KEEP) return null;
-    var b = TC.ask, n = 0, any = false;
+    if (!TC.c || !TC.gaps || !(bucket > 0) || t < TC.since || t < Date.now() - TC_KEEP) return null;
+    var b = TC.ask, n = 0;
     for (var k = Math.ceil(t / b) * b; k < t + bucket; k += b) {
-      if (k in TC.c) { n += +TC.c[k] || 0; any = true; }
+      if (TC.gaps[k]) return null;
+      n += +TC.c[k] || 0;
     }
-    if (t < TC.since && !any) return null;
     return n;
   }
   function tradesTxt(p, S, inUsd, usdPerNear) {
@@ -2432,7 +2437,7 @@
       return { s: t.s, logo: t.logo || logos[t.i] || (t.i === d.i ? d.logo : '') || (t.i === WNEAR ? NEAR_LOGO : '') };
     });
     return { id: id, name: ts.map(function (t) { return t.s; }).join(' / '), ico: ico, liqUsd: liqUsd, lps: lps,
-      key: ts.map(function (t) { return t.i; }).sort().join('|'), more: 0,
+      key: ts.map(function (t) { return t.i; }).sort().join('|'),
       href: href ? poolHref(id, ts.map(function (t) { return t.s; })) : '' };
   }
   function mergePools(d, j) {
@@ -2455,18 +2460,18 @@
     return out.sort(function (a, b) { return (b.liqUsd || 0) - (a.liqUsd || 0); });
   }
   // ONE ROW PER PAIR (RAZA 2026-11-07: "Identical token pair pools ... are repeated multiple times"). A pair's row is its
-  // deepest pool, with that pool's own figures and link, and "+3 pools" under the name; the tab count and the summary
-  // stay over every pool. A concentrated-liquidity pool has no pool page, so a pair that also has a classic pool leads
-  // with its deepest classic one, and only a pair with nothing else is a row without a link.
+  // deepest pool, with that pool's own figures and link; the tab count and the summary stay over every pool. A
+  // concentrated-liquidity pool has no pool page, so a pair that also has a classic pool leads with its deepest classic
+  // one, and only a pair with nothing else is a row without a link. Those rows read a dash under LP holders: such a
+  // pool's positions are listed per account on chain, never per pool, so no free source can count them.
   function pairRows(list) {
     var at = {}, out = [];
     list.forEach(function (p) {
       var k = 'k:' + p.key, g = at[k];
-      if (!g) { at[k] = { lead: p, n: 1 }; out.push(k); return; }
-      g.n++;
+      if (!g) { at[k] = { lead: p }; out.push(k); return; }
       if (!g.lead.href && p.href) g.lead = p;
     });
-    return out.map(function (k) { at[k].lead.more = at[k].n - 1; return at[k].lead; })
+    return out.map(function (k) { return at[k].lead; })
       .sort(function (a, b) { return (b.liqUsd || 0) - (a.liqUsd || 0); });
   }
   function poolCounts() {
@@ -2523,9 +2528,6 @@
   function lpTxt(p) {
     return p.lps == null ? '—' : Number(p.lps).toLocaleString('en-US');
   }
-  function moreTxt(p) {
-    return '+' + p.more.toLocaleString('en-US') + (p.more === 1 ? ' pool' : ' pools');
-  }
   function shareTxt(p, tvl) {
     if (!(tvl > 0) || p.liqUsd == null) return '—';
     var v = p.liqUsd / tvl * 100;
@@ -2575,19 +2577,17 @@
     var ICOS = '<span class="dxa-pl-icos" data-paired="1"><span class="dxa-pl-ico"></span><span class="dxa-pl-ico"></span></span>';
     body.innerHTML = top.map(function (p) {
       var name = escH(p.name), hf = escH(p.href), liq = money0(p.liqUsd), share = shareTxt(p, tvl);
-      var more = p.more > 0 ? '<span class="lx-pl-more" data-logoed="1" data-logo="" style="display:block;font-size:11px;font-weight:500;color:var(--text-muted);margin-top:1px">' + moreTxt(p) + '</span>' : '';
-      var more = p.more > 0 ? '<span class="lx-pl-more" data-logoed="1" data-logo="" style="display:block;font-size:11px;font-weight:500;color:var(--text-muted);margin-top:1px">' + moreTxt(p) + '</span>' : '';
       if (phone) {
         var tag = p.href ? 'a' : 'div';
         return '<' + tag + ' class="mdxa-pl-row"' + (p.href ? ' href="' + hf + '"' : '') + ' data-lxhref="' + hf + '" data-logoed="1">'
-          + '<div class="mdxa-pl-l">' + ICOS + '<div><div class="mdxa-pl-name">' + name + '</div>' + more
+          + '<div class="mdxa-pl-l">' + ICOS + '<div><div class="mdxa-pl-name">' + name + '</div>'
           + '<div class="mdxa-pl-net mdxa-pl-lp">' + lpTxt(p) + ' LP holders</div></div></div>'
           + '<div class="mdxa-pl-r"><div class="mdxa-pl-tvl mono">' + liq + '</div>'
           + '<div class="mdxa-pl-apr apr-low">' + (share === '—' ? share : share + ' share') + '</div></div></' + tag + '>';
       }
       var cell = function (t) { return '<td class="mono" data-logoed="1" data-logo="">' + t + '</td>'; };
       return '<tr class="dxa-pl-row" data-lxhref="' + hf + '"' + (p.href ? '' : ' style="cursor:default"') + '><td><div class="dxa-pl-pair">' + ICOS
-        + '<span class="dxa-pl-name">' + (p.href ? '<a href="' + hf + '" style="color:inherit;text-decoration:none">' + name + '</a>' : name) + more + '</span></div></td>'
+        + '<span class="dxa-pl-name">' + (p.href ? '<a href="' + hf + '" style="color:inherit;text-decoration:none">' + name + '</a>' : name) + '</span></div></td>'
         + cell(liq) + cell(lpTxt(p)) + cell(escH(share)) + '</tr>';
     }).join('');
     [].forEach.call(body.children, function (row, k) {
@@ -2598,7 +2598,7 @@
     // One page needs no pager, as on Stellar.
     foot.style.display = pages > 1 ? '' : 'none';
     foot.innerHTML = '<span class="info lxp">Showing ' + (start + 1).toLocaleString('en-US') + '–' + end.toLocaleString('en-US') + ' of '
-      + list.length.toLocaleString('en-US') + ' pairs</span><span class="pc"><button type="button" class="lx-pl-prev"' + (PL.page <= 1 ? ' disabled' : '') + '>‹ Prev</button>'
+      + list.length.toLocaleString('en-US') + ' pools</span><span class="pc"><button type="button" class="lx-pl-prev"' + (PL.page <= 1 ? ' disabled' : '') + '>‹ Prev</button>'
       + '<span class="pmid">Page ' + PL.page + ' of ' + pages + '</span>'
       + '<button type="button" class="lx-pl-next"' + (PL.page >= pages ? ' disabled' : '') + '>Next ›</button></span>';
   }

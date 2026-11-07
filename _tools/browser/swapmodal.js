@@ -7,12 +7,16 @@
 // fill in beside it, one press of the design's "Confirm Swap" opens the wallet. There is no Review/Back
 // stage -- the wallet's own approval screen is the confirmation, as on the Trade-Asset pane.
 //
-// THE DESIGN'S MARKUP ONLY. The From and To fields, the two .asset-pick buttons, the flip arrow, the rate
-// line and the details box (Route / Price impact / Network fee) are the design's; this file writes into
-// them. Three things are added, each copied from what the design or Stellar already draws:
-//   * MAX in the From label -- Stellar's .lx-wsmax (its CSS ships in lx-swapcalc-css, kept on this page).
-//   * "Platform fee" and "Minimum received" rows -- clones of the design's own details rows. A swap that
-//     takes a fee must say so before the press; Stellar's panel carries the same two figures.
+// STELLAR'S POPUP (RAZA 2026-11-07, tickets 294 and 297), on the Wallet and on the LUMOS page alike. The From and To
+// fields and the flip arrow are the design's; the rest is what _swapcalc.js builds around them there:
+//   * .lx-swap-pick under each amount (the design's inline .asset-pick is hidden), so the amount has its row.
+//   * MAX in the From label -- Stellar's .lx-wsmax.
+//   * .lx-swapd, hidden at rest and filled once a quote is in: Rate, Slippage tolerance, Swap fee, Network fee,
+//     Minimum received, the fee note. Nothing else; the design's rate line and Route box stay hidden for good. Stellar
+//     leaves Price impact out of this panel on purpose. Only a reading of 5% or more is said here, in the status line:
+//     pool 9001 is small enough for one swap to move it a long way, and Minimum received alone does not say why.
+//   * the button reads "Confirm Swap" whatever the state; what stops it goes in .lx-swap-err, above the panel, and a
+//     state that needs no explaining (nothing typed, still quoting) is simply a disabled button.
 //   * the token menus and the status line -- send.js's .lxw-astmenu / .lxw-say pattern.
 //
 // CLEARED ON OPEN (RAZA 2026-10-24: "if the swap box is filled and the popup is closed, and then opened
@@ -55,26 +59,15 @@
   function modal() { return $('#modalSwap'); }
   function parts(m) {
     var f = $$('.swap-pair .field', m);
-    var box = $('.modal-body > div[style]', m);
     return {
       from: f[0], to: f[1],
       inIn: f[0] && $('input', f[0]), outIn: f[1] && $('input', f[1]),
-      fromPick: f[0] && $('.asset-pick', f[0]), toPick: f[1] && $('.asset-pick', f[1]),
+      fromPick: f[0] && $('.lx-swap-pick', f[0]), toPick: f[1] && $('.lx-swap-pick', f[1]),
       fromMeta: f[0] && $('.field-label .meta', f[0]), toMeta: f[1] && $('.field-label .meta', f[1]),
-      rate: $('.swap-rate span strong', m), rateSpan: $('.swap-rate span', m),
-      box: box, rows: box ? $$(':scope > div', box) : [],
+      panel: $('.lx-swapd', m), err: $('.lx-swap-err', m),
       go: $('.modal-foot .btn-primary', m)
     };
   }
-  // The details rows by label, so a clone added below never shifts which row is which.
-  function row(P, label) {
-    for (var i = 0; i < P.rows.length; i++) {
-      var sp = $('span', P.rows[i]);
-      if (sp && sp.textContent.trim().toLowerCase() === label) return $('strong', P.rows[i]);
-    }
-    return null;
-  }
-
   var from = null, to = null;                 // { id, code, dec, logo }
   var bal = {};                               // id -> raw spendable balance (before MAX's NEAR keep)
   // id -> 1 when the last read FAILED. Kept apart from bal so "still reading" (bal null, no failure) and
@@ -87,11 +80,36 @@
   function asset(id, code, dec, logo) { return { id: id, code: code, dec: +dec, logo: logo || '' }; }
   var NEAR = asset('near', 'NEAR', 24, NEAR_LOGO);
 
+  // ---- the stacked layout -------------------------------------------------------------------------------------
+  // One sheet for both pages. Stellar's rules are repeated under #modalSwap because the LUMOS page ships neither
+  // .lx-asset-pick nor .lx-ap-ico's base rules. In the head of the dialog's life, before it can first open.
+  function css() {
+    if (document.getElementById('lxn-swapmodal-css')) return;
+    var st = document.createElement('style');
+    st.id = 'lxn-swapmodal-css';
+    st.textContent = '#modalSwap .field-label{display:flex;align-items:center;gap:8px}'
+      + '#modalSwap .field-label .meta{order:2;margin-left:auto}#modalSwap .field-label .lx-wsmax{order:3}'
+      + '#modalSwap .field-amt .asset-pick{display:none}'
+      + '#modalSwap .field-amt input{padding-right:14px!important}'
+      + '#modalSwap .lx-swap-pick{display:inline-flex;align-items:center;gap:7px;margin-top:6px;padding:5px 9px;'
+      + 'background:var(--surface,var(--bg,#12141b));border:1px solid var(--border,rgba(255,255,255,.14));border-radius:12px;'
+      + 'cursor:pointer;color:var(--text,#fff);font-weight:700;font-size:14px;white-space:nowrap}'
+      + '#modalSwap .lx-swap-pick:hover{border-color:var(--accent-soft,rgba(234,106,44,.45))}'
+      + '#modalSwap .lx-ap-ico{width:28px;height:28px;border-radius:50%;flex:0 0 auto;overflow:hidden;position:relative;'
+      + 'background-color:transparent;background-image:var(--lxlogo,none);background-size:cover;background-position:center;background-repeat:no-repeat}'
+      + '#modalSwap .lx-ap-ico:not([data-l=""])::after{content:attr(data-l);position:absolute;inset:0;display:flex;align-items:center;'
+      + 'justify-content:center;border-radius:50%;background:#3a3a46;color:#fff;font-weight:800;font-size:13px;pointer-events:none}'
+      + '#modalSwap .swap-pair .field{padding:9px 14px}'
+      + '#modalSwap .lx-swapd{margin-top:8px!important}';
+    (document.head || document.documentElement).appendChild(st);
+  }
+
   // ---- one-time set-up of the design's dialog ---------------------------------------------------------
   function prepare(m) {
     if (m.__lxsm) return;
     m.__lxsm = 1;
-    var P = parts(m);
+    css();
+    var P = parts(m), pair = $('.swap-pair', m);
     if (P.outIn) { P.outIn.readOnly = true; P.outIn.tabIndex = -1; }
     if (P.inIn) { P.inIn.disabled = false; P.inIn.setAttribute('inputmode', 'decimal'); P.inIn.autocomplete = 'off'; }
     // MAX: Stellar's button, in the From label, before the balance.
@@ -103,20 +121,37 @@
       mx.textContent = 'MAX';
       lab.insertBefore(mx, P.fromMeta || null);
     }
-    // Two rows cloned from the design's own, before the last one (Network fee), wearing the first row's
-    // spacing so the box keeps its rhythm.
-    if (P.box && P.rows.length >= 2 && !$('[data-lxsm-row]', P.box)) {
-      var last = P.rows[P.rows.length - 1], gap = P.rows[0].getAttribute('style') || '';
-      [['fee', 'Platform fee'], ['min', 'Minimum received']].forEach(function (d) {
-        var r = last.cloneNode(true);
-        r.setAttribute('style', gap);
-        r.setAttribute('data-lxsm-row', d[0]);
-        plain($('span', r), d[1]);
-        var st = $('strong', r);
-        st.setAttribute('style', 'color:var(--text);font-family:\'JetBrains Mono\',monospace');
-        plain(st, '—');
-        P.box.insertBefore(r, last);
-      });
+    // The design's rate line and Route box, found by what they say, as Stellar's layer finds them.
+    $$('.modal-body > div', m).forEach(function (d) {
+      if (d !== pair && /Route|Network fee|Price impact|Slippage/.test(d.textContent || '')) d.style.display = 'none';
+    });
+    [P.from, P.to].forEach(function (f) {
+      var fp = f && $('.asset-pick', f);
+      if (!fp || $('.lx-swap-pick', f)) return;
+      fp.style.display = 'none';
+      var ap = document.createElement('button');
+      ap.type = 'button';
+      ap.className = 'lx-asset-pick lx-swap-pick';
+      ap.setAttribute('data-lx-noswap', '');
+      ap.innerHTML = '<span class="lx-ap-ico" data-logoed="1"></span><span class="lx-ap-code" data-logoed="1"></span>'
+        + '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>';
+      fp.parentNode.insertBefore(ap, fp.nextSibling);
+    });
+    if (pair && !$('.lx-swapd', m)) {
+      var ee = document.createElement('div');
+      ee.className = 'lx-swap-err';
+      ee.style.display = 'none';
+      var pp = document.createElement('div');
+      pp.className = 'lx-swapd';
+      pp.style.display = 'none';
+      pp.innerHTML = '<div class="r"><span>Rate</span><strong data-k="rate">—</strong></div>'
+        + '<div class="r"><span>Slippage tolerance</span><strong data-k="slip">—</strong></div>'
+        + '<div class="r"><span data-k="feelbl">Swap fee</span><strong data-k="fee">—</strong></div>'
+        + '<div class="r"><span>Network fee</span><strong data-k="net">—</strong></div>'
+        + '<div class="r rtot"><span>Minimum received</span><strong data-k="min">—</strong></div>'
+        + '<div class="lx-feenote" data-k="feenote"></div>';
+      pair.parentNode.insertBefore(pp, pair.nextSibling);
+      pair.parentNode.insertBefore(ee, pp);
     }
     if (P.go) P.go.setAttribute('data-lxsm-go', '1');
   }
@@ -137,14 +172,18 @@
     im.onerror = function () { if (im.parentNode) im.parentNode.removeChild(im); plain(host, a.code.charAt(0).toUpperCase()); };
     host.appendChild(im);
   }
+  // .lx-ap-ico paints from --lxlogo and draws its letter in ::after; a child <img> is hidden by the shared sheet.
   function setPick(btn, a) {
     if (!btn || !a) return;
-    icon($('.a-ico', btn), a);
-    // The ticker is the button's bare text node; the icon span and the chevron stay the design's.
-    var done = false;
-    [].forEach.call(btn.childNodes, function (nd) {
-      if (nd.nodeType === 3 && nd.nodeValue.trim()) { if (!done) { nd.nodeValue = ' ' + a.code + ' '; done = true; } else nd.nodeValue = ' '; }
-    });
+    var ico = $('.lx-ap-ico', btn), u = String(a.logo || '').split(String.fromCharCode(10)).join('');
+    if (u.indexOf('"') >= 0) u = '';
+    if (u.indexOf('data:image/svg+xml,') === 0) u = u.split('#').join('%23');
+    if (ico) {
+      if (u) ico.style.setProperty('--lxlogo', 'url("' + u + '")');
+      else ico.style.removeProperty('--lxlogo');
+      ico.setAttribute('data-l', u ? '' : a.code.charAt(0).toUpperCase());
+    }
+    plain($('.lx-ap-code', btn), a.code);
   }
   function room(id) { return bal[id] == null ? null : S().swapRoom(id, bal[id]); }   // 0.2 NEAR kept for a swap's gas
   function paintBalance(P) {
@@ -163,37 +202,37 @@
     if (v == null || !isFinite(v)) return '—';
     return v < 0.01 ? '< 0.01%' : (v < 100 ? v.toFixed(2) : Math.round(v)) + '%';
   }
+  function cell(P, k, text) { var e = P.panel && $('[data-k="' + k + '"]', P.panel); if (e) plain(e, text); }
+  // Stellar's two fee notes, word for word. The flame is its own glyph.
+  var FLAME = '<span class="lx-fee-ic"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 23c-4 0-7-2.7-7-6.5 0-2.3 1.2-4 2.4-5.4.3.9 1 1.6 1.9 1.6 1.4 0 1.7-1 1.6-3.5-.1-2.4 1-4.6 3.1-6.2-.4 2 .3 3.2 1.6 4.6C19 9.6 19 11.8 19 16.5c0 3.8-3 6.5-7 6.5z"></path></svg></span>';
+  function feeNote(bps) {
+    return bps <= 10
+      ? '<div class="lx-fee-banner holder">' + FLAME + '<span class="txt"><b>0.1% trading fees</b> — 50% discount active</span></div>'
+      : '<div class="lx-fee-banner nudge">' + FLAME + '<span class="txt"><b>50% off trading fees</b> — hold 250,000 <a class="lx-fee-buy" href="/lumos/near" data-lxc="" data-logoed="1"><svg width="0" height="0" aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden"></svg>LUMOS</a></span></div>';
+  }
+  // Empty until a quote is in. While one is on its way the last figures stand, so typing does not make the panel blink;
+  // the button is disabled meanwhile, so nothing can be pressed on them.
   function paintQuote(P) {
-    var r = row(P, 'route'), im = row(P, 'price impact'), nf = row(P, 'network fee');
-    var fe = P.box && $('[data-lxsm-row="fee"] strong', P.box), mn = P.box && $('[data-lxsm-row="min"] strong', P.box);
-    var bps = S().FEE_BPS;
-    if (nf) plain(nf, S().NET_FEE_EST);
+    if (!q && amountRaw(P)) return;
     if (!q || !q.ok) {
       if (P.outIn) P.outIn.value = '';
-      plain(P.rate, '—');
-      if (r) plain(r, from && to ? from.code + ' → ' + to.code : '—');
-      if (im) { plain(im, '—'); im.style.color = 'var(--text)'; }
-      if (fe) plain(fe, (bps / 100) + '%');
-      if (mn) plain(mn, '—');
+      if (P.panel) P.panel.style.display = 'none';
       return;
     }
+    var bps = S().FEE_BPS;
     if (P.outIn) P.outIn.value = down(q.out, to.dec);
     // The rate the pools give, on the amount that is actually swapped (after the fee).
     var rt = S().toNum(q.out, to.dec) / S().toNum(q.net, from.dec);
-    plain(P.rate, (rt > 0 && isFinite(rt) ? +rt.toPrecision(6) : '—') + ' ' + to.code);
-    if (P.rateSpan && P.rateSpan.firstChild && P.rateSpan.firstChild.nodeType === 3) P.rateSpan.firstChild.nodeValue = '1 ' + from.code + ' ≈ ';
-    if (r) plain(r, from.code + ' → ' + to.code + (q.hops && q.hops.length > 1 ? ' (via ' + hopCode(q.hops[0].tout) + ')' : ' (Direct)'));
-    if (im) {
-      plain(im, fmtImpact(q.impact));
-      im.style.color = q.impact == null ? 'var(--text)' : (q.impact < 1 ? 'var(--green)' : (q.impact < 5 ? '#f5a524' : '#e5484d'));
-    }
-    if (fe) plain(fe, show(q.fee, from.dec) + ' ' + from.code + ' (' + (bps / 100) + '%)');
-    if (mn) plain(mn, show(q.min, to.dec) + ' ' + to.code);
-  }
-  function hopCode(id) {
-    if (id === S().WNEAR) return 'NEAR';
-    var m = S().meta(id);
-    return (m && m.code) || 'USDC';
+    cell(P, 'rate', '1 ' + from.code + ' ≈ ' + (rt > 0 && isFinite(rt) ? +rt.toPrecision(6) : '—') + ' ' + to.code);
+    cell(P, 'slip', (S().SLIP_BPS / 100) + '%');
+    cell(P, 'feelbl', 'Swap fee (' + (bps / 100) + '%)');
+    cell(P, 'fee', show(q.fee, from.dec) + ' ' + from.code);
+    cell(P, 'net', S().NET_FEE_EST);
+    cell(P, 'min', show(q.min, to.dec) + ' ' + to.code);
+    var note = P.panel && $('[data-k="feenote"]', P.panel);
+    if (note) note.innerHTML = feeNote(bps);
+    if (P.panel) P.panel.style.display = '';
+    if (q.impact != null && q.impact >= 5) say('This swap moves the pool price by ' + fmtImpact(q.impact) + '.', 'muted');
   }
 
   // ---- status line and the button ------------------------------------------------------------------------
@@ -232,24 +271,26 @@
     return raw && S().big(raw) > BigInt(0) ? raw : null;
   }
   // Why the button cannot be pressed, or '' when it can. Every money check the press makes again.
+  // An answer of '.' is a state with nothing to explain: the button is disabled and that is all.
   function blocker(P) {
-    if (!me()) return 'Connect a NEAR wallet';
-    if (!from || !to) return 'Choose two tokens';
-    var raw = amountRaw(P);
-    if (!raw) return 'Enter an amount';
-    if (feeOk[from.id] === false) return 'Swaps from ' + from.code + ' are not open yet';
+    if (!me()) return 'Connect a NEAR wallet to swap.';
+    if (!from || !to) return '.';
+    if (feeOk[from.id] === false) return from.code + ' cannot be swapped here yet: the platform fee account is not registered on it.';
     var r = room(from.id);
-    if (r == null) return balFail[from.id] ? 'Could not read your balance' : 'Reading your balance…';
-    if (S().big(raw) > S().big(r)) return 'Not enough ' + from.code;
-    if (!q) return 'Getting a quote…';
-    if (!q.ok) return q.why || 'No route';
-    if (q.amount !== raw || q.from !== from.id || q.to !== to.id) return 'Getting a quote…';
+    if (r == null && balFail[from.id]) return 'Your ' + from.code + ' balance could not be read from the NEAR network. Close and reopen Swap to try again.';
+    var raw = amountRaw(P);
+    if (!raw || r == null) return '.';
+    if (S().big(raw) > S().big(r)) return 'Not enough ' + from.code + '.';
+    if (!q) return '.';
+    if (!q.ok) return (q.why || 'No route') + '.';
+    if (q.amount !== raw || q.from !== from.id || q.to !== to.id) return '.';
     return '';
   }
   function setCta(P) {
     if (busy) return;
-    var why = blocker(P);
-    label(P, why || GO, !why);
+    var why = blocker(P), text = why === '.' ? '' : why;
+    label(P, GO, !why);
+    if (P.err) { P.err.textContent = text; P.err.style.display = text ? '' : 'none'; }
   }
 
   // ---- data ---------------------------------------------------------------------------------------------
@@ -272,8 +313,6 @@
       if (from !== f) return;
       var P = parts(m);
       paintBalance(P);
-      if (feeOk[f.id] === false) say(f.code + ' cannot be swapped here yet: the platform fee account is not registered on it.', 'muted');
-      else if (balFail[f.id]) say('Your ' + f.code + ' balance could not be read from the NEAR network. Close and reopen Swap to try again.', 'bad');
       setCta(P);
     });
   }
@@ -336,7 +375,7 @@
   function openMenu(btn, side) {
     var m = modal();
     if (!m || busy) return;
-    var old = $('.lxw-astmenu', m);
+    var old = $('.lxw-astmenu');
     if (old) { var same = old.__side === side; old.parentNode.removeChild(old); if (same) return; }
     (side === 'from' ? heldList() : curatedList()).then(function (list) {
       var other = side === 'from' ? to : from;
@@ -345,7 +384,8 @@
       var menu = document.createElement('div');
       menu.className = 'lxw-astmenu';
       menu.__side = side;
-      menu.style.cssText = 'position:absolute;z-index:40;right:0;top:calc(100% + 6px);min-width:210px;'
+      // Fixed, on body: the picker now sits low in the dialog, where .modal-body's own scroll would clip an absolute menu.
+      menu.style.cssText = 'position:fixed;z-index:100000;min-width:210px;'
         + 'max-height:260px;overflow:auto;background:var(--surface,#14141b);border:1px solid var(--border,#2a2a35);'
         + 'border-radius:11px;padding:5px;box-shadow:0 12px 30px rgba(0,0,0,.45)';
       list.forEach(function (a) {
@@ -370,18 +410,19 @@
         });
         menu.appendChild(r);
       });
-      var host = btn.parentNode;
-      if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
-      host.appendChild(menu);
-      // Bound on the next frame: the click that opened the menu is still propagating (send.js's note).
-      requestAnimationFrame(function () {
+      document.body.appendChild(menu);
+      var br = btn.getBoundingClientRect(), mh = menu.offsetHeight || 260, vh = window.innerHeight || 800;
+      menu.style.left = Math.round(Math.max(8, br.left)) + 'px';
+      menu.style.top = Math.round(br.bottom + 6 + mh > vh - 8 ? Math.max(8, br.top - mh - 6) : br.bottom + 6) + 'px';
+      // Bound after this click: it is still propagating (send.js's note).
+      setTimeout(function () {
         function away(e) {
           if (menu.contains(e.target) || btn.contains(e.target)) return;
           if (menu.parentNode) menu.parentNode.removeChild(menu);
           document.removeEventListener('click', away, true);
         }
         document.addEventListener('click', away, true);
-      });
+      }, 0);
     });
   }
   function changed(fromChanged) {
@@ -389,6 +430,7 @@
     if (!m) return;
     var P = parts(m);
     say('');
+    if (P.panel) P.panel.style.display = 'none';       // another pair's figures do not stand while this one is asked
     paintPair(P);
     if (fromChanged) refreshFrom();
     doQuote();
@@ -408,7 +450,7 @@
     if (u && to.id === u.id && !to.logo) to = asset(u.id, u.code, u.dec, u.logo);
     if (P.inIn) P.inIn.value = '';
     q = null; seq++; busy = false;
-    var menu = $('.lxw-astmenu', m);
+    var menu = $('.lxw-astmenu');
     if (menu) menu.parentNode.removeChild(menu);
     say('');
     paintPair(P);
@@ -471,7 +513,7 @@
     var m = modal();
     if (!m || busy) return;
     var P = parts(m), why = blocker(P);
-    if (why) { say(why + '.', 'bad'); return; }
+    if (why) { if (why !== '.') say(why, 'bad'); return; }
     var who = me(), shown = q, f = from, t = to;
     busy = true;
     say('');
@@ -534,7 +576,7 @@
       if (r != null && P.inIn) { P.inIn.value = down(r, from.dec); say(''); doQuote(); }
       return;
     }
-    var pk = t.closest('.asset-pick');
+    var pk = t.closest('.lx-swap-pick');
     if (pk) { e.preventDefault(); e.stopImmediatePropagation(); openMenu(pk, pk === P.toPick ? 'to' : 'from'); return; }
     if (t.closest('.swap-arrow')) {
       e.preventDefault(); e.stopImmediatePropagation();
@@ -559,9 +601,7 @@
     if (i >= 0) v = v.slice(0, i + 1) + v.slice(i + 1).replace(/\./g, '');
     if (from && i >= 0 && v.length - i - 1 > from.dec) v = v.slice(0, i + 1 + from.dec);
     if (t.value !== v) t.value = v;
-    // A failed balance read keeps its explanation: typing does not make the balance any more readable.
-    if (from && balFail[from.id]) say('Your ' + from.code + ' balance could not be read from the NEAR network. Close and reopen Swap to try again.', 'bad');
-    else say('');
+    say('');
     q = null;
     setCta(P);
     requote();

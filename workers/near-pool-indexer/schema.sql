@@ -28,6 +28,8 @@ CREATE TABLE IF NOT EXISTS lpv (pool INTEGER PRIMARY KEY, list TEXT NOT NULL, po
 -- Trades per pool per 5-minute window, from DexScreener's rolling m5 (trJob). trw: the pools sampled, first = when it began.
 CREATE TABLE IF NOT EXISTS trc (pool TEXT NOT NULL, b INTEGER NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (pool, b));
 CREATE TABLE IF NOT EXISTS trw (pool TEXT PRIMARY KEY, first INTEGER NOT NULL, seen INTEGER NOT NULL);
+-- One row per sampling run, b = the window it read: ok 1 when every batch answered. No row, or ok 0: a window nobody saw.
+CREATE TABLE IF NOT EXISTS trr (b INTEGER PRIMARY KEY, ok INTEGER NOT NULL);
 -- Token logos as the contract publishes them (icon()); u '' = the token publishes none.
 CREATE TABLE IF NOT EXISTS icn (t TEXT PRIMARY KEY, u TEXT NOT NULL);
 -- pools no list knows the holders of, worked through in liquidity order; lpc is who was found, recounted with the rest

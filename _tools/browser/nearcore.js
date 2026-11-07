@@ -596,7 +596,7 @@
               if (s <= BigInt(0) || total <= BigInt(0)) return;
               var f = Number(s * BigInt(1000000000) / total) / 1e9, tvl = p.tvl == null ? NaN : +p.tvl;
               out.push({ id: String(p.id), syms: (p.token_symbols || []).map(function (x) { return String(cleanSym(x) || '?').slice(0, 16); }),
-                ids: p.token_account_ids, amounts: p.amounts || [], fraction: f,
+                ids: p.token_account_ids, amounts: p.amounts || [], fraction: f, lp: s.toString(),
                 share: f * 100, tvl: isFinite(tvl) ? tvl : null, usd: isFinite(tvl) ? f * tvl : null, farm: !!staked[p.id] });
             }, function () { failed++; });
           })).then(next);

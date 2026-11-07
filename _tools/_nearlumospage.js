@@ -38,22 +38,16 @@ const CSS_ID = 'lx-nearlumospage-css';
 const LOGO_CSS = 'width:100%;height:100%;object-fit:cover;display:block;border-radius:50%';
 const STYLE = '<style id="' + CSS_ID + '">'
   + '.hero-price-block:not(.lxlt) .price-native{visibility:hidden}'
-  // The Swap popup at rest is Stellar's: From, To, the two buttons. The rate and the details box show once an amount is
-  // typed (.lxn-amt, as Stellar's lx-swapd), without Route and Price impact: the box's first two rows.
-  + '#modalSwap .swap-rate,#modalSwap .modal-body>div[style]:not(.lxw-say){display:none}'
-  + '#modalSwap.lxn-amt .swap-rate{display:flex}'
-  + '#modalSwap.lxn-amt .modal-body>div[style]:not(.lxw-say){display:block}'
-  + '#modalSwap .modal-body>div[style]:not(.lxw-say)>div:nth-child(-n+2){display:none!important}'
-  // Balance, then MAX, right-aligned, as Stellar's From label.
-  + '#modalSwap .field-label .meta{order:2}#modalSwap .field-label .lx-wsmax{order:3}'
+  // The Swap popup's look is browser/swapmodal.js's own sheet now, so the Wallet and this page cannot differ.
   + '.pool-list .pair-icons .b,.pools .pair-icons .b{overflow:hidden}'
   + '.lxn-book{display:inline-block;margin-left:8px;padding:1px 7px;border-radius:999px;font-size:11.5px;font-weight:700;color:var(--text-muted);background:var(--bg);border:1px solid var(--border)}'
   + '.lxn-noholders{padding:18px;color:var(--text-soft);font-size:14.5px}'
-  // Ticket 270's list, under the utility cards. Down the first column, then the second; one column on a phone.
-  + '#lxnEco{margin-top:18px;padding:18px 18px 12px;background:var(--surface);border:1px solid var(--border);border-radius:14px}'
-  + '#lxnEco h3{margin:0 0 4px;font-size:18px;font-weight:800;color:var(--text)}'
-  + '#lxnEco p{margin:0 0 12px;font-size:14.5px;line-height:1.5;color:var(--text-muted)}'
-  + '.lxn-eco-list{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(5,auto);grid-auto-flow:column;column-gap:22px}'
+  // The phone's name for .sub carries no red of its own.
+  + '.cstat .small-sub.up{color:var(--green)}.cstat .small-sub.down{color:var(--red,#e5484d)}'
+  // Tickets 270 and 292: the list sits in the Ecosystem card, Stellar's own section. The card takes the band's two right
+  // columns with Native and Whale stacked beside it, so ten rows do not stretch their neighbours. One column when narrow.
+  + '@media(min-width:761px){.utility-grid .util-card.native,.utility-grid .util-card.whale{grid-column:1}.utility-grid .util-card.eco{grid-column:2/-1;grid-row:span 2}}'
+  + '.lxn-eco-list{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(5,auto);grid-auto-flow:column;column-gap:22px;margin:6px 0 14px}'
   + '.lxn-eco-row{display:flex;align-items:center;gap:12px;padding:10px 4px;min-width:0;border-top:1px solid var(--border);text-decoration:none;color:inherit}'
   + '.lxn-eco-row:nth-child(5n+1){border-top:0}'
   + '.lxn-eco-row:hover .lxn-eco-tk{color:var(--accent,#ea6a2c)}'
@@ -65,6 +59,7 @@ const STYLE = '<style id="' + CSS_ID + '">'
   + '.lxn-eco-tk .lx-vtick{width:15px;height:15px;flex:0 0 15px;margin:0}.lxn-eco-tk .lx-vtick svg{width:10px;height:10px}'
   + '.lxn-eco-id{font:500 12.5px/1.2 "JetBrains Mono",monospace;color:var(--text-soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
   // The contract is short enough to read whole: the lock and the two buttons wrap under it on a phone.
+  + '@media(max-width:1180px){.lxn-eco-list{display:block}.lxn-eco-row:nth-child(5n+1){border-top:1px solid var(--border)}.lxn-eco-row:first-child{border-top:0}}'
   + '@media(max-width:760px){.addr-row .addr-value{max-width:none!important;overflow:visible!important}.lxn-eco-list{display:block}.lxn-eco-row:nth-child(5n+1){border-top:1px solid var(--border)}.lxn-eco-row:first-child{border-top:0}}'
   + '</style>';
 // The earlier style block of this id, or the one from before the mint.
@@ -154,7 +149,7 @@ function nearMarkup(h, key) {
 
   // The hero: the pill, the contract and its two actions. First the design's comment, which quotes the row's opening tag.
   h = h.replace(/<!--(?:(?!-->)[sS])*?addr-row(?:(?!-->)[sS])*?-->/g, '');
-  h = h.replace(/<div class="lh-desc">[^<]*<\/div>/, '<div class="lh-desc">LumosCore’s native utility token on NEAR</div>');
+  h = h.replace(/<div class="lh-desc">[^<]*<\/div>/, '<div class="lh-desc">LumosCore\'s native utility token — powers platform fees and rewards</div>');
   h = eachEl(h, '<div class="addr-row', 'div', (el) => el
     .replace(/<div class="addr-row[^"]*">/, '<div class="addr-row lxlt">')
     .replace(/<span class="net-tag">[\s\S]*?(<span class="addr-value)/, '<span class="net-tag"><span class="b-ico" data-logoed="1" style="background:transparent">' + NEAR_IMG + '</span> NEAR</span>\n$1')
