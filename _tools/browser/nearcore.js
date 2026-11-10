@@ -317,13 +317,16 @@
       var da = (actPair(acts[0])[1].delegate_action) || {};
       sg = da.sender_id || sg; rc = da.receiver_id || rc; acts = da.actions || [];
     }
-    txns.push({ ts: ts, h: h, sg: sg, rc: rc, ok: ok, acts: acts.map(function (a) {
+    var row = { ts: ts, h: h, sg: sg, rc: rc, ok: ok, acts: acts.map(function (a) {
       var p = actPair(a), b = p[1];
       return { a: ACT_NAME[p[0]] || String(p[0]).toUpperCase(), m: b.method_name || '', dep: +b.deposit || 0 };
-    }) });
+    }) };
+    txns.push(row);
 
-    var net = {}, who = {};
-    function add(c, amt, other) { net[c] = (net[c] || BigInt(0)) + amt; if (other) who[c] = other; }
+    // EVERY counterparty, kept on the transaction (wallet.js's bridge rows, RAZA 2026-11-10): the legs below net per token
+    // and keep one name each, and a wrap that is sent straight on nets to nothing -- Omni's own name is then nowhere.
+    var net = {}, who = {}, peers = {};
+    function add(c, amt, other) { net[c] = (net[c] || BigInt(0)) + amt; if (other) { who[c] = other; peers[other] = 1; } }
     // NEAR that a contract unwrapped in this transaction ("Withdraw <x> NEAR from <contract>" on wrap.near) and
     // then paid on to this account is the proceeds of a sale (Rhea DCL unwraps for the seller), not change.
     var wd = {};
@@ -374,6 +377,7 @@
         });
       });
     });
+    row.to = Object.keys(peers);
     Object.keys(net).forEach(function (c) {
       var v = net[c];
       if (v === BigInt(0)) return;

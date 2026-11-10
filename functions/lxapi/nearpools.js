@@ -192,12 +192,14 @@ function offRow(p, all, meta) {
   // each side, so its wNEAR side, doubled, is its liquidity in NEAR -- the same figure the reserves x prices sum
   // would give once the other token is priced.
   const wi = p.ids.indexOf(WNEAR);
-  if (liq == null && p.ids.length === 2 && wi >= 0 && tokens[wi].v != null) liq = tokens[wi].v * 2;
+  // est marks it: a figure for ranking and the list, not a priced total (the pool page shows no dollar sum for it).
+  let est = 0;
+  if (liq == null && p.ids.length === 2 && wi >= 0 && tokens[wi].v != null) { liq = tokens[wi].v * 2; est = 1; }
   // LISTED MEANS EVERY TOKEN IS CURATED -- the same rule the list itself uses. A pool too new or too small for
   // Rhea's top list is still a pool of tokens LumosCore vouches for, and gets no "Not curated" warning.
   const listed = p.ids.every((t) => !!META[t]);
   return { id: p.id, kind: p.kind, tokens, fee: p.fee == null ? null : p.fee / 100,
-    liq, vol: null, fees: null, apr: null, trades: null, listed };
+    liq, est, vol: null, fees: null, apr: null, trades: null, listed };
 }
 // A pool Rhea's top list does not carry -- a new or tiny one (RAZA 2026-11-04: LUMOS/wNEAR 9001, two minutes
 // old and $2.27 deep, read "Pool not found") -- is read from the chain itself, which is the authority on whether

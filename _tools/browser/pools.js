@@ -68,6 +68,31 @@
     // Any token without one, curated or not: the indexer serves what its contract publishes (RAZA 2026-11-06).
     return t.i ? 'https://near-pool-indexer.usa282.workers.dev/icon?v=2&t=' + encodeURIComponent(t.i) : '';
   }
+  // EVERY TOKEN'S MARK, UP TO FOUR (RAZA 2026-11-10: pool 1910 "USDT.e / USDC.e / DAI" showed two logos). DAI's logo was
+  // in the data all along; the row and the card drew only the design's two discs. A pool of three or four gets the rest,
+  // overlapping in the same stack; the design's rules place two discs only, so for more every disc is placed here.
+  function stackIcons(icons, toks, size, cls) {
+    var n = Math.min(4, (toks || []).length);
+    if (n < 3) return;
+    for (var k = 2; k < n; k++) {
+      var x = logoEl(nameOf(toks[k]), logoOf(toks[k]), size);
+      x.classList.add(cls);
+      icons.appendChild(x);
+    }
+    var step = Math.round(size * 0.62), kids = icons.children;
+    for (var j = 0; j < kids.length; j++) {
+      var st = kids[j].style;
+      st.setProperty('position', 'absolute', 'important');
+      st.setProperty('top', '0', 'important');
+      st.setProperty('left', (j * step) + 'px', 'important');
+      st.setProperty('margin-left', '0', 'important');
+      st.setProperty('z-index', String(kids.length - j), 'important');
+    }
+    icons.style.setProperty('position', 'relative', 'important');
+    icons.style.setProperty('width', (size + step * (kids.length - 1)) + 'px', 'important');
+    icons.style.setProperty('height', size + 'px', 'important');
+    icons.style.setProperty('flex', '0 0 auto', 'important');
+  }
   function logoEl(name, logo, size) {
     var s = size || 32;
     var NS = 'http://www.w3.org/2000/svg';
@@ -393,6 +418,7 @@
     var la = logoEl(nameOf(t0), logoOf(t0), 32); la.classList.add('pa');
     var lb = logoEl(nameOf(t1), logoOf(t1), 32); lb.classList.add('pb');
     icons.appendChild(la); icons.appendChild(lb);
+    stackIcons(icons, p.tokens, 32, 'pb');
     wrap.appendChild(icons);
     var nm = el('div');
     nm.appendChild(el('div', 'pair-name', pairName(p)));
@@ -465,6 +491,7 @@
     var ia = logoEl(nameOf(c0), logoOf(c0), 26); ia.classList.add('a');
     var ib = logoEl(nameOf(c1), logoOf(c1), 26); ib.classList.add('b');
     icons.appendChild(ia); icons.appendChild(ib);
+    stackIcons(icons, p.tokens, 26, 'b');
     head.appendChild(icons);
 
     var info = el('div', 'pc-info');

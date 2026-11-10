@@ -919,6 +919,11 @@
   // GeckoTerminal.
   var IDX = 'https://near-pool-indexer.usa282.workers.dev';
   var TXI = { rows: null, from: null, failed: false };
+  // THE WINDOW THE EMPTY TABS SPEAK FOR (RAZA 2026-11-10, "No deposits in the last 600 pool operations"): what was read is
+  // this pool's last TX_IDX_LIMIT operations in the index. When that many came back, the record goes further back than
+  // the read, so the note names the count; fewer is the whole record, which starts at the index's first day (from) and
+  // is kept 30 days (workers/near-pool-indexer KEEP_DAYS), so the note names that day.
+  var TX_IDX_LIMIT = 300, TX_IDX_KEEP = 30 * 86400000;
   function tokName(id) {
     var p = window.__lxnPool, t = p && p.tokens.filter(function (x) { return x.i === id; })[0];
     return t ? t.name : (id.length > 14 ? id.slice(0, 6) + '…' : id);
@@ -927,13 +932,14 @@
     var p = window.__lxnPool;
     if (!p) return;
     if (!IDX) { TXI.off = true; return; }
-    fetch(IDX + '/pool?id=' + encodeURIComponent(p.id) + '&limit=300').then(function (r) { return r.json(); }).then(function (d) {
+    fetch(IDX + '/pool?id=' + encodeURIComponent(p.id) + '&limit=' + TX_IDX_LIMIT).then(function (r) { return r.json(); }).then(function (d) {
       if (!d || !d.ok) throw new Error('index');
       var ids = p.tokens.map(function (t) { return t.i; });
       return Promise.all(ids.map(function (i) { return decOf(i).catch(function () { return null; }); })).then(function (decs) {
         var dec = {}; ids.forEach(function (i, k) { dec[i] = decs[k]; });
         var amt = function (raw, tok) { return dec[tok] != null ? scaled(raw, dec[tok]) : null; };
         TXI.from = d.from || null;
+        TXI.cap = (d.rows || []).length >= TX_IDX_LIMIT;
         TXI.rows = (d.rows || []).map(function (x) {
           var r = { kind: x.kind === 'add' ? 'deposit' : x.kind === 'remove' ? 'withdraw' : 'swap', who: ACCT_RE.test(x.who || '') ? x.who : '',
             t: +x.t || 0, hash: /^[A-Za-z0-9]{20,64}$/.test(x.tx || '') ? x.tx : '', src: 'idx' };
@@ -1009,14 +1015,19 @@
     go();
   }
   function txNote() {
-    var since = TXI.from ? new Date(TXI.from).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
+    var fromMs = TXI.from ? Math.max(+TXI.from, Date.now() - TX_IDX_KEEP) : 0;
+    var since = fromMs ? new Date(fromMs).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
     if (TX.filter === 'deposit' || TX.filter === 'withdraw') {
+      var what = TX.filter === 'deposit' ? 'deposits' : 'withdrawals';
       if (TXI.off) return 'Deposits and withdrawals are not published for NEAR pools yet. Only swaps are listed.';
-      if (TXI.rows == null && !TXI.failed) return 'Reading this pool’s ' + (TX.filter === 'deposit' ? 'deposits' : 'withdrawals') + '…';
-      return 'No ' + (TX.filter === 'deposit' ? 'deposits' : 'withdrawals') + ' in this pool' + (since ? ' since ' + since : '') + '.';
+      if (TXI.rows == null && !TXI.failed) return 'Reading this pool’s ' + what + '…';
+      if (TXI.failed) return 'This pool’s ' + what + ' could not be read right now. Reload to try again.';
+      if (TXI.cap) return 'No ' + what + ' in the last ' + TX_IDX_LIMIT.toLocaleString('en-US') + ' pool operations.';
+      return 'No ' + what + ' in this pool' + (since ? ' since ' + since : '') + '.';
     }
     if (TX.err === 'untracked' && TXI.off) return 'This pool’s swaps are not published by any feed LumosCore reads yet (GeckoTerminal does not track it), so they cannot be listed here.';
     if (TX.err === 'untracked' && TXI.rows == null && !TXI.failed) return 'Reading this pool’s recent swaps…';
+    if (TX.err === 'untracked' && TXI.cap) return 'No swaps in the last ' + TX_IDX_LIMIT.toLocaleString('en-US') + ' pool operations.';
     if (TX.err === 'untracked') return 'No swaps in this pool' + (since ? ' since ' + since : ' recently') + '.';
     if (TX.err) return 'Recent swaps could not be loaded right now. Reload to try again.';
     if (!TX.rows) return 'Reading this pool’s recent swaps…';
@@ -1214,7 +1225,30 @@
 
     $$('.ph-icons').forEach(function (icons) {
       tokImg(icons.querySelector('.pa'), a);
-      tokImg(icons.querySelector('.pb'), b);
+      var pb = icons.querySelector('.pb');
+      tokImg(pb, b);
+      // Every token's mark, up to four (RAZA 2026-11-10: pool 1910's DAI had none; the header drew two discs). The
+      // extra discs are copies of the second, so they wear its ring, and all of them are placed here in one stack.
+      [].slice.call(icons.querySelectorAll('.lx-phx')).forEach(function (x) { x.parentNode.removeChild(x); });
+      var n = Math.min(4, T.length);
+      if (!pb || n < 3) return;
+      for (var k = n - 1; k >= 2; k--) {
+        var x = pb.cloneNode(false);
+        x.classList.add('lx-phx');
+        pb.parentNode.insertBefore(x, pb.nextSibling);
+        tokImg(x, T[k]);
+      }
+      var kids = [].slice.call(icons.children), size = icons.querySelector('.pa').offsetWidth || 44, step = Math.round(size * 0.62);
+      kids.forEach(function (c, j) {
+        c.style.setProperty('position', 'absolute', 'important');
+        c.style.setProperty('top', '0', 'important');
+        c.style.setProperty('left', (j * step) + 'px', 'important');
+        c.style.setProperty('margin-left', '0', 'important');
+        c.style.setProperty('z-index', String(kids.length - j), 'important');
+      });
+      icons.style.setProperty('position', 'relative', 'important');
+      icons.style.setProperty('width', (size + step * (kids.length - 1)) + 'px', 'important');
+      icons.style.setProperty('height', size + 'px', 'important');
     });
     // Every token named, each a link to its Trade page. A stable pool holds three or four; the design's
     // two discs show the first two, the name lists them all.
@@ -1286,6 +1320,15 @@
           big2.appendChild(u2);
           ls.appendChild(big2);
         });
+        // THE POOL IN DOLLARS, under the amounts, as Stellar's card closes (RAZA 2026-11-10: "$1.24M"). Not the "1.18M
+        // NEAR" line 267 removed: it is every reserve at its own price, and a pool with a token that has no price
+        // (nearpools sends liq null, or est when it doubled the wNEAR side) gets no total rather than half of one.
+        if (USD && row.liq != null && !row.est) {
+          var tot = el('span', 'lx-liqusd', usdShort(row.liq * USD));
+          tot.style.display = 'block';
+          tot.setAttribute('data-logoed', '1');
+          ls.appendChild(tot);
+        }
       }
     }
 

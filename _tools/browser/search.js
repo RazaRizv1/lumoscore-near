@@ -164,6 +164,10 @@
     var info = el('div', 'sp-info');
     var nameRow = el('div', 'sp-name-row', t.n || short(t.i));
     if (t.cur) nameRow.appendChild(vBadge());
+    // THE DOMAIN BADGE, STELLAR'S "lumoscore.com" (RAZA 2026-11-10, ticket 318). On NEAR it is the site the curated list
+    // carries for the token, so only a curated row has one.
+    var dom = t.cur ? domainOf(t.w) : '';
+    if (dom) { nameRow.appendChild(document.createTextNode(' ')); nameRow.appendChild(tag('sp-domain', dom)); }
     info.appendChild(nameRow);
     // STELLAR'S AND XRPL'S ROW (RAZA 2026-10-30, "fix the search like Stellar and XRPL"; read off lumoscore.com):
     // the second line is "CODE · Name · N holders" and the right side is the address chip alone. This row also
@@ -171,8 +175,12 @@
     // ("$0.00165-2.45%token…near"). A token IS its contract on NEAR, so the contract is the chip.
     var nm = String(t.nm || '').trim(), sub = [t.n || short(t.i)];
     if (nm && nm.toLowerCase() !== String(t.n || '').toLowerCase()) sub.push(nm);
-    if (t.h > 0) sub.push(compact(t.h) + ' holder' + (+t.h === 1 ? '' : 's'));
-    info.appendChild(el('div', 'sp-sub', sub.join(' · ')));
+    var hc = t.h > 0 ? +t.h : (HC[t.i] > 0 ? HC[t.i] : 0);
+    if (hc > 0) sub.push(compact(hc) + ' holder' + (hc === 1 ? '' : 's'));
+    var subEl = el('div', 'sp-sub', sub.join(' · '));
+    subEl.__lxnParts = sub.slice();
+    info.appendChild(subEl);
+    if (!(hc > 0) && t.cur) askHolders(t.i);
     a.appendChild(info);
 
     var right = el('div', 'sp-right');
@@ -183,6 +191,31 @@
     right.appendChild(mini);
     a.appendChild(right);
     return a;
+  }
+
+  // The site's own hostname, from an https url only: "lumoscore.com" for https://lumoscore.com. Our pages never name Rhea,
+  // so a token whose site is Rhea's carries no badge rather than that name.
+  function domainOf(u) {
+    var m = /^https:[/][/]([^/?#:]+)/i.exec(String(u || ''));
+    var h = m ? m[1].toLowerCase().replace(/^www[.]/, '') : '';
+    return (!h || h.indexOf('rhea') >= 0 || !/^[a-z0-9.-]+$/.test(h)) ? '' : h;
+  }
+  // A REAL COUNT FOR A CURATED TOKEN THE BAKED LIST HAS NONE FOR (LUMOS read no holders, ticket 318): /lxapi/nearholders,
+  // and only its exact count -- never its "at least" floor. Asked once per token per page; a failed ask is not kept.
+  var HC = {}, HC_ASK = {};
+  function askHolders(id) {
+    if (HC_ASK[id]) return;
+    HC_ASK[id] = 1;
+    fetch('/lxapi/nearholders?i=' + encodeURIComponent(id)).then(function (r) { return r.json(); }).then(function (j) {
+      var n = j && j.ok && j.count != null ? Number(j.count) : 0;
+      if (!(n > 0)) { if (!(j && j.ok)) delete HC_ASK[id]; return; }
+      HC[id] = n;
+      // The list may have been redrawn while this was asked: every row of this token on screen takes the count.
+      [].forEach.call(document.querySelectorAll('#spAssetList .lx-searow'), function (a) {
+        var se = a.__lxnT && a.__lxnT.i === id && a.querySelector('.sp-sub');
+        if (se && se.__lxnParts) se.textContent = se.__lxnParts.concat([compact(n) + ' holder' + (n === 1 ? '' : 's')]).join(' · ');
+      });
+    }, function () { delete HC_ASK[id]; });
   }
 
   // A 5x5 mirrored identicon drawn from the address, so every wallet has its own mark (RAZA 2026-09-16: "Use a unique identicon").
@@ -213,7 +246,10 @@
     if (document.getElementById('lxn-sea-gate')) return;
     var st = document.createElement('style');
     st.id = 'lxn-sea-gate';
+    // THE FOOTER GOES, AS STELLAR'S DID (RAZA 2026-11-10, ticket 318: "Search assets, pools and wallets on NEAR. Type ? for
+    // help." is still there; lumoscore.com's panel has none).
     st.textContent = '#spAssetList .sp-row:not(.lx-searow){display:none!important}'
+      + '#searchPopup .sp-foot{display:none!important}'
       + '#spAssetList>.sp-empty{display:none!important}';
     (document.head || document.documentElement).appendChild(st);
   })();
@@ -232,7 +268,7 @@
       (d.rows || []).forEach(function (r) {
         if (!r || !r.i || !C.isAccountId(r.i)) return;
         out.push({ i: r.i, n: C.cleanSym(r.n) || short(r.i), nm: C.cleanSym(r.nm), logo: r.logo || '',
-          p: r.p, d: r.d, t: +r.t || 0, h: +r.hc || 0, cur: true });
+          p: r.p, d: r.d, t: +r.t || 0, h: +r.hc || 0, w: r.w || '', cur: true });
       });
       TOKS = out;
       return out;
@@ -459,7 +495,11 @@
     nr.appendChild(tag('sp-domain', 'NEAR pool'));
     info.appendChild(nr);
     var usd = (p.liq != null && USD > 0) ? money(p.liq * USD) : '';
-    info.appendChild(el('div', 'sp-sub', 'Liquidity pool' + (usd ? ' · ' + usd + ' TVL' : '')));
+    // PARTICIPANTS, AS STELLAR'S "13 participants · $1,760 TVL" (ticket 318): the indexer's count of the pool's LPs, shown
+    // only when exact (lpa marks an approximate one), else the row says what it is, as before.
+    var lp = (p.lps != null && !p.lpa && isFinite(+p.lps)) ? +p.lps : null;
+    var lead = lp != null ? (lp.toLocaleString('en-US') + ' participant' + (lp === 1 ? '' : 's')) : 'Liquidity pool';
+    info.appendChild(el('div', 'sp-sub', lead + (usd ? ' · ' + usd + ' TVL' : '')));
     a.appendChild(info);
     var right = el('div', 'sp-right');
     right.appendChild(tag('sp-addr-mini', '#' + p.id));
@@ -647,11 +687,15 @@
     var n = hits.length;
     if (x && x.kind === 'token' && !known[x.t.i]) { list.appendChild(rowFor(x.t)); n++; }
     hits.forEach(function (t) { list.appendChild(rowFor(t)); });
+    // THE HEADING COUNTS EVERY ROW UNDER IT, as Stellar's "(4)" over one token and three pools (ticket 318: NEAR read
+    // "(1)" over a token and a pool).
     if (phits.length) {
       list.appendChild(el('div', 'lx-recgrp', 'Pools'));
       phits.forEach(function (p) { list.appendChild(poolRow(p)); });
+      n += phits.length;
     }
     if (x && x.kind === 'account') {
+      n++;
       list.appendChild(el('div', 'lx-recgrp', 'Wallets'));
       list.appendChild(accountRow(String(($('#spSearchInput') || {}).value || '').trim().toLowerCase()));
     }

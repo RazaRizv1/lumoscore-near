@@ -725,7 +725,8 @@
     m.__lxFor = btn;
     m.setAttribute('data-lxcode', code);
     m.setAttribute('data-lxiss', iss);
-    var h = '<button type="button" data-lxmi="view">' + menuSvg('<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle>') + ' View asset</button>'
+    // NEAR itself has no asset page to view (RAZA 2026-11-10, ticket 317): its menu is Pin to top and the explorer.
+    var h = (iss ? '<button type="button" data-lxmi="view">' + menuSvg('<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle>') + ' View asset</button>' : '')
       + '<button type="button" data-lxmi="pin">' + menuSvg('<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>')
       + (pinnedList().indexOf(pinKey) >= 0 ? ' Unpin' : ' Pin to top') + '</button>';
     if (iss) h += '<button type="button" data-lxmi="copy">' + menuSvg('<rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>') + ' Copy token contract</button>';
@@ -1901,6 +1902,7 @@
     received: '<path d="M12 5v14M19 12l-7 7-7-7"/>',
     sent: '<path d="M12 19V5M5 12l7-7 7 7"/>',
     swap: '<path d="M7 10l-3 3 3 3M4 13h11M17 14l3-3-3-3M20 11H9"/>',
+    bridge: '<circle cx="5" cy="12" r="2.4"/><circle cx="19" cy="12" r="2.4"/><line x1="7.4" y1="12" x2="16.6" y2="12"/><polyline points="14 9.6 16.6 12 14 14.4"/>',
     lp: '<path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/>',
     order: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
     contract: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>'
@@ -1962,6 +1964,89 @@
 
   function tokOf(f) { return { code: f.s, logo: f.ic || (f.c === WNEAR ? NEAR_LOGO : orderLogo(f.c)) }; }
 
+  // ---- cross-chain rows ------------------------------------------------------------------------------
+  // RAZA 2026-11-10, ticket 320: a bridge out of NEAR read "Sent NEAR" and, for Omni, a second row "Contract call ·
+  // storage_deposit on omni.bridge.near". Stellar's row is "Cross-chain swap · via <bridge> · <network>", the incoming
+  // figure over the outgoing one (_walletdata.js mapOp, from the bridge's own record). Here, a transaction is a bridge when:
+  //   * this browser recorded it (browser/nibridge.js, 'lumos.near.ni.txs'): by its hash, or for NEAR Intents by the
+  //     one-time deposit address it paid. The record also knows the network and what was promised.
+  //   * or the chain says so: it paid omni.bridge.near or contract.portalbridge.near (the nearbridges.js contracts),
+  //     or it paid LumosCore's fee account AND a 64-hex implicit account in one go -- nibridge.js's own on-chain test
+  //     for a NEAR Intents deposit. A plain transfer to an implicit account pays no fee account, so it stays "Sent".
+  // Omni's first transaction (storage_deposit on omni.bridge.near, the relayer's fee) joins the transfer it paid for:
+  // the next bridge row from this account within ten minutes. Alone, it stays what it is.
+  // The incoming figure is shown only once the record says the transfer finished; before that it is a quote.
+  var BR_OMNI = 'omni.bridge.near', BR_PORTAL = 'contract.portalbridge.near', BR_FEE = 'fees-lumoscore.near';
+  // MUST MATCH NI_CHAIN in browser/nibridge.js (1Click's chain ids). Omni and Wormhole records carry the name itself.
+  var BR_NET = {
+    eth: 'Ethereum', arb: 'Arbitrum', base: 'Base', op: 'Optimism', pol: 'Polygon',
+    avax: 'Avalanche', bsc: 'BNB Chain', scroll: 'Scroll', gnosis: 'Gnosis', bera: 'Berachain',
+    monad: 'Monad', plasma: 'Plasma', xlayer: 'X Layer', abs: 'Abstract', hood: 'Hood',
+    hypercore: 'Hyperliquid', sol: 'Solana', sui: 'Sui', starknet: 'Starknet',
+    aptos: 'Aptos', movement: 'Movement', ton: 'TON', tron: 'Tron', cardano: 'Cardano',
+    btc: 'Bitcoin', ltc: 'Litecoin', doge: 'Dogecoin', bch: 'Bitcoin Cash', dash: 'Dash',
+    zec: 'Zcash', aleo: 'Aleo', fogo: 'Fogo', adi: 'ADI', stellar: 'Stellar', xrp: 'XRPL'
+  };
+  function bridgeRecs(me) {
+    var l = [];
+    try { l = JSON.parse(localStorage.getItem('lumos.near.ni.txs') || '[]'); } catch (e) {}
+    return (Array.isArray(l) ? l : []).filter(function (r) { return r && r.from === me; });
+  }
+  function bridgeRows(me, d, list) {
+    var recs = bridgeRecs(me), found = {}, store = [], fees = [];
+    (d.txns || []).forEach(function (t) {
+      if (t.sg !== me || !t.h) return;
+      var to = t.to || [], rec = null, via = '', net = '';
+      recs.forEach(function (r) {
+        if (rec) return;
+        if (r.hash === t.h || (r.dep && (r.dep === t.rc || to.indexOf(r.dep) >= 0))) rec = r;
+      });
+      if (rec) {
+        via = rec.route === 'om' ? 'Omni Bridge' : (rec.route === 'wh' ? 'Wormhole' : 'NEAR Intents');
+        net = rec.route ? (rec.chain || '') : (BR_NET[rec.chain] || '');
+      } else if (t.rc === BR_PORTAL || to.indexOf(BR_PORTAL) >= 0) via = 'Wormhole';
+      else if (t.rc !== BR_OMNI && to.indexOf(BR_OMNI) >= 0) via = 'Omni Bridge';
+      else if (to.indexOf(BR_FEE) >= 0 && to.some(function (x) { return /^[0-9a-f]{64}$/.test(x); })) via = 'NEAR Intents';
+      if (via) { found[t.h] = { via: via, net: net, rec: rec, ts: t.ts }; return; }
+      if (t.rc === BR_OMNI && t.acts.length && t.acts.every(function (a) { return a.m === 'storage_deposit'; })) store.push(t);
+      else if (to.length === 1 && to[0] === BR_FEE) fees.push(t);
+    });
+    // Omni's storage top-up goes with the transfer that follows it; Wormhole's fee, which cannot share the bridge's receipt
+    // (nearbridges.js), with the transfer it follows. A fee paid on its own, nowhere near a bridge, keeps its row.
+    var drop = {};
+    function near(t, via, after) {
+      Object.keys(found).forEach(function (h) {
+        var f = found[h], dt = after ? t.ts - f.ts : f.ts - t.ts;
+        if (f.via === via && dt >= 0 && dt < 600000) drop[t.h] = 1;
+      });
+    }
+    store.forEach(function (t) { near(t, 'Omni Bridge', false); });
+    fees.forEach(function (t) { near(t, 'Wormhole', true); });
+    var out = [], done = {};
+    list.forEach(function (x) {
+      if (drop[x.h]) return;
+      var f = found[x.h];
+      if (!f) { out.push(x); return; }
+      if (done[x.h]) return;
+      done[x.h] = 1;
+      // What left the wallet: the outgoing leg of this transaction, as the row it replaces printed it.
+      var give = null;
+      list.forEach(function (y) {
+        if (give || y.h !== x.h) return;
+        if (y.kind === 'sent' && y.tok) give = { v: y.tok.v, s: y.tok.s, c: y.tok.c, ic: y.tok.ic };
+        else if (y.kind === 'sent' && y.near > 0) give = { v: y.near, s: 'NEAR', c: 'near' };
+        else if (y.kind === 'swap' && y.give) give = y.give;
+        else if (y.kind === 'contract' && y.near > 0) give = { v: y.near, s: 'NEAR', c: 'near' };
+      });
+      var r = f.rec, get = null;
+      if (r && /^(SUCCESS|COMPLETED|DELIVERED)$/i.test(String(r.status || '')) && r.out != null && isFinite(+r.out) && +r.out > 0) {
+        get = { v: +r.out, s: String(r.sym || '') };
+      }
+      out.push({ kind: 'bridge', ts: x.ts, h: x.h, ok: x.ok, via: f.via, net: f.net, give: give, get: get });
+    });
+    return out;
+  }
+
   function paintActivity(me) {
     var block = $('.activity-block');
     if (!block) return;
@@ -1973,7 +2058,7 @@
     window.__lxnActRowT = rowT; window.__lxnActDayT = dayT;
 
     activityData(me).then(function (d) {
-      var list = entriesOf(me, d);
+      var list = bridgeRows(me, d, entriesOf(me, d));
       if (!list.length) { activityNote('No activity on this account yet.'); return; }
       block.innerHTML = '';
       var lastDay = '';
@@ -1993,9 +2078,11 @@
 
         var ty = row.querySelector('.type');
         if (ty) {
-          var verb = x.kind === 'swap' ? 'Swap' : x.kind === 'received' ? 'Received' : x.kind === 'sent' ? 'Sent' : x.label;
+          var verb = x.kind === 'bridge' ? 'Cross-chain swap' : x.kind === 'swap' ? 'Swap' : x.kind === 'received' ? 'Received' : x.kind === 'sent' ? 'Sent' : x.label;
           ty.textContent = verb + (x.ok ? '' : ' (failed)');
-          if (x.kind === 'swap') {
+          if (x.kind === 'bridge') {
+            // Stellar's row carries no token mark in its title; the amounts say what moved.
+          } else if (x.kind === 'swap') {
             ty.appendChild(actLogo(tokOf(x.give)));
             ty.appendChild(document.createTextNode(x.give.s + ' →'));
             ty.appendChild(actLogo(tokOf(x.get)));
@@ -2012,7 +2099,8 @@
         var mt = row.querySelector('.meta');
         if (mt) {
           mt.textContent = '';
-          if (x.kind === 'received' && x.other) { mt.textContent = 'From '; mt.appendChild(addrLink(x.other)); }
+          if (x.kind === 'bridge') mt.textContent = 'via ' + x.via + (x.net ? ' · ' + x.net : '');
+          else if (x.kind === 'received' && x.other) { mt.textContent = 'From '; mt.appendChild(addrLink(x.other)); }
           else if (x.kind === 'sent' && x.other) { mt.textContent = 'To '; mt.appendChild(addrLink(x.other)); }
           else if (x.kind === 'contract') {
             mt.textContent = (x.method ? x.method + ' · ' : '') + (x.mine ? 'on ' : 'by ');
@@ -2025,21 +2113,27 @@
         if (a1) {
           a1.classList.remove('up', 'down', 'swap');
           var v = null, code = '', sign = '';
-          if (x.kind === 'swap') { v = x.get.v; code = x.get.s; sign = '+'; }
+          if (x.kind === 'bridge') {
+            if (x.get) { v = x.get.v; code = x.get.s; sign = '+'; }
+            else if (x.give) { v = x.give.v; code = x.give.s; sign = '−'; }
+          } else if (x.kind === 'swap') { v = x.get.v; code = x.get.s; sign = '+'; }
           else if (x.tok) { v = x.tok.v; code = x.tok.s; sign = x.kind === 'received' ? '+' : '−'; }
           else if (x.near > 0) { v = x.near; code = 'NEAR'; sign = x.kind === 'received' ? '+' : '−'; }
           if (v != null && isFinite(v) && x.ok) {
             a1.textContent = sign + fmt(v, 6) + ' ' + code;
             a1.classList.toggle('up', x.kind === 'received');
             a1.classList.toggle('down', x.kind === 'sent' || x.kind === 'contract');
-            a1.classList.toggle('swap', x.kind === 'swap');
+            a1.classList.toggle('swap', x.kind === 'swap' || (x.kind === 'bridge' && !!x.get));
+            if (x.kind === 'bridge' && !x.get) a1.classList.add('down');
             a1.classList.add('lxp');
           } else a1.textContent = '';
         }
         var a2 = row.querySelector('.a2');
         if (a2) {
           a2.textContent = '';
-          if (x.kind === 'swap' && x.ok) { a2.textContent = '−' + fmt(x.give.v, 6) + ' ' + x.give.s; a2.classList.add('lxp'); }
+          if ((x.kind === 'swap' || (x.kind === 'bridge' && x.get)) && x.ok && x.give && x.give.v != null) {
+            a2.textContent = '−' + fmt(x.give.v, 6) + ' ' + x.give.s; a2.classList.add('lxp');
+          }
         }
         var xl = txLink(x.h);
         if (xl) row.appendChild(xl);

@@ -280,7 +280,8 @@
     if (r == null && balFail[from.id]) return 'Your ' + from.code + ' balance could not be read from the NEAR network. Close and reopen Swap to try again.';
     var raw = amountRaw(P);
     if (!raw || r == null) return '.';
-    if (S().big(raw) > S().big(r)) return 'Not enough ' + from.code + '.';
+    // Stellar's words (RAZA 2026-11-10, ticket 316), with the figure MAX would fill: the same floored, reserve-aware room.
+    if (S().big(raw) > S().big(r)) return 'Insufficient ' + from.code + ' balance — you have ' + show(r, from.dec) + ' ' + from.code;
     if (!q) return '.';
     if (!q.ok) return (q.why || 'No route') + '.';
     if (q.amount !== raw || q.from !== from.id || q.to !== to.id) return '.';

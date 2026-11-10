@@ -145,6 +145,7 @@
   // such as .tg, which is why this looks for the dot and not for ".near"). Whether it exists is still asked on click.
   function validDest(a) { return validAcct(a) && (isImplicit(a) || a.indexOf('.') > 0); }
   var BAD_DEST = 'That doesn’t look like a valid NEAR account (should end with .near or be a 64-character ID).';
+  var SELF_TOKEN = 'A token can’t be sent to its own holder on NEAR: the token contract refuses the transfer.';
 
   function $(s, r) { return (r || document).querySelector(s); }
   function $$(s, r) { return [].slice.call((r || document).querySelectorAll(s)); }
@@ -577,8 +578,16 @@
     var dest = toIn ? String(toIn.value || '').trim().toLowerCase() : '';
     var okDest = !!dest && validDest(dest);
     if (dest && !okDest) msg = msg ? msg + ' ' + BAD_DEST : BAD_DEST;
-    err.textContent = msg;
-    err.style.display = msg ? '' : 'none';
+    // YOUR OWN ADDRESS (RAZA 2026-11-10, ticket 315). Stellar's validateSend has no such check at all; the request is a
+    // note that does not block. NEAR sent to itself is a valid Transfer, so it goes. A TOKEN cannot: NEP-141's
+    // ft_transfer panics when sender and receiver are the same account, so that one is still refused, in red, and says
+    // why -- the honest nearest thing to letting it through would be a transaction that fails after its gas.
+    var self = okDest && dest === addr(), note = '';
+    if (self && a && !a.native) { msg = msg ? msg + ' ' + SELF_TOKEN : SELF_TOKEN; okDest = false; }
+    else if (self && !msg) note = 'Note: This is your wallet address';
+    err.textContent = msg || note;
+    err.style.color = note ? 'var(--text-muted,#9aa)' : '';
+    err.style.display = (msg || note) ? '' : 'none';
     if (go && go.getAttribute('data-busy') !== '1') {
       var ok = okAmt && okDest;
       go.disabled = !ok;
@@ -877,7 +886,7 @@
     }
     var dest = parseDest(toIn.value);
     if (dest.err) { say(dest.err, 'bad'); return; }
-    if (dest.account === me) { say('That is your own account.', 'bad'); return; }
+    if (dest.account === me && !a.native) { say(SELF_TOKEN, 'bad'); return; }
 
     var label = go.textContent;
     go.disabled = true;

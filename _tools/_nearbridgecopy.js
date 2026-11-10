@@ -39,12 +39,12 @@ const FAQ = [
   ['Do I have to claim it on the other side?', 'Do I have to claim anything on the other side?',
     'Not with NEAR Intents or Omni Bridge: both deliver to the address you give, with no second signature. '
     + 'Wormhole is the exception — nobody relays NEAR transfers on it, so once its guardians have signed the '
-    + 'transfer (about fifteen minutes) you claim it from Recent transactions with an EVM wallet, paying that '
+    + 'transfer (about fifteen minutes) you claim it from the Pending claims tab with an EVM wallet, paying that '
     + 'chain’s gas.'],
   ['What if I close the tab before claiming?', 'What if I close the tab?',
     'Once the NEAR transaction is signed, NEAR Intents and Omni Bridge carry the transfer whether or not the '
-    + 'page is open. A Wormhole transfer waits for you to claim it: it stays listed under Recent transactions '
-    + 'in this browser and can be claimed later. Close the tab before signing and nothing has happened. If a '
+    + 'page is open. A Wormhole transfer waits for you to claim it: it stays listed under Pending claims '
+    + 'whenever the wallet that sent it is connected, and can be claimed later. Close the tab before signing and nothing has happened. If a '
     + 'NEAR Intents transfer cannot be completed, it is refunded to the NEAR account that paid.'],
   ['What is Circle CCTP?', 'Which bridge does LumosCore use here?',
     'Three. NEAR Intents, through its 1Click service: solvers deliver the destination chain’s own token. '

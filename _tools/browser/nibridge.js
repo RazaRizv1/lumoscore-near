@@ -226,6 +226,18 @@
   // The design's own options are painted by stylesheet (XRPL: setting a background on the node itself is
   // a fight with the design's render loop). Also the closed chip, the receiving-address row and the "To"
   // pill, keyed on attributes that survive a rebuild of their contents.
+  // THE SELECTED ROUTE KEEPS ITS BORDER UNDER THE POINTER (RAZA 2026-11-10, ticket 323). The inherited
+  // ".lx-brr:hover:not([disabled])" (one class, one pseudo, one attribute) out-ranked ".lx-brr[aria-pressed=true]" (one
+  // class, one attribute), both !important, so hovering the chosen card painted the plain hover border over it.
+  (function () {
+    if (document.getElementById('lx-nbrr-sel')) return;
+    var st = document.createElement('style');
+    st.id = 'lx-nbrr-sel';
+    st.textContent = '.lx-brr[aria-pressed="true"],.lx-brr[aria-pressed="true"]:hover,.lx-brr[aria-pressed="true"]:hover:not([disabled])'
+      + '{border-color:var(--accent,#ea6a2c)!important}';
+    (document.head || document.documentElement).appendChild(st);
+  })();
+
   function paintOptionCss() {
     try {
       if (document.getElementById('lx-nnetbg')) return;
@@ -1501,14 +1513,20 @@
     // A hash this browser recorded wins over the recovered copy: it also knows what the quote promised.
     var have = {};
     list.forEach(function (r) { if (r && r.hash) have[r.hash] = 1; });
-    (RECOVERED || []).forEach(function (r) { if (!have[r.hash]) list.push(r); });
+    (RECOVERED || []).forEach(function (r) { if (!have[r.hash]) { list.push(r); have[r.hash] = 1; } });
+    // Every wallet's transfers (/lxapi/nearbridgetx), after this browser's own and the recovered ones, which know more.
+    (GLOBAL || []).forEach(function (r) {
+      if (have[r.hash] || (r.feeTx && have[r.feeTx])) return;
+      var w = r.route === 'wh' && WH[r.hash];
+      list.push(w && w.status ? Object.assign({}, r, { status: w.status, claimTx: w.claimTx || '' }) : r);
+    });
     return list.filter(function (r) { return r && r.hash; })
       .map(function (r) {
         // A refunded or failed transfer delivered nothing: the quote's figure would read as received.
         var none = r.status === 'REFUNDED' || r.status === 'FAILED';
         return { at: r.at, hash: r.hash, sent: r.inAmt, sentSym: r.srcSym || '', recv: none ? null : r.out,
           recvSym: r.sym || '', place: r.route ? (r.chain || '') : (NI_CHAIN[r.chain] || ''), from: r.from || '', to: r.to || '',
-          route: r.route || 'ni', status: r.status || '', claimTx: r.claimTx || '' };
+          route: r.route || 'ni', status: r.status || '', claimTx: r.claimTx || '', glob: !!r.glob };
       })
       .sort(function (a, b) { return (b.at || 0) - (a.at || 0); });
   }
@@ -1601,18 +1619,15 @@
       + '<span>' + esc2(m.name) + '</span></span>' + (r ? txState(r) : '');
   }
   // WHERE A BRIDGED TRANSFER HAS GOT TO, under the route's name. A Wormhole transfer the guardians have
-  // signed is the reader's to claim, so that row carries the button.
+  // signed is the reader's to claim: its button lives in the Pending claims tab (paintPending), the row only says so.
   var CLAIMING = {}, CLAIM_ERR = {};
   var ST_CSS = 'display:block;margin-top:4px;font-size:12px;line-height:1.35;color:var(--text-soft)';
   function txState(r) {
+    // Another wallet's transfer: its status is not followed from here, so its row claims none.
+    if (r.glob && !r.status) return '';
     if (r.route === 'wh') {
-      if (r.status === 'READY') {
-        return '<button type="button" class="lx-whclaim" data-whclaim="' + esc2(r.hash) + '" style="display:inline-flex;'
-          + 'align-items:center;margin-top:6px;padding:6px 11px;border-radius:9px;border:0;cursor:pointer;font:600 12.5px/1.2 inherit;'
-          + 'background:var(--accent,#ea6a2c);color:#fff"' + (CLAIMING[r.hash] ? ' disabled' : '') + '>'
-          + esc2(CLAIMING[r.hash] || ('Claim on ' + r.place)) + '</button>'
-          + (CLAIM_ERR[r.hash] ? '<span style="' + ST_CSS + ';color:var(--danger,#e5484d)">' + esc2(CLAIM_ERR[r.hash]) + '</span>' : '');
-      }
+      // THE CLAIM HAS ITS OWN TAB (RAZA 2026-11-10, tickets 321/322: "move it out" of Bridge used): the row says so.
+      if (r.status === 'READY') return '<span style="' + ST_CSS + '">Waiting to be claimed</span>';
       if (r.status === 'SUCCESS') {
         var ex = r.claimTx && BRX() ? BRX().evmExplorer(r.place) : '';
         return '<span style="' + ST_CSS + '">' + (ex ? ('<a href="' + esc2(ex + '/tx/' + r.claimTx) + '" target="_blank" rel="noopener">Claimed</a>') : 'Claimed') + '</span>';
@@ -1637,7 +1652,7 @@
   var TX_HEAD = '<tr><th>Time</th><th>From</th><th>Source address</th><th>To</th>'
     + '<th>Destination address</th><th>Bridge used</th>'
     + '<th class="br-xph" aria-label="Explorer">Explorer</th></tr>';
-  var TX_EMPTY = 'No bridge transfers from this browser yet. Bridge something and it will be listed here.';
+  var TX_EMPTY = 'No bridge transfers on LumosCore from NEAR yet.';
 
   function paintTxs() {
     var all = txRecords();
@@ -1707,7 +1722,7 @@
       var mh = '';
       if (!all.length) {
         mh = '<div style="padding:22px 12px;text-align:center;color:var(--text-soft);font-size:13.5px">'
-          + esc2('No bridge transfers from this browser yet.') + '</div>';
+          + esc2(TX_EMPTY) + '</div>';
       } else {
         slice.forEach(function (r) {
           mh += '<div class="brm-txc lx-brmtx">'
@@ -1723,8 +1738,142 @@
       }
       if (host.innerHTML !== mh) host.innerHTML = mh;
     }
+    try { paintPending(); } catch (_) {}
   }
   window.__lxnPaintTxs = paintTxs;
+
+  // ---- PENDING CLAIMS, as Stellar's /bridge/stellar (RAZA 2026-11-10, tickets 321/322) ---------------------------------
+  // Only a transfer that truly waits on its owner: Wormhole to an EVM chain, signed by the guardians, not yet redeemed --
+  // which only Wormholescan can say, so a row is listed after it has answered THIS visit, never from a stored status
+  // (Stellar's rule: a row the chain has not answered for is not a claim). Candidates are this browser's Wormhole sends
+  // and the connected wallet's in the platform-wide list. Omni and NEAR Intents deliver by themselves: nothing to claim.
+  var WH = {}, WH_ASK = {};
+  function pendCandidates() {
+    var me = addr();
+    return txRecords().filter(function (r) {
+      if (r.route !== 'wh' || !r.hash || r.status === 'SUCCESS' || r.status === 'FAILED') return false;
+      return !!txFind(r.hash) || (me && r.from === me);
+    });
+  }
+  function pendCheck() {
+    if (!BRX()) return;
+    pendCandidates().filter(function (r) { return !WH_ASK[r.hash]; }).slice(0, 12).forEach(function (r) {
+      WH_ASK[r.hash] = 1;
+      BRX().whStatus(r.hash).then(function (st) {
+        WH[r.hash] = st;
+        if (txFind(r.hash) && st.status && st.status !== 'PENDING') patchRec(r.hash, function (x) { x.status = st.status; if (st.claimTx) x.claimTx = st.claimTx; });
+        try { paintTxs(); } catch (_) {}
+      }, function () { delete WH_ASK[r.hash]; });
+    });
+  }
+  function pendList() {
+    return pendCandidates().filter(function (r) { return WH[r.hash] && WH[r.hash].status === 'READY'; });
+  }
+  // Desktop: a second tab beside Recent transactions. Phone: that section does not exist, so a panel after the card.
+  function pendHost() {
+    var wrap = $('.br-txwrap');
+    if (wrap) {
+      var body = wrap.querySelector('.lx-brpbody');
+      if (!body) {
+        var head = wrap.querySelector('.br-txhead'), tbl = wrap.querySelector('.br-table');
+        if (!head || !tbl) return null;
+        head.classList.add('lx-brtabs');
+        head.innerHTML = '<button type="button" class="lx-brtab active" data-brtab="tx">Recent transactions</button>'
+          + '<button type="button" class="lx-brtab" data-brtab="pend" hidden>Pending claims <span class="lx-brtab-n">0</span></button>';
+        body = document.createElement('div'); body.className = 'lx-brpbody'; body.style.display = 'none';
+        tbl.parentNode.insertBefore(body, tbl.nextSibling);
+        head.addEventListener('click', function (e) {
+          var b = e.target && e.target.closest ? e.target.closest('.lx-brtab') : null;
+          if (!b) return;
+          e.preventDefault(); e.stopPropagation();
+          var pend = b.getAttribute('data-brtab') === 'pend';
+          $$('.lx-brtab', head).forEach(function (x) { x.classList.toggle('active', x === b); });
+          tbl.style.display = pend ? 'none' : '';
+          body.style.display = pend ? '' : 'none';
+          var pg = wrap.querySelector('.lx-txpager'); if (pg) pg.style.display = pend ? 'none' : '';
+        }, true);
+      }
+      return { el: body, tabbed: true, wrap: wrap };
+    }
+    var p = document.getElementById('lxBrPending');
+    if (!p) {
+      var card = $('.br-card');
+      if (!card || !card.parentNode) return null;
+      p = document.createElement('section'); p.id = 'lxBrPending'; p.className = 'lx-brpend'; p.style.display = 'none';
+      card.parentNode.insertBefore(p, card.nextSibling);
+    }
+    return { el: p, tabbed: false };
+  }
+  var PEND_NOTE = 'Wormhole carries your tokens to the destination chain and holds them there until the claim is submitted. '
+    + 'That last step is yours: press Claim, approve one transaction in your EVM wallet, and the tokens arrive. You need a '
+    + 'little gas on the destination chain to do it. Nothing here moves without your approval.';
+  function howTo() {
+    return '<details class="lx-brhow"><summary>How to claim</summary><ol class="lx-brhow-l">'
+      + '<li><b>Fund the destination address with a little gas.</b> ETH on Ethereum and the L2s, POL on Polygon, BNB on BNB Chain, AVAX on Avalanche.</li>'
+      + '<li><b>Wait for Wormhole’s guardians to sign</b>, about 15 minutes after the transfer. It is listed here once they have.</li>'
+      + '<li><b>Press Claim and approve one transaction.</b> Your wallet is switched to the right network and the claim is checked before anything is signed.</li>'
+      + '<li><b>Or do it yourself:</b> Copy redeem data, then call <span class="mono">completeTransfer</span> with the signed message on that chain’s Wormhole Token Bridge.</li>'
+      + '</ol><p class="lx-brhow-p">Anyone can submit the claim: it always pays the address the transfer named, so a failed attempt costs nothing but gas.</p></details>';
+  }
+  function paintPending() {
+    var host = pendHost();
+    if (!host) return;
+    var p = host.el, list = pendList();
+    if (host.tabbed) {
+      var tb = host.wrap.querySelector('.lx-brtab[data-brtab="pend"]');
+      if (tb) {
+        var n = tb.querySelector('.lx-brtab-n'); if (n) n.textContent = String(list.length);
+        tb.hidden = !list.length;
+        if (!list.length && tb.classList.contains('active')) {
+          var tx = host.wrap.querySelector('.lx-brtab[data-brtab="tx"]'), tbl = host.wrap.querySelector('.br-table');
+          tb.classList.remove('active'); if (tx) tx.classList.add('active');
+          if (tbl) tbl.style.display = ''; p.style.display = 'none';
+        }
+      }
+    }
+    if (!list.length) { if (!host.tabbed) p.style.display = 'none'; if (p.innerHTML) p.innerHTML = ''; return; }
+    var rows = list.map(function (r) {
+      var busy = CLAIMING[r.hash];
+      return '<div class="lx-brp-row" data-h="' + esc2(r.hash) + '">'
+        + '<div class="lx-brp-main"><div class="lx-brp-amt">' + txAmt(r.sent, r.sentSym, 'NEAR') + '<span class="lx-brp-ar">→</span>'
+        + txAmt(r.recv, r.recvSym, r.place) + '</div></div>'
+        + '<div class="lx-brp-meta"><div class="lx-brp-sub">Sent ' + esc2(txWhen(r.at)) + ' · <a class="mono" target="_blank" rel="noopener" href="'
+        + esc2(txExplorer(r.hash)) + '">' + esc2(short(r.hash)) + '</a>' + (r.to ? ' · to ' + txDest(r.place, r.to) : '') + '</div>'
+        + (CLAIM_ERR[r.hash] ? '<div class="lx-brp-sub lx-brp-warn">' + esc2(CLAIM_ERR[r.hash]) + '</div>' : '') + '</div>'
+        + '<div class="lx-brp-btns">'
+        + '<button type="button" class="lx-brp-b primary" data-whact="claim" data-h="' + esc2(r.hash) + '"' + (busy ? ' disabled' : '') + '>'
+        + esc2(busy || ('Claim on ' + r.place)) + '</button>'
+        + '<button type="button" class="lx-brp-b" data-whact="copy" data-h="' + esc2(r.hash) + '">Copy redeem data</button>'
+        + '</div></div>';
+    }).join('');
+    var h = (host.tabbed ? '' : '<div class="lx-brp-head"><h2>Awaiting redemption</h2><span class="lx-brp-n">' + list.length + '</span></div>')
+      + '<div class="lx-brp-intro"><p class="lx-brp-note">' + esc2(PEND_NOTE) + '</p></div>' + howTo() + rows;
+    // Rewritten only when it changed, so an open "How to claim" stays open across repaints.
+    if (p.__lxh !== h) {
+      var open = !!p.querySelector('.lx-brhow[open]');
+      p.innerHTML = h; p.__lxh = h;
+      if (open) { var d = p.querySelector('.lx-brhow'); if (d) d.open = true; }
+    }
+    if (!host.tabbed) p.style.display = '';
+  }
+  function redeemData(hash) {
+    var r = txRecords().filter(function (x) { return x.hash === hash; })[0] || {}, w = WH[hash] || {};
+    return JSON.stringify({ sourceChain: 'NEAR', sourceTransaction: hash, route: 'Wormhole Token Bridge',
+      destinationChain: r.place || null, recipient: r.to || null, amount: r.recv != null ? String(r.recv) : null, token: r.recvSym || null,
+      status: w.status || null, signedVaaBase64: w.vaa || null }, null, 2);
+  }
+  function copyRedeem(hash) {
+    var text = redeemData(hash);
+    function ok() { toast('Redeem data copied'); }
+    function old() {
+      try {
+        var ta = document.createElement('textarea'); ta.value = text; ta.setAttribute('readonly', '');
+        ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+        document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); ok();
+      } catch (e) { toast('Could not copy', true); }
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(ok, old); else old();
+  }
 
   // THE BALANCE AND MAX MOVE INTO THE AMOUNT BOX (XRPL's brpolish.js). The step-2 stylesheet hides
   // .br-amtrow's children and positions .lx-balrow beside the box; on Stellar the CCTP layer made this
@@ -2159,11 +2308,11 @@
   // A CLAIM ASKS WORMHOLESCAN AGAIN FIRST: the signed message is not stored, and the transfer may have
   // been claimed from somewhere else since the row was painted.
   function claim(hash) {
-    var rec = txFind(hash);
+    var rec = txFind(hash) || (GLOBAL || []).filter(function (x) { return x.hash === hash; })[0];
     if (!rec || CLAIMING[hash] || !BRX()) return;
     CLAIM_ERR[hash] = '';
     var setS = function (s) { CLAIMING[hash] = s; try { paintTxs(); } catch (_) {} };
-    var done = function (claimTx) { patchRec(hash, function (x) { x.status = 'SUCCESS'; if (claimTx) x.claimTx = claimTx; }); };
+    var done = function (claimTx) { WH[hash] = { status: 'SUCCESS', claimTx: claimTx || '' }; patchRec(hash, function (x) { x.status = 'SUCCESS'; if (claimTx) x.claimTx = claimTx; }); };
     setS('Checking…');
     BRX().whStatus(hash).then(function (s) {
       if (s.status === 'SUCCESS') { done(s.claimTx); return null; }
@@ -2334,6 +2483,50 @@
   // never matches. Native NEAR is wrapped in the same transaction: a wrap.near MINT there means "NEAR".
   // Not cached: a lookup that fails leaves the browser's own rows, never an empty history.
   var RECOVERED = [];
+  // EVERY WALLET'S TRANSFERS, NEWEST FIRST (RAZA 2026-11-10, ticket 319, as Stellar's /bridge reads /lxapi/bridgetx).
+  // /lxapi/nearbridgetx reads them from the chain itself, by the fee each one pays (functions/lxapi/nearbridgetx.js). A
+  // NEAR Intents row names only its deposit account; 1Click says where it went, as for this wallet's own history. A
+  // failed read leaves the table as it was, never empty.
+  var GLOBAL = [], NI_SEEN = {};
+  function loadGlobal(n) {
+    n = n || 0;
+    fetch('/lxapi/nearbridgetx' + (n ? '?r=' + n : '')).then(function (r) { return r.json(); }).then(function (j) {
+      if (!j || !j.ok || !Array.isArray(j.rows)) throw new Error('down');
+      var keep = {};
+      GLOBAL.forEach(function (g) { keep[g.hash] = g; });
+      GLOBAL = j.rows.filter(function (r) { return r && r.hash; }).map(function (r) {
+        var old = keep[r.hash];
+        if (old && old.niDone) return old;
+        return { glob: 1, hash: r.hash, feeTx: r.feeTx, at: +r.at || 0, from: r.from || '', route: r.route === 'ni' ? '' : r.route,
+          dep: r.dep || '', inAmt: r.sent, srcSym: r.sym || '', out: r.out, sym: r.route === 'ni' ? '' : (r.sym || ''),
+          chain: r.route === 'ni' ? '' : (r.chain || ''), to: r.to || '' };
+      });
+      try { paintTxs(); } catch (_) {}
+      try { resolveGlobalNi(); } catch (_) {}
+      try { pendCheck(); } catch (_) {}
+      if (j.partial && n < 4) setTimeout(function () { loadGlobal(n + 1); }, 6000);
+    }).catch(function () { if (n < 2) setTimeout(function () { loadGlobal(n + 1); }, [1500, 4000][n]); });
+  }
+  function resolveGlobalNi() {
+    if (!TOKENS) return;
+    GLOBAL.filter(function (g) { return !g.route && g.dep && !g.niDone && !NI_SEEN[g.dep]; }).slice(0, 20).reduce(function (p, g) {
+      NI_SEEN[g.dep] = 1;
+      return p.then(function () {
+        return fetch(API + '?op=status&depositAddress=' + encodeURIComponent(g.dep)).then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (j) {
+            var qr = j && j.quoteResponse, req = qr && qr.quoteRequest;
+            if (!req || !req.destinationAsset) { delete NI_SEEN[g.dep]; return; }
+            var t = null;
+            for (var i = 0; i < TOKENS.length; i++) if (TOKENS[i].assetId === req.destinationAsset) { t = TOKENS[i]; break; }
+            var sd = j.swapDetails || {}, q = qr.quote || {};
+            g.out = sd.amountOutFormatted || q.amountOutFormatted || null;
+            g.sym = t ? t.symbol : ''; g.chain = t ? t.blockchain : ''; g.to = req.recipient || ''; g.status = j.status || '';
+            g.niDone = 1;
+            try { paintTxs(); } catch (_) {}
+          }, function () { delete NI_SEEN[g.dep]; });
+      });
+    }, Promise.resolve());
+  }
   var NB = 'https://api.nearblocks.io/v1/account/';
   var FEE_ACCT = 'fees-lumoscore.near';
   function nbPages(me, pages) {
@@ -2435,6 +2628,7 @@
     try { document.documentElement.classList.add('lx-chainready'); } catch (e) {}
     paintOptionCss();
     try { paintTxs(); } catch (_) {}
+    try { loadGlobal(); pendCheck(); } catch (_) {}
     try {
       txList().forEach(function (r) {
         if (r && r.hash && r.status !== 'SUCCESS' && r.status !== 'FAILED' && r.status !== 'REFUNDED'
@@ -2447,6 +2641,13 @@
       window.addEventListener('click', function (e) {
         var t = e.target;
         if (!t || !t.closest) return;
+        var wa = t.closest('[data-whact]');
+        if (wa) {
+          e.preventDefault(); e.stopPropagation();
+          if (wa.getAttribute('data-whact') === 'copy') copyRedeem(wa.getAttribute('data-h'));
+          else if (!wa.disabled) claim(wa.getAttribute('data-h'));
+          return;
+        }
         var cl = t.closest('[data-whclaim]');
         if (cl) { e.preventDefault(); e.stopPropagation(); claim(cl.getAttribute('data-whclaim')); return; }
         var hit = t.closest('[data-lxni-cta]');
@@ -2521,6 +2722,7 @@
       try { paintSourceAsset(); checkFee(); title(wireDestinations()); paintSteps(); setCta(); } catch (_) {}
       try { paintTxs(); } catch (_) {}
       try { recoverFromChain(); } catch (_) {}
+      try { resolveGlobalNi(); } catch (_) {}
       return loadBalances().then(function () { paintSource(); paintSteps(); });
     });
     loadBalances().then(function () { try { paintSteps(); } catch (_) {} });
