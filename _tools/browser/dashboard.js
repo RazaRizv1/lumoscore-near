@@ -258,8 +258,14 @@
       list.setAttribute('data-lxact', '1');
       try { list.setAttribute('data-logoed', '1'); } catch (e) {}
     }, function () {
-      // FastNEAR refused (its per-visitor allowance) or failed: one more try a minute later.
-      if (!activity.retried) { activity.retried = 1; setTimeout(activity, 60000); }
+      // FastNEAR refused (its per-visitor allowance) or failed. That is not "no activity" (RAZA 2026-11-10: "why its
+      // saying no platform activity"): the row says it could not be read, and it asks again at 20s, 1 and 3 minutes.
+      var list = document.getElementById('activityList'), k = activity.tries = (activity.tries || 0) + 1;
+      if (list && !list.querySelector('.lx-fr')) {
+        list.innerHTML = '<div class="activity-feed-row" style="justify-content:center;color:var(--text-soft);font-size:14px">Couldn’t load platform activity just now' + (k < 4 ? ' — trying again…' : '. Reload to try again.') + '</div>';
+        list.setAttribute('data-lxact', '1');
+      }
+      if (k < 4) setTimeout(activity, [20000, 60000, 180000][k - 1]);
     });
   }
 

@@ -425,10 +425,13 @@
     var memo = '';
     (acts || []).forEach(function (a) {
       var p = actPair(a), b = p[1];
-      if (p[0] !== 'FunctionCall' || b.method_name !== 'ft_transfer' || memo) return;
+      if (p[0] !== 'FunctionCall' || memo) return;
       try {
         var j = JSON.parse(atob(b.args || ''));
-        if (j && j.receiver_id === FEE_ACCT) memo = String(j.memo || 'fee');
+        if (b.method_name === 'ft_transfer' && j && j.receiver_id === FEE_ACCT) memo = String(j.memo || 'fee');
+        // THE FEE AS A SWAP (RAZA 2026-11-10, nearswap.js): a token other than NEAR pays its fee by swapping a slice
+        // to wNEAR with Rhea delivering it to the collector, so the transaction carries no memo of ours. Its msg does.
+        else if (b.method_name === 'ft_transfer_call' && j && JSON.parse(j.msg || '{}').swap_out_recipient === FEE_ACCT) memo = 'LumosCore platform fee';
       } catch (e) {}
     });
     return memo;
