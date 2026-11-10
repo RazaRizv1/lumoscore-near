@@ -21,12 +21,24 @@
 //   * A swap that fails inside Rhea refunds the INPUT through ft_resolve_transfer (paypass.near, 4PcCwgq5...);
 //     the fee, transferred in the same receipt before it, is not refunded. Accepted for v1 (RAZA 2026-10-21).
 //
-// THE FEE: 0.2% of the INPUT, in the input token, as an ft_transfer to FEE_ACCOUNT in the SAME transaction
-// and the SAME receipt as the ft_transfer_call. Same receipt means: if the fee transfer fails (the fee
-// account is not registered on that token), the whole receipt reverts and nothing is swapped -- the user
-// pays gas for nothing. So the fee account's registration is checked on the input token BEFORE the button
-// is enabled, and a token it is not registered on is simply not swappable yet. The user's transaction
-// never carries a storage_deposit for the fee account: users do not pay for our registration.
+// THE FEE ARRIVES AS wNEAR (RAZA 2026-11-10: "the fee always arrives as wNEAR, in the one transaction the user
+// signs"). 0.2% of the INPUT (0.1% at the LUMOS tier, feeBps), taken in the same transaction as the swap:
+//   * Input NEAR or wNEAR: an ft_transfer of wNEAR to FEE_ACCOUNT with the platform-fee memo, as before.
+//   * Any other input X with a classic X/wNEAR pool: a second ft_transfer_call of the fee slice to Rhea, swapping
+//     it X -> wNEAR through the deepest such pool with swap_out_recipient FEE_ACCOUNT, so Rhea pays the wNEAR
+//     straight to the fee account (the field contracts/router sends, honoured by Ref 1.9.19 on testnet; mainnet runs
+//     1.9.21). skip_unwrap_near:true keeps it wNEAR, on which the fee account is registered. Its floor is half the
+//     slice's expected wNEAR. Then the main swap of the net amount, unchanged. If the fee swap fails, Rhea refunds
+//     the slice to the user and the main swap still runs: accepted. The admin recognises these fees by this msg
+//     (C:/LumosCore functions/lxapi/nearfees.js), as Rhea's transfer carries no memo of ours.
+//   * X with no classic X/wNEAR pool: the fee stays in X as an ft_transfer, as before, so the fee account must be
+//     registered on X (feeReady). A slice of 0 raw units (an input under 500 units) takes no fee at all.
+// The wNEAR path needs no registration of ours on X, so an uncurated token can be sold. Gas: the fee call gets
+// FEE_SWAP_GAS (a one-hop swap burns well under it) and the swap keeps SWAP_GAS, 270 TGas together, under NEAR's
+// 300 per transaction with room for a wallet that adds its own. One transaction, so one approval.
+// The fee and the swap share one receipt: an ft_transfer that fails (an unregistered fee account) reverts both, and
+// the user pays gas for nothing, which is why feeReady is checked before the button lights. The user's
+// transaction never carries a storage_deposit for the fee account: users do not pay for our registration.
 //
 // Amounts are integer STRINGS in raw units end to end (BigInt for the arithmetic); floats exist only for
 // display.
@@ -78,6 +90,7 @@
   // to it. 180 is what Rhea's own app sends with a swap's ft_transfer_call (and what this file's DCL orders
   // use); real swaps here burned 18-28 TGas end to end. Unused gas is refunded either way.
   var SWAP_GAS = 180;
+  var FEE_SWAP_GAS = 90;                              // the fee slice's one-hop swap to wNEAR (see the header)
   var NEAR_KEEP = '50000000000000000000000';          // 0.05 NEAR left behind by MAX, for gas and storage
   // A SWAP KEEPS 0.2 NEAR, NOT 0.05 (RAZA 2026-10-30: HOT refused three swaps of 0.005 NEAR from a 0.147 NEAR
   // balance with "User rejected the request"; Rhea's own app, same wallet, refuses the same swap with "Must have
@@ -445,8 +458,8 @@
           return { amt: t.toString(), out: o };
         });
       }
-      return spotAt(tiny, 0).then(function (s) { return s; }, function () { return null; }).then(function (spot) {
-        var impact = null;
+      return Promise.all([spotAt(tiny, 0).then(function (s) { return s; }, function () { return null; }), feeVia(fromId, fee, net, r)]).then(function (x) {
+        var spot = x[0], via = x[1], impact = null;
         if (spot && big(spot.out) > BigInt(0)) {
           // (out/net) / (spotOut/spotAmt) - 1, in floating point only for display.
           var ex = Number(r.out) / Number(net), sp = Number(spot.out) / Number(spot.amt);
@@ -454,10 +467,37 @@
         }
         return {
           from: fromId, to: toId, amount: String(amountRaw), fee: fee, net: net,
-          out: r.out, min: minOut(r.out), slipBps: SLIP_BPS, hops: r.hops, split: r.split || null, impact: impact, at: Date.now()
+          out: r.out, min: minOut(r.out), slipBps: SLIP_BPS, hops: r.hops, split: r.split || null, impact: impact, at: Date.now(),
+          feeVia: via, feeNear: via ? via.out : (contractOf(fromId) === WNEAR ? fee : null)
         };
       });
     });
+  }
+
+  // THE FEE SLICE'S POOL: the deepest classic X/wNEAR pool, from the pool rows the quote engine already holds (no
+  // RPC call). Rejects when the rows could not be read, which is not "no pool".
+  function wnearPool(c) {
+    return pools().then(function (cur) {
+      return poolsWith(cur, c).then(function (more) { return poolsBetween(cur.concat(more), c, WNEAR, 1)[0] || null; });
+    });
+  }
+  // { pool, out, min } for the fee slice, or null when it is paid in X (no pool) or not at all. A route whose first hop
+  // is that classic pool prices the slice off it at no cost (the slice is the smaller trade, so it is not overstated
+  // beyond what the floor allows); otherwise one get_return.
+  function feeVia(fromId, fee, net, r) {
+    var c = contractOf(fromId);
+    if (c === WNEAR || router() || big(fee) <= BigInt(0)) return Promise.resolve(null);
+    return wnearPool(c).then(function (p) {
+      if (!p) return null;
+      var h = r.hops[0];
+      var priced = (!h.pool.dcl && String(h.pool.id) === String(p.id) && h.tin === c && h.tout === WNEAR && !r.split)
+        ? Promise.resolve((big(h.out) * big(fee) / big(net)).toString())
+        : getReturn(p.id, c, WNEAR, fee);
+      return priced.then(function (out) {
+        if (!(big(out) > BigInt(1))) return null;               // a slice worth nothing in wNEAR takes no fee
+        return { pool: +p.id, out: String(out), min: (big(out) / BigInt(2)).toString() };
+      });
+    }, function () { throw busyErr(); });
   }
 
   // ---- accounts --------------------------------------------------------------------------------------
@@ -485,9 +525,14 @@
     return p;
   }
   // With a router, the router must be registered on the input token too: the user's tokens go to it first.
+  // Without one, a token with a classic X/wNEAR pool pays its fee as wNEAR, so only wNEAR's registration counts.
   function feeReady(fromId) {
     var c = contractOf(fromId), acct = feeAccount(), rt = router();
     if (!acct) return Promise.resolve(false);
+    if (!rt && c !== WNEAR) {
+      return wnearPool(c).then(function (p) { return p ? regReady(WNEAR, acct, 'fee account') : regReady(c, acct, 'fee account'); },
+        function () { return null; });
+    }
     var checks = [regReady(c, acct, 'fee account')];
     if (rt) checks.push(regReady(c, rt, 'router'));
     return Promise.all(checks).then(function (r) {
@@ -582,13 +627,28 @@
           a.min_amount_out = i === first.length - 1 ? firstMin : '0';
           return a;
         });
-        if (!acts.length) {
-          // A DCL SWAP: the fee transfer and then ft_transfer_call to DCL, the shape the classic swap takes
-          // without a router (the router speaks Rhea's classic actions only). The message is DCL's own, as
-          // Rhea's app sends it on chain: {"Swap":{pool_ids, output_token, min_output_amount, skip_unwrap_near}}.
+        // THE FEE, first in the transaction: wNEAR through Rhea when X has a classic X/wNEAR pool (q.feeVia), else an
+        // ft_transfer in X (wNEAR itself included); nothing when the slice is 0. See the header.
+        var feeActs = function () {
+          if (!(big(q.fee) > BigInt(0))) return;
+          if (q.feeVia) {
+            actions.push({ type: 'FunctionCall', params: { methodName: 'ft_transfer_call',
+              args: { receiver_id: REF, amount: q.fee, msg: JSON.stringify({ force: 0, actions: [{ pool_id: q.feeVia.pool, token_in: inC, token_out: WNEAR,
+                amount_in: q.fee, min_amount_out: q.feeVia.min }], skip_unwrap_near: true, swap_out_recipient: acct }) },
+              gas: FEE_SWAP_GAS + TGAS, deposit: '1' } });
+            used += FEE_SWAP_GAS;
+            return;
+          }
           actions.push({ type: 'FunctionCall', params: { methodName: 'ft_transfer',
             args: { receiver_id: acct, amount: q.fee, memo: 'LumosCore platform fee ' + (feeBps() / 100) + '%' }, gas: '30' + TGAS, deposit: '1' } });
           used += 30;
+        };
+        if (!acts.length) {
+          // A DCL SWAP: the fee and then ft_transfer_call to DCL, the shape the classic swap takes without a router
+          // (the router speaks Rhea's classic actions only). The message is DCL's own, as Rhea's app sends it on
+          // chain: {"Swap":{pool_ids, output_token, min_output_amount, skip_unwrap_near}}. The fee slice still goes
+          // through a classic X/wNEAR pool when X has one.
+          feeActs();
           actions.push({ type: 'FunctionCall', params: { methodName: 'ft_transfer_call',
             args: { receiver_id: DCL, amount: q.net, msg: JSON.stringify({ Swap: { pool_ids: first.map(function (h) { return h.pool.id; }), output_token: firstOut,
               min_output_amount: firstMin, skip_unwrap_near: firstSkip } }) },
@@ -599,9 +659,7 @@
             args: { receiver_id: rt, amount: q.amount, msg: JSON.stringify({ fee_bps: feeBps(), actions: acts, skip_unwrap_near: firstSkip }) },
             gas: String(Math.min(SWAP_GAS, MAX_TX_GAS - used)) + TGAS, deposit: '1' } });
         } else {
-          actions.push({ type: 'FunctionCall', params: { methodName: 'ft_transfer',
-            args: { receiver_id: acct, amount: q.fee, memo: 'LumosCore platform fee ' + (feeBps() / 100) + '%' }, gas: '30' + TGAS, deposit: '1' } });
-          used += 30;
+          feeActs();
           var msg = { force: 0, actions: acts, skip_unwrap_near: firstSkip };
           actions.push({ type: 'FunctionCall', params: { methodName: 'ft_transfer_call',
             args: { receiver_id: REF, amount: q.net, msg: JSON.stringify(msg) },
