@@ -22,10 +22,11 @@
 // Last of all, the count baked into the build from a paced run (_tools/_nearholdercounts.js), so a curated
 // token is never "—" just because NearBlocks was busy -- with its date, as countAt.
 import { CURATED } from './_nearcurated.js';
-const TTL = 1800, KEEP = 604800, VER = 'v5';
+const TTL = 1800, KEEP = 604800, VER = 'v6';
 const COUNT_TTL = 21600, COUNT_KEEP = 2592000;
 const TOP = 'https://api.fastnear.com/v1/ft/';
 const COUNT = 'https://api.nearblocks.io/v1/fts/';
+const INTEAR = 'https://prices.intear.tech/token?token_id=';
 
 function json(body, maxAge) {
   return new Response(JSON.stringify(body), { headers: {
@@ -50,6 +51,11 @@ export function validId(id) { return /^[a-z0-9._-]{2,64}$/.test(id) && !/\.\.|^\
 // undefined when it could not be asked -- three different answers, kept apart.
 export async function readCount(id, get) {
   let c;
+  // Intear first (RAZA 2026-11-12): NearBlocks' token index stopped at the end of September and read BATMAN as 79
+  // holders against 724. NearBlocks stays the fallback for a token Intear has no figure for.
+  try { c = await (get || getJson)(INTEAR + encodeURIComponent(id)); } catch (e) { c = null; }
+  const live = Number(c && c.holders);
+  if (Number.isInteger(live) && live > 0) return live;
   try { c = await (get || getJson)(COUNT + encodeURIComponent(id) + '/holders/count'); } catch (e) { return undefined; }
   const n = Number((((c && c.holders) || [])[0] || {}).count);
   return isFinite(n) && n > 0 ? n : null;
@@ -65,10 +71,18 @@ export async function build(id, get, count, countAt) {
   // A LIST SHORTER THAN FastNEAR's 100 IS EVERY ACCOUNT -- so its holders are the count, exact and live, for
   // the small tokens NearBlocks has never indexed (DARK: 25). Preferred over any other figure.
   if (top.accounts.length < 100) { count = holders.length; countAt = null; }
+  // A COUNT BELOW THE LIST IS STALE (RAZA 2026-11-12: BATMAN read 79 holders while 100 accounts hold it). NearBlocks'
+  // token index stopped moving at the end of September, and the baked figure came from it. A full list proves at least
+  // 100, so a smaller count is never shown: Intear's live count replaces it when it is at least the list, else the floor.
+  else if (count != null && count < holders.length) {
+    let live = null;
+    try { const t = await get(INTEAR + encodeURIComponent(id)); live = Number(t && t.holders); } catch (e) {}
+    if (Number.isInteger(live) && live >= holders.length) { count = live; countAt = null; } else count = null;
+  }
   // With no count anywhere, a FULL list still proves a floor: at least this many hold it. The page shows
   // "100+" -- true -- rather than "—" (14 curated tokens NearBlocks has never indexed, 2026-10-30).
   const countMin = count == null && top.accounts.length >= 100 ? holders.length : null;
-  return { ok: true, src: 'FastNEAR (list), NearBlocks (count)', at: Date.now(), i: id,
+  return { ok: true, src: 'FastNEAR (list), Intear (count)', at: Date.now(), i: id,
     count: count == null ? null : count, countUnread: count === undefined, countAt: countAt || null, countMin, holders };
 }
 

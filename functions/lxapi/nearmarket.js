@@ -120,8 +120,8 @@ export async function marketBody(context) {
   // The cache outlives a deployment, so the key carries the answer's SHAPE version: a new deploy that
   // changes what a row holds must not serve the previous version's answer for two minutes. Bump it
   // whenever the row shape changes (v3: rows carry cg; history is fetched by the page; v6: own-pool prices; v7: rows carry w).
-  const fresh = new Request('https://lumoscore.internal/lxapi/nearmarket/v7/fresh');
-  const kept = new Request('https://lumoscore.internal/lxapi/nearmarket/v7/kept');
+  const fresh = new Request('https://lumoscore.internal/lxapi/nearmarket/v8/fresh');
+  const kept = new Request('https://lumoscore.internal/lxapi/nearmarket/v8/kept');
 
   const hit = await cache.match(fresh);
   if (hit) return await hit.json();

@@ -299,7 +299,10 @@
     var p = fetch('/lxapi/neartokensearch?q=' + encodeURIComponent(q)).then(function (r) { return r.json(); })
       .then(function (d) {
         if (!d || !d.ok || !d.rows) { delete WIDE[q]; return []; }
-        return d.rows.filter(function (r) { return r && C.isAccountId(r.i); }).map(function (r) {
+        // ONLY WHAT THE QUERY NAMES (RAZA 2026-11-12: "why was batman even appearing when i was searching for nearly").
+        // The index matches inside contract ids, so batman-4.nearlytrade.near answered "nearly"; the list keeps its own
+        // rule, rank() below: a bare word matches a symbol or a name, and a contract only from its start.
+        return d.rows.filter(function (r) { return r && C.isAccountId(r.i) && rank({ i: r.i, n: C.cleanSym(r.n), nm: C.cleanSym(r.nm) }, q) >= 0; }).map(function (r) {
           return { i: r.i, n: C.cleanSym(r.n) || short(r.i), nm: C.cleanSym(r.nm), p: null, d: null, cur: false, h: +r.h || 0,
             logo: iconOf(r.i) };
         });
@@ -649,7 +652,18 @@
       function draw() {
         var known = {};
         hits.forEach(function (t) { known[t.i] = 1; });
-        var more = (wideRows || []).filter(function (t) { return !known[t.i]; });
+        // ONE ROW PER TOKEN, THE CURATED ONE WINNING (RAZA 2026-11-12: BATMAN came up without its tick, then with it). A
+        // token the index returns that is on the curated list is drawn from the list, tick, domain and all; and the
+        // index's live holder count replaces the list's, whose figure can be months old.
+        var live = {}, cur = {};
+        (wideRows || []).forEach(function (t) { if (t.h > 0) live[t.i] = t.h; });
+        (toks || []).forEach(function (t) { cur[t.i] = t; });
+        hits.forEach(function (t) { if (live[t.i] > (t.h || 0)) t.h = live[t.i]; });
+        var more = (wideRows || []).filter(function (t) { return !known[t.i]; }).map(function (t) {
+          var c = cur[t.i]; if (!c) return t;
+          if (t.h > (c.h || 0)) c.h = t.h;
+          return c;
+        });
         var seen = {};
         phits.forEach(function (p) { seen[p.id] = 1; });
         paint(list, hits.concat(more), phits.concat(morePools.filter(function (p) { return !seen[p.id]; })).slice(0, 5), xNow, !toks && !pools);
