@@ -106,7 +106,7 @@
     return v.toFixed(0);
   }
 
-  function pct(v) { return (v == null || !isFinite(v)) ? null : (v >= 0 ? '+' : '') + v.toFixed(2) + '%'; }
+  function pct(v) { return (v == null || v === '' || !isFinite(v)) ? null : (+v >= 0 ? '+' : '') + (+v).toFixed(2) + '%'; }
 
   // ICONS: the design's icon classes (.mdx-mk-ic, .dex-mk-pair-ic, .dex-mover-ico) and the
   // data-lxic attribute are all hooks for inherited Stellar icon painters that resolve logos BY
@@ -1283,7 +1283,9 @@
   var XRP24 = null;
 
   function changeIn(d) {
-    if (DEN === 'usd') return d;                 // the endpoint's change is already in dollars
+    // As a NUMBER (RAZA 2026-11-11, the table failed to draw for anyone on $): the endpoint can send the change as a
+    // string, and only the NEAR branch below ever converted it, so pct() met a string and threw.
+    if (DEN === 'usd') return (d == null || d === '' || !isFinite(+d)) ? null : +d;   // already in dollars
     if (d == null || XRP24 == null) return null;
     // Composed, not added: a token up 10% against an XRP that is down 5% is not up 5% in dollars.
     return ((1 + d / 100) / (1 + XRP24 / 100) - 1) * 100;   // dollars -> NEAR terms
@@ -1901,7 +1903,10 @@
       // XRP's own 24h move, for the dollar-denominated change column. Fire-and-forget: the toggle
       // is usable immediately in XRP mode, and if this never lands the $ column shows em dashes
       // rather than the XRP number wearing a $ heading.
-      ensureXrp24(function () { if (DEN === 'usd') renderPage(h, d, pageNo); });
+      // NOT CALLED HERE ANY MORE (RAZA 2026-11-11, the table read 'Market data is unavailable' for anyone whose price unit
+      // was $): ensureXrp24 answers at once on NEAR, so this painted the table before the search, sort and history it
+      // reads were wired, threw, and the catch below reported the throw as missing data. renderPage(h, d, 1) below paints
+      // it once everything is in place.
 
       buildDenToggle(h, d);
       wireSearch(h, d);
@@ -1928,7 +1933,12 @@
       }
 
       attribution(d);
-    }).catch(function () { reveal(); note(h, 'Market data is unavailable right now.'); });
+    }).catch(function (e) {
+      // A throw while DRAWING is not missing data: it is reported as such and said in the console.
+      reveal();
+      try { console.error('[trade] market table', e); } catch (_) {}
+      note(h, window.__lxnTradeData ? 'Couldn’t show the market table. Reload to try again.' : 'Market data is unavailable right now.');
+    });
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', load);
