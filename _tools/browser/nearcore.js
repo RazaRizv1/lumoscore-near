@@ -20,10 +20,18 @@
 
   // The market answer, shared with prices.js so the page asks once. A failed answer is never kept as
   // THE answer: the promise is dropped so the next caller asks again.
+  // The last good answer this browser saw, marked stale; null when there is none. Never stored from a failure.
+  function keptMarket() {
+    try { var k = JSON.parse(localStorage.getItem('lxn.market') || 'null'); if (k && k.ok && k.rows && k.rows.length) { k.stale = true; return k; } } catch (e) {}
+    return null;
+  }
   function market() {
     if (!window.__lxnMarketP) {
       var p = fetch('/lxapi/nearmarket').then(function (r) { return r.json(); })
-        .then(function (d) { return (d && d.ok && d.rows) ? d : null; }, function () { return null; });
+        .then(function (d) {
+          if (d && d.ok && d.rows && d.rows.length) { try { localStorage.setItem('lxn.market', JSON.stringify(d)); } catch (e) {} return d; }
+          return keptMarket();
+        }, keptMarket);
       window.__lxnMarketP = p;
       p.then(function (d) { if (!d && window.__lxnMarketP === p) window.__lxnMarketP = null; });
     }

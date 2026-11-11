@@ -1857,19 +1857,27 @@
     // ASKED AGAIN BEFORE GIVING UP (RAZA 2026-09-17: "sometimes i get this error when i open trade main page"). One refused
     // read emptied the whole market table; the upstream's daily cap makes that a matter of when, not if. The endpoint also
     // serves its last good answer when the live one fails, so this usually gets rows either way.
+    // AND THROUGH lxnCore.market, which falls back to the copy this browser last saw. A location with no answer yet keeps
+    // asking for two minutes before it says it has none (RAZA 2026-11-11), the table saying it is still reading meanwhile.
+    var C = window.lxnCore;
+    function read() {
+      if (C && C.market) { window.__lxnMarketP = null; return C.market().then(function (d) { return d || { ok: false }; }); }
+      return fetch('/lxapi/nearmarket').then(function (r) { return r.json(); });
+    }
     (function ask(tries) {
-      return fetch('/lxapi/nearmarket').then(function (r) { return r.json(); }).then(function (d) {
+      return read().then(function (d) {
         if (d && d.ok && d.rows && d.rows.length) return d;
         if (tries > 0) {
-          return new Promise(function (res) { setTimeout(res, 1200 * (4 - tries)); }).then(function () { return ask(tries - 1); });
+          if (tries < 7) note(h, 'Still reading NEAR markets…');
+          return new Promise(function (res) { setTimeout(res, tries > 6 ? 1500 : 15000); }).then(function () { return ask(tries - 1); });
         }
         return d;
       }, function () {
         return tries > 0
-          ? new Promise(function (res) { setTimeout(res, 1200 * (4 - tries)); }).then(function () { return ask(tries - 1); })
+          ? new Promise(function (res) { setTimeout(res, tries > 6 ? 1500 : 15000); }).then(function () { return ask(tries - 1); })
           : null;
       });
-    })(3).then(function (d) {
+    })(14).then(function (d) {
       reveal();
       if (!d || !d.ok || !d.rows.length) { note(h, 'Market data is unavailable right now.'); return; }
       window.__lxnTradeData = d;
