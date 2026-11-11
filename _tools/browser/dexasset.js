@@ -1926,7 +1926,7 @@
   // Recent Exchanges from the pool indexer's swap rows, in paintTrades' row shape (see idxSeries).
   function idxTrades(pool, attempt) {
     var d = window.__lxnAssetData, no = poolNo(pool), at = attempt || 0;
-    if (!no) { TR.rows = []; TR.at = Date.now(); syncPanel(); return; }
+    if (!no) { TR.rows = []; TR.at = Date.now(); syncPanel(); chainTrades(0); return; }
     idxRows(no).then(function (j) {
       var out = idxTicks(j, d).ticks.filter(function (k) { return k.n > 0 && ACCT_RE.test(k.addr); }).map(function (k) {
         return { addr: k.addr, side: k.side, amt: k.amt, near: k.near, px: k.px, t: k.t,
@@ -1935,14 +1935,40 @@
       TR.rows = out; TR.mean = trMean(out);
       TR.ts = null; TR.err = false; TR.at = Date.now();
       syncPanel();
+      if (!out.length) chainTrades(0);
     }, function () {
       if (at >= CH_RETRY.length) { TR.err = true; syncPanel(); }
       if (at < 12) setTimeout(function () { idxTrades(pool, at + 1); }, at < CH_RETRY.length ? CH_RETRY[at] : 60000);
     });
   }
+  // THE CHAIN'S OWN RECORD, WHEN THE FEED HAS NOTHING (RAZA 2026-11-12, HNEAR: "No trades in the recent window").
+  // GeckoTerminal sends a pool's last 24 hours only, so a token that last traded a week ago read as never traded.
+  // /lxapi/neartokentrades reads the token's swaps from the chain, newest first, in this table's row shape. Asked only
+  // when the feed answered with none (or does not know the pool, or there is no wNEAR pool): busy tokens keep the feed.
+  // A partial answer is shown and asked again a little later; a failure is retried a few times, never read as "none".
+  function chainTrades(attempt) {
+    var d = window.__lxnAssetData, at = attempt || 0;
+    if (!d || !d.i) return;
+    var want = d.i;
+    fetch('/lxapi/neartokentrades?i=' + encodeURIComponent(want)).then(function (r) { return r.json(); }).then(function (j) {
+      var d2 = window.__lxnAssetData;
+      if (!d2 || d2.i !== want) return;
+      if (!j || !j.ok || !Array.isArray(j.rows)) throw new Error('chain trades');
+      TR.chain = true;
+      if (j.rows.length || !TR.rows || !TR.rows.length) {
+        TR.rows = j.rows; TR.mean = trMean(j.rows);
+        if (j.rows.length) TR.none = false;
+      }
+      TR.err = false; TR.at = Date.now();
+      syncPanel();
+      if (j.partial && at < 3) setTimeout(function () { chainTrades(at + 1); }, 6000);
+    }).catch(function () {
+      if (at < 3) setTimeout(function () { chainTrades(at + 1); }, [3000, 10000, 30000][at]);
+    });
+  }
   function loadTrades(attempt) {
     var d = window.__lxnAssetData, pool = gtPool(d);
-    if (!pool) { TR.none = true; TR.rows = []; syncPanel(); return; }
+    if (!pool) { TR.none = true; TR.rows = []; syncPanel(); chainTrades(0); return; }
     TR.pool = pool;
     var at = attempt || 0;
     if (GT_NONE[pool.id]) { idxTrades(pool, at); return; }
@@ -1975,6 +2001,7 @@
       TR.mean = trMean(TR.rows);
       TR.err = false; TR.at = Date.now();
       syncPanel();
+      if (!TR.rows.length) chainTrades(0);                    // a quiet day on the feed: the chain's older trades
     }, function (e) {
       // GeckoTerminal has never seen this pool, which waiting cannot change: the indexer's swap rows instead.
       if (/^404$/.test(String((e && e.message) || ''))) { GT_NONE[pool.id] = 1; idxTrades(pool, 0); return; }
@@ -2083,7 +2110,7 @@
         ? (!me ? 'Connect a wallet to see your own trades in this asset.'
           : !MINE.rows ? (MINE.err ? 'Your trades could not be read right now. Try again in a moment.' : 'Reading your trades…')
           : 'No trades from this wallet in this asset.')                   // Stellar's line (RAZA 2026-11-03)
-        : TR.min > 0 ? ('No trades of ' + TR.min.toLocaleString('en-US') + '+ NEAR among the latest ' + TR.rows.length + '.') : 'No trades in the recent window.';   // Stellar's line
+        : TR.min > 0 ? ('No trades of ' + TR.min.toLocaleString('en-US') + '+ NEAR among the latest ' + TR.rows.length + '.') : (TR.chain ? 'No trades found for this asset.' : 'No trades in the recent window.');   // Stellar's line; the chain's record has no window
       tb.innerHTML = phone
         ? '<div class="lxda-ex-empty" data-lxda="1" style="text-align:center;padding:26px 12px;color:var(--text-soft,#8a8fa3);font-size:13.5px">' + none + '</div>'
         : '<tr class="lxda-ex-empty" data-lxda="1"><td colspan="6" style="text-align:center;padding:26px 12px;color:var(--text-soft,#8a8fa3);font-size:13.5px">' + none + '</td></tr>';
