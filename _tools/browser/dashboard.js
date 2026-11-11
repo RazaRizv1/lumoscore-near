@@ -246,17 +246,42 @@
     el.textContent = n + ' in 24h';
     el.title = (n === 1 ? '1 transaction' : n + ' transactions') + ' through LumosCore in the last 24 hours';
   }
+  function paintRows(rows) {
+    var list = document.getElementById('activityList');
+    if (!list || !rows || !rows.length) return;
+    var h = rows.map(actRow).join('');
+    if (list.__lxh !== h) { list.innerHTML = h; list.__lxh = h; }
+    head24(rows);
+    list.setAttribute('data-lxact', '1');
+    try { list.setAttribute('data-logoed', '1'); } catch (e) {}
+  }
+  // INSTANT, AS STELLAR'S AND XRPL'S (RAZA 2026-11-11: "Couldn't load platform activity just now" for minutes, because
+  // FastNEAR refuses his IP). The last rows this browser drew paint at once; /lxapi/nearactivity, one read at the edge
+  // for every visitor, then replaces them; the browser's own FastNEAR read is the fallback when the edge cannot answer.
+  var PACT_KEY = 'lxn.pact.last';
+  function savedRows() {
+    try { var c = JSON.parse(localStorage.getItem(PACT_KEY) || 'null'); return (c && Array.isArray(c.rows) && c.rows.length) ? c.rows : null; } catch (e) { return null; }
+  }
+  function saveRows(rows) { try { localStorage.setItem(PACT_KEY, JSON.stringify({ t: Date.now(), rows: rows })); } catch (e) {} }
   function activity() {
+    if (!activity.painted) { activity.painted = 1; paintRows(savedRows()); }
+    if (activity.edge !== 'down') {
+      // A 200 {ok:false} is the edge saying it could not read: not "no activity". A partial answer is shown but not
+      // remembered as complete; an empty complete one leaves the real "No platform activity yet."
+      j('/lxapi/nearactivity' + (activity.again ? '?r=' + activity.again : '')).then(function (d) {
+        if (!d || !d.ok || !Array.isArray(d.rows)) throw new Error('edge');
+        if (d.rows.length) { paintRows(d.rows); if (!d.partial) saveRows(d.rows); }
+        if (d.partial && (activity.again = (activity.again || 0) + 1) < 4) setTimeout(activity, 6000);
+      }).catch(function () { activity.edge = 'down'; activity(); });
+      return;
+    }
     var C = window.lxnCore;
     // nearcore.js can arrive after this script: wait for it (up to 10s) rather than keep the empty row.
     if (!C || !C.platformActivity) { if ((activity.n = (activity.n || 0) + 1) < 40) setTimeout(activity, 250); return; }
     C.platformActivity(15).then(function (rows) {
-      var list = document.getElementById('activityList');
-      if (!list || !rows || !rows.length) return;
-      list.innerHTML = rows.map(actRow).join('');
-      head24(rows);
-      list.setAttribute('data-lxact', '1');
-      try { list.setAttribute('data-logoed', '1'); } catch (e) {}
+      if (!rows || !rows.length) return;
+      paintRows(rows);
+      saveRows(rows);
     }, function () {
       // FastNEAR refused (its per-visitor allowance) or failed. That is not "no activity" (RAZA 2026-11-10: "why its
       // saying no platform activity"): the row says it could not be read, and it asks again at 20s, 1 and 3 minutes.
@@ -265,7 +290,8 @@
         list.innerHTML = '<div class="activity-feed-row" style="justify-content:center;color:var(--text-soft);font-size:14px">Couldn’t load platform activity just now' + (k < 4 ? ' — trying again…' : '. Reload to try again.') + '</div>';
         list.setAttribute('data-lxact', '1');
       }
-      if (k < 4) setTimeout(activity, [20000, 60000, 180000][k - 1]);
+      // Each retry asks the edge first again, with its own query string, so a cached refusal cannot answer it.
+      if (k < 4) setTimeout(function () { activity.edge = ''; activity.again = 10 + k; activity(); }, [20000, 60000, 180000][k - 1]);
     });
   }
 

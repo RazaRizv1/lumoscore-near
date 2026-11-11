@@ -18,15 +18,15 @@
 //        the same signer, within ten minutes before the fee, or the row says nothing it cannot read.
 // A row's hash is the transaction that moved the tokens, which is what NearBlocks and Wormholescan know it by.
 //
-// COST: one index call, then only transactions not decoded before, five a call, at most 30 per request; the decoded map is
-// kept a week in one cache entry and the answer a minute. A failure is never cached: the last good answer is kept a day
+// COST: one index call (shared with /lxapi/nearactivity through _nearfeetx.js), then only transactions not decoded before,
+// five a call, at most 30 per request; the decoded map is kept a week in one cache entry and the answer a minute. A failure is never cached: the last good answer is kept a day
 // and served marked stale.
 import { CURATED } from './_nearcurated.js';
+import { FEE, WNEAR, post, signed, feeIndex, decodeNew } from './_nearfeetx.js';
 
-const FTX = 'https://tx.main.fastnear.com/v0/';
 const RPC = 'https://free.rpc.fastnear.com';
-const FEE = 'fees-lumoscore.near', OMNI = 'omni.bridge.near', PORTAL = 'contract.portalbridge.near', WNEAR = 'wrap.near';
-const VER = 'v1', TTL = 60, KEEP = 86400, MAP_TTL = 604800, NEWEST = 80, PER_RUN = 30, MAP_MAX = 400;
+const OMNI = 'omni.bridge.near', PORTAL = 'contract.portalbridge.near';
+const VER = 'v1', TTL = 60, KEEP = 86400, NEWEST = 80, PER_RUN = 30;
 const OM_CHAIN = { eth: 'Ethereum', base: 'Base', arb: 'Arbitrum', sol: 'Solana', bnb: 'BNB Chain', pol: 'Polygon' };
 const WH_CHAIN = { 2: 'Ethereum', 4: 'BNB Chain', 5: 'Polygon', 6: 'Avalanche', 23: 'Arbitrum', 24: 'Optimism', 30: 'Base' };
 const DEC = {};
@@ -35,15 +35,6 @@ for (const c of CURATED) DEC[c.i] = { d: c.d, s: c.s };
 function json(body, maxAge) {
   return new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json; charset=utf-8',
     'cache-control': 'public, max-age=' + maxAge, 'access-control-allow-origin': '*' } });
-}
-async function post(path, body) {
-  const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 8000);
-  try {
-    const r = await fetch(FTX + path, { method: 'POST', signal: ctl.signal,
-      headers: { 'content-type': 'application/json', 'user-agent': 'LumosCore/1.0 (+https://lumoscore.com)' }, body: JSON.stringify(body) });
-    if (!r.ok) throw new Error('fastnear ' + r.status);
-    return await r.json();
-  } finally { clearTimeout(t); }
 }
 async function meta(id) {
   if (DEC[id]) return DEC[id];
@@ -62,24 +53,6 @@ function scaled(raw, d) {
   const whole = s.length > d ? s.slice(0, s.length - d) : '0';
   const frac = (s.length > d ? s.slice(s.length - d) : s.padStart(d, '0')).replace(/0+$/, '');
   return whole + (frac ? '.' + frac : '');
-}
-// The signed actions, unwrapping a relayed (meta) transaction to the account that really acted.
-function signed(T) {
-  const tx = T.transaction || {};
-  let who = tx.signer_id || '', to = tx.receiver_id || '', acts = tx.actions || [];
-  if (acts.length === 1 && acts[0] && acts[0].Delegate) {
-    const da = acts[0].Delegate.delegate_action || {};
-    who = da.sender_id || who; to = da.receiver_id || to; acts = da.actions || [];
-  }
-  const calls = acts.map((a) => {
-    const f = a && a.FunctionCall;
-    if (!f) return null;
-    let args = null;
-    try { args = JSON.parse(atob(f.args || '')); } catch (e) {}
-    return { m: f.method_name, args, dep: String(f.deposit || '0') };
-  }).filter(Boolean);
-  const ts = Math.floor(Number((T.execution_outcome && T.execution_outcome.block_timestamp) || 0) / 1e6);
-  return { hash: tx.hash || '', who, to, calls, ts };
 }
 const ok64 = (x) => /^[0-9a-f]{64}$/.test(String(x || ''));
 // Wormhole names an EVM receiver as 32 bytes, left-padded: the address is the last 20.
@@ -117,27 +90,9 @@ function decode(T) {
 }
 
 async function build(cache) {
-  const mapKey = new Request('https://lumoscore.internal/lxapi/nearbridgetx/' + VER + '/map');
-  let map = {};
-  const hit = await cache.match(mapKey);
-  if (hit) { try { map = await hit.json(); } catch (e) { map = {}; } }
-
-  const idx = await post('account', { account_id: FEE });
-  const list = ((idx && idx.account_txs) || []).filter((x) => x && x.is_success !== false)
-    .sort((a, b) => Number(b.tx_block_height) - Number(a.tx_block_height)).slice(0, NEWEST);
-  const todo = list.map((x) => x.transaction_hash).filter((h) => !(h in map)).slice(0, PER_RUN);
-  const batches = [];
-  for (let i = 0; i < todo.length; i += 5) batches.push(todo.slice(i, i + 5));
-  const got = await Promise.all(batches.map((b) => post('transactions', { tx_hashes: b }).catch(() => null)));
-  let fresh = 0;
-  got.forEach((g) => {
-    ((g && g.transactions) || []).forEach((T) => {
-      const h = T && T.transaction && T.transaction.hash;
-      if (!h) return;
-      map[h] = decode(T) || 0;                     // 0: read, and not a bridge -- never asked again
-      fresh++;
-    });
-  });
+  const list = (await feeIndex(cache)).filter((x) => x.ok).slice(0, NEWEST)
+    .map((x) => ({ h: x.h, transaction_hash: x.h }));
+  const D = await decodeNew(cache, 'bridge', list, decode, PER_RUN), map = D.map;
 
   // Wormhole's native leg: the sender's own transactions in the ten minutes before the fee, and among them the one that
   // called send_transfer_near on the portal (the portal itself is too busy to search). One index call per such transfer,
@@ -145,7 +100,7 @@ async function build(cache) {
   const wants = Object.keys(map).filter((h) => map[h] && map[h].whNative && !map[h].leg && !(map[h].tries > 3)).slice(0, 3);
   for (const h of wants) {
     const r = map[h];
-    r.tries = (r.tries || 0) + 1; fresh++;
+    r.tries = (r.tries || 0) + 1; D.touch();
     try {
       const own = await post('account', { account_id: r.from });
       const near = ((own && own.account_txs) || []).filter((x) => x.is_success !== false && x.transaction_hash !== h)
@@ -177,11 +132,7 @@ async function build(cache) {
       dep: r.dep || null, chain: r.chain || null, to: r.to || null });
   }
 
-  if (fresh) {
-    const ks = Object.keys(map);
-    if (ks.length > MAP_MAX) ks.slice(0, ks.length - MAP_MAX).forEach((k) => { delete map[k]; });
-    await cache.put(mapKey, new Response(JSON.stringify(map), { headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=' + MAP_TTL } }));
-  }
+  await D.save();
   // Still behind (more new transactions than one run decodes): say so, so the answer is not kept as complete.
   return { body: { ok: true, at: Date.now(), rows, partial: list.some((x) => !(x.transaction_hash in map)) || undefined } };
 }
