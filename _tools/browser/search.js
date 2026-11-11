@@ -162,7 +162,10 @@
     a.appendChild(icoImg(t.i === C.WNEAR ? C.NEAR_LOGO : t.logo, t.n));
 
     var info = el('div', 'sp-info');
-    var nameRow = el('div', 'sp-name-row', t.n || short(t.i));
+    // NAME ON TOP, CODE BELOW (RAZA 2026-11-12, as Stellar's "Stellar Gold" over "XLMG · 11.8K holders"): the name heads
+    // the row and the second line is the code and holders only. A token with no name of its own keeps its code on top.
+    var nm = String(t.nm || '').trim();
+    var nameRow = el('div', 'sp-name-row', nm || t.n || short(t.i));
     if (t.cur) nameRow.appendChild(vBadge());
     // THE DOMAIN BADGE, STELLAR'S "lumoscore.com" (RAZA 2026-11-10, ticket 318). On NEAR it is the site the curated list
     // carries for the token, so only a curated row has one.
@@ -173,8 +176,7 @@
     // the second line is "CODE · Name · N holders" and the right side is the address chip alone. This row also
     // carried a price and a 24h change in the same right-hand cell, which ran into the chip as one string
     // ("$0.00165-2.45%token…near"). A token IS its contract on NEAR, so the contract is the chip.
-    var nm = String(t.nm || '').trim(), sub = [t.n || short(t.i)];
-    if (nm && nm.toLowerCase() !== String(t.n || '').toLowerCase()) sub.push(nm);
+    var sub = [t.n || short(t.i)];
     var hc = t.h > 0 ? +t.h : (HC[t.i] > 0 ? HC[t.i] : 0);
     if (hc > 0) sub.push(compact(hc) + ' holder' + (hc === 1 ? '' : 's'));
     var subEl = el('div', 'sp-sub', sub.join(' · '));
