@@ -191,7 +191,7 @@
   function inl(f) {
     if (!f) return '';
     var l = esc(String(f.s || '?').charAt(0).toUpperCase());
-    return '<span class="act-inl lx-actasset lx-dimg" data-logoed="1" data-l="' + l + '">'
+    return '<span class="act-inl lx-actasset lx-dimg" data-logoed="1" data-l="' + l + '" data-c="' + esc(f.c || '') + '">'
       + (f.ic ? '<img src="' + esc(f.ic) + '" alt="" onerror="this.remove()">' : '') + '</span>';
   }
   function tok(f) {
@@ -297,6 +297,24 @@
 
   // ---- the Quick actions row -------------------------------------------------------------------------------
   // lx-dashqa (inherited, patched by _neardash.js) routes the cards. Nothing here.
+
+  // THE ASSET OPENS ITS TRADE PAGE (RAZA 2026-11-11: "on Near when we click the asset in platform activity, nothing
+  // happens"), as Stellar's _realdata.js does: the bold amount-and-token, not the row, which keeps its own links. NEAR
+  // itself has no asset page, as XLM has none on Stellar, so it stays still.
+  if (!document.__lxnActNav) {
+    document.__lxnActNav = 1;
+    var st = document.createElement('style');
+    st.textContent = '#activityList .lx-fr b{cursor:pointer}#activityList .lx-fr b:hover{text-decoration:underline}';
+    (document.head || document.documentElement).appendChild(st);
+    document.addEventListener('click', function (ev) {
+      var t = ev.target;
+      if (!t || !t.closest || !t.closest('#activityList') || t.closest('.lx-actlink') || t.closest('.lx-actwho')) return;
+      var b = t.closest('b'), sp = b && b.querySelector('.lx-actasset'), c = sp ? sp.getAttribute('data-c') || '' : '';
+      if (!c || c === 'wrap.near' || c === 'near') return;
+      ev.preventDefault(); ev.stopPropagation();
+      location.href = '/trade/near/' + encodeURIComponent(c);
+    }, true);
+  }
 
   function load() {
     activityEmpty();
