@@ -104,6 +104,27 @@ for (const dev of ['desktop', 'mobile']) {
     });
     json[key] = h;
   }
+  // THE FAQ STYLES GO IN THE HEAD (RAZA 2026-11-12, the NEAR bridge flashed its FAQ as bare text on refresh). The
+  // inherited page carries them after the FAQ, at the end of the body, so the FAQ is drawn once unstyled. Moved, both
+  // blocks in their own order, so the cascade between them is unchanged; a page already carrying them in its head is left.
+  for (const key of Object.keys(json)) {
+    let h = json[key];
+    if (typeof h !== "string") continue;
+    const he = h.indexOf("</head>");
+    if (he < 0) continue;
+    const blocks = [];
+    for (const id of ["lx-faqtabs-css", "lx-faq-css"]) {
+      const at = h.indexOf("<style id=\"" + id + "\">");
+      if (at < he) continue;
+      const end = h.indexOf("</style>", at) + 8;
+      blocks.push([at, h.slice(at, end)]);
+    }
+    if (!blocks.length) continue;
+    blocks.sort((x, y) => x[0] - y[0]);
+    blocks.forEach((b) => { h = h.split(b[1]).join(""); });
+    json[key] = h.replace("</head>", blocks.map((b) => b[1]).join("") + "</head>");
+    tally.hoisted = (tally.hoisted || 0) + 1;
+  }
   fs.writeFileSync(file, data.slice(0, s) + JSON.stringify(json).split('</').join('<' + B + '/') + data.slice(e), 'utf8');
 }
 console.log('near faq: ' + Object.keys(tally).length + ' page key(s); replacements ' + JSON.stringify(tally));
