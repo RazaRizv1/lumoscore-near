@@ -35,7 +35,9 @@ const KEEP = 86400;
 const WNEAR = 'wrap.near';
 const RPC = 'https://free.rpc.fastnear.com';
 const PAIRS = 'https://api.dexscreener.com/token-pairs/v1/near/';
-const VER = 'v7';   // v2: web, x, desc; v3: curated logo first (2026-10-29); v5: own pools; v6: their count (2026-11-04); v7: 30 pools (2026-11-05)
+const VER = 'v8';   // v2: web, x, desc; v3: curated logo first (2026-10-29); v5: own pools; v6: their count (2026-11-04); v7: 30 pools (2026-11-05); v8: DCL pool (2026-11-12)
+const DCL = 'dclv2.ref-labs.near', DCL_FEES = [100, 400, 2000, 10000];
+const INTEAR = 'https://prices.intear.tech/token?token_id=';
 
 // NEAR account-id rules (nomicon): 2-64 chars, lowercase alphanumerics separated by single - _ or .,
 // no leading/trailing separator. Implicit accounts (64 hex) and eth-implicit (0x + 40 hex) satisfy
@@ -63,11 +65,12 @@ async function getJson(u, opts, ms) {
 // A view call. Resolves { ok:true, v } with the decoded JSON result, { ok:false, none:true } when the
 // chain answered that the account or method does not exist (a definitive "no"), or { ok:false } when
 // the call itself failed (an outage — which must not be reported as "not a token").
-async function view(account, method) {
+async function view(account, method, args) {
   try {
     const j = await getJson(RPC, { method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'query', params: {
-        request_type: 'call_function', finality: 'final', account_id: account, method_name: method, args_base64: 'e30=' } }) }, 5000);
+        request_type: 'call_function', finality: 'final', account_id: account, method_name: method,
+        args_base64: args ? btoa(JSON.stringify(args)) : 'e30=' } }) }, 5000);
     if (j.error || (j.result && j.result.error)) {
       const why = JSON.stringify(j.error || j.result.error);
       return { ok: false, none: /UNKNOWN_ACCOUNT|MethodNotFound|CodeDoesNotExist|does not exist|NO_CONTRACT_CODE/i.test(why) };
@@ -140,6 +143,42 @@ function usdOf(p, id) {
   return (pu > 0 && pn > 0) ? pu / pn : null;
 }
 
+// A TOKEN WHOSE ONLY MARKET IS A DCL POOL (RAZA 2026-11-12: "for every near asset which isnt curated ... it opens like
+// this", every figure a dash). DexScreener and the classic pool list know nothing of Rhea's concentrated-liquidity pools,
+// so GOD and ILOVEALEX read "no pool with a live price" while GOD/wNEAR at 1% holds ~1,000 NEAR. Read from the chain:
+// get_pool on each fee tier against wNEAR, the deepest Running one. Its price is the pool's current point, exact; its
+// liquidity is everything it holds (total_x, total_y) at that price. null when no tier holds a pool; throws when the
+// chain did not answer, which is not "no pool".
+async function dclMarket(id, decimals) {
+  if (decimals == null || id === WNEAR) return null;
+  const pair = [id, WNEAR].sort();
+  const rs = await Promise.all(DCL_FEES.map((f) => view(DCL, 'get_pool', { pool_id: pair[0] + '|' + pair[1] + '|' + f })));
+  if (rs.some((r) => !r.ok)) throw new Error('dcl unread');
+  let best = null;
+  for (const r of rs) {
+    const p = r.v;
+    if (!p || p.state !== 'Running' || !(BigInt(String(p.liquidity || '0')) > 0n || BigInt(String(p.total_order_x || '0')) > 0n || BigInt(String(p.total_order_y || '0')) > 0n)) continue;
+    if (!best || Number(p.total_y) + Number(p.total_x) > Number(best.total_y) + Number(best.total_x)) best = p;
+  }
+  if (!best) return null;
+  const tokIsX = best.token_x === id, decX = tokIsX ? decimals : 24, decY = tokIsX ? 24 : decimals;
+  const xInY = Math.pow(1.0001, +best.current_point) * Math.pow(10, decX - decY);   // human token_x in token_y
+  const price = tokIsX ? xInY : 1 / xInY;                                            // NEAR per token
+  if (!(price > 0) || !isFinite(price)) return null;
+  const tok = Number(tokIsX ? best.total_x : best.total_y) / Math.pow(10, decimals);
+  const near = Number(tokIsX ? best.total_y : best.total_x) / 1e24;
+  return { price, liq: near + tok * price, id: 'refv2-' + String(best.pool_id).split('|').join(':'), fee: +best.fee };
+}
+// What the chain cannot give for such a pool -- the 24h change and volume -- from Intear's price index, which the page
+// names as their source. Its price is never used: the pool's own is.
+async function intear(id) {
+  try {
+    const j = await getJson(INTEAR + encodeURIComponent(id), null, 4000);
+    const now = +j.price_usd_raw, ago = +j.price_usd_raw_24h_ago, vol = +j.volume_usd_24h;
+    return { d24: now > 0 && ago > 0 ? (now / ago - 1) * 100 : null, volUsd: isFinite(vol) && vol >= 0 ? vol : null };
+  } catch (e) { return null; }
+}
+
 async function build(id, context) {
   const cur = CURATED.find((c) => c.i === id) || null;
   const [market, pairsRaw, meta, supplyRaw, keys, ownP] = await Promise.all([
@@ -192,6 +231,15 @@ async function build(id, context) {
       }
     }
     src = 'pairs';
+  }
+  // No market row and no pair anywhere: the token's DCL pool against wNEAR, if it has one (see dclMarket).
+  let dcl = null, extra = null;
+  if (price == null && id !== WNEAR && !own.length) {
+    try { [dcl, extra] = await Promise.all([dclMarket(id, decimals), intear(id)]); } catch (e) { partial = true; }
+    if (dcl) {
+      price = dcl.price; usd = nearUsd ? dcl.price * nearUsd : null; liq = dcl.liq; src = 'dcl';
+      if (extra) { d24 = extra.d24; v24 = extra.volUsd != null && nearUsd ? extra.volUsd / nearUsd : null; }
+    }
   }
   if (price == null && !partial) partial = true;
 
@@ -247,6 +295,12 @@ async function build(id, context) {
       id: 'refv1-' + o.id, url: '' });
     if (logos[id] === undefined) logos[id] = logo;
   }
+  if (dcl) {
+    pools.unshift({ pair: symbol + ' / wNEAR', base: { i: id, s: symbol }, quote: { i: WNEAR, s: 'wNEAR' }, dex: 'ref-dcl',
+      liqUsd: nearUsd ? dcl.liq * nearUsd : 0, volUsd: extra && extra.volUsd != null ? extra.volUsd : 0,
+      liq: dcl.liq, vol: v24, id: dcl.id, url: '' });
+    if (logos[id] === undefined) logos[id] = logo;
+  }
   for (const k of Object.keys(logos)) if (!logos[k]) delete logos[k];
 
   const body = {
@@ -262,7 +316,8 @@ async function build(id, context) {
     poolCapped: !(cur && cur.pcl > 0) && own.length >= 30, logos,
     curated: !!cur, cg: (cur && cur.cg) || '', web, x, desc: DESC[id] || '',
     lock: { keys, locked: keys == null ? null : (keys > 0 ? false : null) },
-    src, at: Date.now(),
+    // src 'dcl': price and liquidity from the DCL pool on chain; d24 and v24 from Intear (srcExtra), when it answered.
+    src, srcExtra: dcl && extra ? 'intear' : '', at: Date.now(),
   };
   if (partial) body.partial = true;
   return { body, store: !partial };

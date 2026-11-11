@@ -3340,8 +3340,13 @@
     if (!a) { if (desc.parentNode) desc.parentNode.removeChild(desc); return; }
     var d = window.__lxnAssetData;
     var nm = d && d.name && d.name.toLowerCase() !== String(a.code).toLowerCase() ? (' (' + d.name + ')') : '';
-    plain(desc, (d && d.desc) ? d.desc : (a.code + nm + ' is a token on NEAR Protocol. Its price, 24h volume and pools come from '
-      + 'NEAR\'s on-chain pools and DexScreener, and its supply is read from the token contract itself.'));
+    // A token priced from its concentrated-liquidity pool (neartoken src 'dcl', RAZA 2026-11-12) says where each figure
+    // comes from: the pool itself on chain, and Intear's index for what the chain does not keep.
+    var srcLine = (d && d.src === 'dcl')
+      ? ' Its price and liquidity are read on chain from its NEAR order-book pool' + (d.srcExtra === 'intear' ? '; 24h change and volume come from Intear’s price index' : '')
+        + ', and its supply from the token contract itself.'
+      : ' Its price, 24h volume and pools come from NEAR’s on-chain pools and DexScreener, and its supply is read from the token contract itself.';
+    plain(desc, (d && d.desc) ? d.desc : (a.code + nm + ' is a token on NEAR Protocol.' + srcLine));
     // Stellar's settled state: two lines at most, and no 24px held under it for a "Show more" control.
     // Without these the pre-script rule kept that space reserved for good, so NEAR's header stood 22px
     // taller than Stellar's for the same one-line USDC text.

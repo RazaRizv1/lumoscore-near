@@ -298,7 +298,7 @@
       .then(function (d) {
         if (!d || !d.ok || !d.rows) { delete WIDE[q]; return []; }
         return d.rows.filter(function (r) { return r && C.isAccountId(r.i); }).map(function (r) {
-          return { i: r.i, n: C.cleanSym(r.n) || short(r.i), nm: C.cleanSym(r.nm), p: null, d: null, cur: false,
+          return { i: r.i, n: C.cleanSym(r.n) || short(r.i), nm: C.cleanSym(r.nm), p: null, d: null, cur: false, h: +r.h || 0,
             logo: iconOf(r.i) };
         });
       }, function () { delete WIDE[q]; return []; });

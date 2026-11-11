@@ -158,7 +158,11 @@
     // Stellar's resetWidget: switching Buy/Sell shows the button lit with the field empty, until the next
     // keystroke (RAZA 2026-11-03). A press then says 'Enter an amount.'
     if (on && !raw && p.__lxnFresh) ready = true;
-    var label = on ? 'Swap' : SOON;
+    // A token no NEAR pool holds (the page's own verdict, dexasset.js __lxnAssetMiss) says so instead of a form that
+    // can never quote (RAZA 2026-11-12, APPLE).
+    var nopool = window.__lxnAssetMiss === 'none';
+    if (nopool) { on = false; ready = false; }
+    var label = nopool ? 'Not tradable on NEAR pools yet' : on ? 'Swap' : SOON;
     // lx-gate saved the design's label before this ran and restores data-lxorig on connect.
     b.setAttribute('data-lxorig', label);
     b.setAttribute('data-lxdis', on ? '0' : '1');

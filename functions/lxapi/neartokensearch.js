@@ -27,7 +27,10 @@ export async function onRequestGet(context) {
     for (const x of a) {
       const i = String((x && x.account_id) || ''), m = (x && x.metadata) || {};
       if (!ID.test(i) || !m.symbol) continue;
-      rows.push({ i, n: String(m.symbol).slice(0, 40), nm: String(m.name || '').slice(0, 80) });
+      // Holders as Intear counts them (RAZA 2026-11-12: NEAR search showed no holders where Stellar's does). Only a
+      // whole number is passed on; anything else is left out rather than shown as 0.
+      const h = Number(x.holders);
+      rows.push({ i, n: String(m.symbol).slice(0, 40), nm: String(m.name || '').slice(0, 80), h: Number.isInteger(h) && h > 0 ? h : null });
       if (rows.length >= 12) break;
     }
     return json({ ok: true, rows }, 300);

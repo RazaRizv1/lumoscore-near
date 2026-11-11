@@ -577,7 +577,8 @@
       detail('slip', (q.slipBps / 100) + '%');
       // The percentage belongs to the LABEL, "Swap fee (0.2%)", as on Stellar — not after the amount.
       detail('feelbl', 'Swap fee (' + (S().FEE_BPS / 100) + '%)');
-      detail('fee', show(q.fee, f.dec, 7) + ' ' + f.code);
+      // The fee is taken in what is paid and arrives as wNEAR (nearswap.js); the wNEAR it is expected to make, beside it.
+      detail('fee', show(q.fee, f.dec, 7) + ' ' + f.code + (q.feeVia ? ' ≈ ' + show(q.feeVia.out, 24, 6) + ' wNEAR' : ''));
       // NET_FEE_EST is a finished string — '0.003 NEAR', unit included — and browser/swapmodal.js
       // prints it verbatim. Wrapping it read "≈ ~0.003 NEAR NEAR".
       detail('net', S().NET_FEE_EST);
