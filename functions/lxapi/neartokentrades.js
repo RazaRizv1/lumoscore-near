@@ -22,7 +22,7 @@ import { WNEAR, post, decodeNew } from './_nearfeetx.js';
 
 const RPC = 'https://free.rpc.fastnear.com';
 const REF = 'v2.ref-finance.near', DCL = 'dclv2.ref-labs.near';
-const VER = 'v2', TTL = 120, N = 50, NEWEST = 120, PER_RUN = 30;
+const VER = 'v2', TTL = 120, N = 50, NEWEST = 120, PER_RUN = 40;
 const ID_RE = /^(?=.{2,64}$)(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/;
 const CUR = {};
 for (const c of CURATED) CUR[c.i] = c;

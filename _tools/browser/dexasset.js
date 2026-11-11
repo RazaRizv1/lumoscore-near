@@ -1949,11 +1949,13 @@
   function chainTrades(attempt) {
     var d = window.__lxnAssetData, at = attempt || 0;
     if (!d || !d.i) return;
+    if (!at) { if (TR.chainAsked === d.i) return; TR.chainAsked = d.i; }
     var want = d.i;
     fetch('/lxapi/neartokentrades?i=' + encodeURIComponent(want)).then(function (r) { return r.json(); }).then(function (j) {
       var d2 = window.__lxnAssetData;
       if (!d2 || d2.i !== want) return;
       if (!j || !j.ok || !Array.isArray(j.rows)) throw new Error('chain trades');
+      if (TR.rows && TR.rows.length && !TR.chain) return;   // the feed answered with rows: they stand
       TR.chain = true;
       if (j.rows.length || !TR.rows || !TR.rows.length) {
         TR.rows = j.rows; TR.mean = trMean(j.rows);
@@ -1961,7 +1963,7 @@
       }
       TR.err = false; TR.at = Date.now();
       syncPanel();
-      if (j.partial && at < 3) setTimeout(function () { chainTrades(at + 1); }, 6000);
+      if (j.partial && at < 8) setTimeout(function () { chainTrades(at + 1); }, 2500);
     }).catch(function () {
       if (at < 3) setTimeout(function () { chainTrades(at + 1); }, [3000, 10000, 30000][at]);
     });
@@ -1971,6 +1973,7 @@
     if (!pool) { TR.none = true; TR.rows = []; syncPanel(); chainTrades(0); return; }
     TR.pool = pool;
     var at = attempt || 0;
+    if (!at && d && d.curated === false) chainTrades(0);
     if (GT_NONE[pool.id]) { idxTrades(pool, at); return; }
     // v2: the first element is { meta: 1, ts, from } for the chart readout's trade count (below).
     getJsonOnce('lumos.nearGtTr.v2.' + pool.id, 'https://api.geckoterminal.com/api/v2/networks/near/pools/'
@@ -1997,7 +2000,9 @@
     }).then(function (rows) {
       var m = rows[0] && rows[0].meta ? rows[0] : null;         // slice, not shift: the array is shared
       TR.ts = m ? m.ts : null; TR.from = m ? m.from : 0;
-      TR.rows = m ? rows.slice(1) : rows;
+      var feed = m ? rows.slice(1) : rows;
+      // An empty day on the feed never wipes rows the chain already sent.
+      if (feed.length || !(TR.chain && TR.rows && TR.rows.length)) { TR.rows = feed; if (feed.length) TR.chain = false; }
       TR.mean = trMean(TR.rows);
       TR.err = false; TR.at = Date.now();
       syncPanel();
