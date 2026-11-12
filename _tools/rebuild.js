@@ -86,6 +86,9 @@ const CHAIN = [
   '_nearlumosdeferred', '_nearlaunchpad',
   // The Launchpad's How it works dialog (NEAR copy); the link is written by _nearlaunchpad.
   '_nearlaunchhiw', '_nearad', '_nearlumospage',
+  // Rewards (/rewards/near): strips Stellar's lx-rewardsdata and its dead companions, NEAR copy and countdown from
+  // 1 December 2026, injects lx-nearrewards. After _nearsearch (its eligibility reads window.lxnCore).
+  '_nearrewards',
   // The bridge: strips Stellar's CCTP / LayerZero / Stellar-origin 1Click layers from the three bridge
   // keys, patches lx-brstep2 to NEAR, injects lx-nearnibridge (nearswap.js + nibridge.js). The build fails
   // if the page's NI_CHAIN and nearoneclick.js's CHAINS disagree.

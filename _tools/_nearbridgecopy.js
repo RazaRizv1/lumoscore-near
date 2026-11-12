@@ -24,10 +24,13 @@ const fs = require('fs');
 const { read, getContents } = require(__dirname + '/lib.js');
 const B = String.fromCharCode(92);
 
-const SUB = 'Bridge NEAR, USDC, USDT and other NEAR tokens to thirty-five networks with NEAR Intents, '
-  + 'Omni Bridge or Wormhole — swap into the destination chain’s own token, or carry the token itself.';
+// STELLAR'S HEADER (RAZA 2026-11-12, ticket 363): "Bridge from NEAR" and one line in the shape of Stellar's ("Bridge USDC
+// with Circle CCTP, USDT0 with LayerZero, or swap into XRP, Bitcoin, Solana and other major assets with NEAR Intents.").
+const SUB = 'Carry NEAR tokens with Omni Bridge or Wormhole, or swap into Bitcoin, Solana, XRP and other major assets with NEAR Intents.';
 const SUB_PREV = ['Bridge NEAR, USDC, USDT and other NEAR tokens to thirty-five networks with NEAR Intents — '
-  + 'delivered as the destination chain’s own token, nothing to claim.'];
+  + 'delivered as the destination chain’s own token, nothing to claim.',
+  'Bridge NEAR, USDC, USDT and other NEAR tokens to thirty-five networks with NEAR Intents, '
+  + 'Omni Bridge or Wormhole — swap into the destination chain’s own token, or carry the token itself.'];
 const SUB_OLD = 'Bridge USDC with Circle CCTP, USDT0 with LayerZero, or swap into XRP, Bitcoin, Solana and other major assets with NEAR Intents.';
 
 // [question as it stands today, new question, new answer]
@@ -77,6 +80,14 @@ const FAQ = [
 // The design's static modal (desktop only). lx-bhiw intercepts the button, so this is what a crawler
 // reads rather than what a person sees -- still corrected, by exact pairs.
 const STATIC = [
+  // The heading, as Stellar's middleware writes its own ("Bridge from Stellar"), and the "How it works?" button kept at
+  // the far right: the design's .br-hero wraps, so a line wider than its half pushed the button under the text.
+  // Both pairs are exact and never contain their own FROM, so a second run changes nothing.
+  ['<h1>Cross-Chain Bridge / Swap</h1>', '<h1>Bridge from NEAR</h1>'],
+  ['.br-hero{display:flex;justify-content:space-between;align-items:flex-end;gap:17.6px;margin-bottom:22px;flex-wrap:wrap}',
+   '.br-hero{display:flex;justify-content:space-between;align-items:flex-end;gap:17.6px;margin-bottom:22px;flex-wrap:nowrap}'
+   + '.br-hero>div:first-child{flex:1 1 auto;min-width:0}.br-hero>div:last-child{flex:none}'
+   + '@media(max-width:760px){.br-hero{flex-wrap:wrap}}'],
   ['Cross-chain transfers via Wormhole and LayerZero.', 'Cross-chain transfers via NEAR Intents, Omni Bridge and Wormhole.'],
   ['Cross-chain transfers via NEAR Intents.', 'Cross-chain transfers via NEAR Intents, Omni Bridge and Wormhole.'],
   ["Choose the chains you're bridging between (Stellar and your destination network), then the asset and the amount you want to move.",

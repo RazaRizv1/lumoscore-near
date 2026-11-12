@@ -229,6 +229,22 @@ async function cachedTokens(request, env, waitUntil) {
   return res;
 }
 
+// WHERE ONE DEPOSIT WENT (RAZA 2026-11-12, ticket 353: the Dashboard's bridge rows name the delivered token, amount and
+// network, as Stellar's do). 1Click's status for the deposit account, its destination asset looked up in the token list.
+// Resolves { status, sym, out, chain } -- chain is 1Click's id (arb, stellar...) -- or null when 1Click does not know it.
+export async function niDelivery(env, dep) {
+  if (!nearOk(dep)) return null;
+  const r = await call(env, '/status?depositAddress=' + encodeURIComponent(dep), { method: 'GET' });
+  if (r.status !== 200 || !r.body) throw new Error('status ' + r.status);
+  const qr = r.body.quoteResponse, req = qr && qr.quoteRequest;
+  if (!req || !req.destinationAsset) return null;
+  const list = await tokens(env);
+  const t = list.find((x) => x.assetId === req.destinationAsset) || null;
+  const sd = r.body.swapDetails || {}, q = qr.quote || {};
+  return { status: String(r.body.status || ''), sym: t ? t.symbol : '', chain: t ? t.blockchain : '',
+    out: sd.amountOutFormatted || q.amountOutFormatted || null };
+}
+
 export async function onRequestGet({ request, env, waitUntil }) {
   const q = new URL(request.url).searchParams;
   const op = q.get('op');

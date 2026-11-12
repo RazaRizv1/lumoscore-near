@@ -60,6 +60,8 @@ function evm(r) { const m = /^(?:0x)?(?:0{24})?([0-9a-f]{40})$/i.exec(String(r |
 
 // One fee transaction -> a row, or null (a swap's fee, a failed transaction, anything not a bridge). Wormhole's native
 // leg is looked up later (needs the portal's list).
+// Exported: /lxapi/nearactivity draws the same transfers on the Dashboard (RAZA 2026-11-12, ticket 353).
+export function decodeBridge(T) { return decode(T); }
 function decode(T) {
   const s = signed(T);
   const fee = s.calls.find((c) => c.m === 'ft_transfer' && c.args && c.args.receiver_id === FEE && /^lx:(ni|om|wh)$/.test(c.args.memo || ''));
@@ -89,6 +91,28 @@ function decode(T) {
   return row;
 }
 
+// One decoded Wormhole native-NEAR fee row (decode's whNative) given its transfer: tries counted on the row itself.
+export async function whLeg(r, h) {
+  r.tries = (r.tries || 0) + 1;
+  try {
+    const own = await post('account', { account_id: r.from });
+    const near = ((own && own.account_txs) || []).filter((x) => x.is_success !== false && x.transaction_hash !== h)
+      .filter((x) => { const t = Math.floor(Number(x.tx_block_timestamp) / 1e6); return t <= r.at && r.at - t < 600000; })
+      .map((x) => x.transaction_hash).slice(0, 5);
+    if (!near.length) return;
+    const g = await post('transactions', { tx_hashes: near });
+    const legs = ((g && g.transactions) || []).map(signed).map((s2) => {
+      const c = s2.to === PORTAL && s2.who === r.from && s2.calls.find((x) => x.m === 'send_transfer_near' && x.args);
+      return c ? { hash: s2.hash, ts: s2.ts, carried: c.dep, chain: WH_CHAIN[c.args.chain], to: evm(c.args.receiver) } : null;
+    }).filter(Boolean).sort((x, y) => y.ts - x.ts);
+    const leg = legs[0];
+    if (!leg) return;
+    r.leg = leg.hash; r.carried = leg.carried; r.native = true;
+    if (leg.chain) r.chain = leg.chain;
+    if (leg.to) r.to = leg.to;
+  } catch (e) {}
+}
+
 async function build(cache) {
   const list = (await feeIndex(cache)).filter((x) => x.ok).slice(0, NEWEST)
     .map((x) => ({ h: x.h, transaction_hash: x.h }));
@@ -98,27 +122,7 @@ async function build(cache) {
   // called send_transfer_near on the portal (the portal itself is too busy to search). One index call per such transfer,
   // three per request, and given up after four tries.
   const wants = Object.keys(map).filter((h) => map[h] && map[h].whNative && !map[h].leg && !(map[h].tries > 3)).slice(0, 3);
-  for (const h of wants) {
-    const r = map[h];
-    r.tries = (r.tries || 0) + 1; D.touch();
-    try {
-      const own = await post('account', { account_id: r.from });
-      const near = ((own && own.account_txs) || []).filter((x) => x.is_success !== false && x.transaction_hash !== h)
-        .filter((x) => { const t = Math.floor(Number(x.tx_block_timestamp) / 1e6); return t <= r.at && r.at - t < 600000; })
-        .map((x) => x.transaction_hash).slice(0, 5);
-      if (!near.length) continue;
-      const g = await post('transactions', { tx_hashes: near });
-      const legs = ((g && g.transactions) || []).map(signed).map((s2) => {
-        const c = s2.to === PORTAL && s2.who === r.from && s2.calls.find((x) => x.m === 'send_transfer_near' && x.args);
-        return c ? { hash: s2.hash, ts: s2.ts, carried: c.dep, chain: WH_CHAIN[c.args.chain], to: evm(c.args.receiver) } : null;
-      }).filter(Boolean).sort((x, y) => y.ts - x.ts);
-      const leg = legs[0];
-      if (!leg) continue;
-      r.leg = leg.hash; r.carried = leg.carried; r.native = true;
-      if (leg.chain) r.chain = leg.chain;
-      if (leg.to) r.to = leg.to;
-    } catch (e) {}
-  }
+  for (const h of wants) { D.touch(); await whLeg(map[h], h); }
 
   const rows = [];
   for (const x of list) {

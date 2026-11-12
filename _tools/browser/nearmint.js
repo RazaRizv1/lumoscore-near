@@ -254,8 +254,47 @@
     return L().config(true).then(function (c) {
       decided = true;
       if (c.paused) setCta(L().SOON, false);
-      else setCta(LAUNCH, true);
+      else { setCta(LAUNCH, true); afford(d, me); }
     }, function () { decided = true; setCta(L().SOON, false); });
+  }
+
+  // CAN THIS WALLET PAY FOR IT (RAZA 2026-11-12, ticket 371), as Stellar's review does (_launchpad.js lxLpRevErr): the
+  // button goes off and says why, in Stellar's red box under the actions, when what the account can spend is below the
+  // total cost shown plus the gas runLaunch keeps back -- the same sum runLaunch refuses on, so the two never disagree.
+  // The total is the panel's own (nearlaunch.js lastPlan), re-checked when it is repainted at a new NEAR price. A
+  // balance that could not be read leaves the button as it was: runLaunch still checks before anything is signed.
+  function revErr(msg) {
+    var btn = cta();
+    if (!btn) return;
+    var el = document.getElementById('lx-lp-rev-err');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'lx-lp-rev-err';
+      el.style.cssText = 'color:#e5484d;font-size:12.5px;font-weight:600;line-height:1.5;text-align:center;width:100%;box-sizing:border-box;'
+        + 'margin:12px 0 0;padding:10px 12px;border:1px solid rgba(229,72,77,.35);border-radius:10px;background:rgba(229,72,77,.08)';
+      var row = btn.closest('.actions-row') || btn.parentNode;
+      (row.parentNode || row).insertBefore(el, row.nextSibling);
+    }
+    el.textContent = msg || '';
+    el.style.display = msg ? 'block' : 'none';
+  }
+  function afford(d, me) {
+    if (!me || !d) return;
+    var spend = null, seen = '', tries = 0;
+    function check() {
+      if (running) return;
+      var p = L().lastPlan;
+      if (!p || !p.total || spend == null) { if (++tries < 40) setTimeout(check, 500); return; }
+      var need = L().big(p.total) + L().big(GAS_MARGIN), key = need.toString();
+      if (key === seen) return;
+      seen = key;
+      if (L().big(spend) < need) {
+        setCta(LAUNCH, false);
+        revErr('Not enough NEAR to launch. You need about ' + L().fmtNear(key) + ' including gas (this wallet can spend '
+          + L().fmtNear(spend) + '). Add funds' + (Number(d.extra) > 0 ? ' or lower the extra liquidity' : '') + ' and try again.');
+      } else { setCta(LAUNCH, true); revErr(''); }
+    }
+    L().spendable(me).then(function (y) { spend = String(y); check(); setInterval(check, 2000); }, function () {});
   }
 
   // ---- the launch ---------------------------------------------------------------------------------------------

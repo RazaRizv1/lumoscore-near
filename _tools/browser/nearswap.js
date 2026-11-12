@@ -90,7 +90,9 @@
   // to it. 180 is what Rhea's own app sends with a swap's ft_transfer_call (and what this file's DCL orders
   // use); real swaps here burned 18-28 TGas end to end. Unused gas is refunded either way.
   var SWAP_GAS = 180;
-  var FEE_SWAP_GAS = 90;                              // the fee slice's one-hop swap to wNEAR (see the header)
+  var FEE_SWAP_GAS = 90;
+  // A token sale's NEAR reserve (see build): attached gas x GAS_HOLD at the floor price, not SWAP_KEEP.
+  var GAS_PRICE_FLOOR = '100000000', GAS_HOLD = 3;                              // the fee slice's one-hop swap to wNEAR (see the header)
   var NEAR_KEEP = '50000000000000000000000';          // 0.05 NEAR left behind by MAX, for gas and storage
   // A SWAP KEEPS 0.2 NEAR, NOT 0.05 (RAZA 2026-10-30: HOT refused three swaps of 0.005 NEAR from a 0.147 NEAR
   // balance with "User rejected the request"; Rhea's own app, same wallet, refuses the same swap with "Must have
@@ -681,9 +683,22 @@
         if (needWrap) dep += big(m[1]);
         if (needHub) dep += big(m[2]);
         // The gas reserve, checked here so every swap screen gets the same answer before anything is signed.
-        var needNear = dep + (q.from === 'near' ? big(q.amount) : BigInt(0)) + big(SWAP_KEEP);
+        // WHAT A TOKEN SALE HOLDS BACK (RAZA 2026-11-12: NEARLY -> NEAR refused with 0.1358 NEAR in the wallet). SWAP_KEEP's
+        // 0.2 is Rhea's own rule and HOT's measured refusal for a swap that SPENDS NEAR. Selling a token spends no NEAR:
+        // the chain only sets aside each transaction's attached gas, paid ahead at a price that may inflate before it is
+        // used, and refunds the rest. So a token sale keeps GAS_HOLD times the attached gas at NEAR's floor gas price
+        // (100 million yocto a unit of gas): 270 TGas reads 0.081 NEAR. Storage the swap registers is added on top.
+        var keep = big(SWAP_KEEP);
+        if (q.from !== 'near') {
+          var tg = 0;
+          txs.forEach(function (t) { t.actions.forEach(function (x) { tg += Number(String(x.params.gas || '0').slice(0, -12) || 0); }); });
+          keep = BigInt(Math.ceil(tg * GAS_HOLD)) * big(GAS_PRICE_FLOOR) * BigInt(1000000000000);
+        }
+        var needNear = dep + (q.from === 'near' ? big(q.amount) : BigInt(0)) + keep;
         if (big(nearHave) < needNear) {
-          throw new Error('Keep at least 0.2 NEAR in your wallet for gas: NEAR sets the gas aside before a swap runs and refunds what is not used. '
+          var keepTxt = fromUnits(keep.toString(), 24), kd = keepTxt.indexOf('.');
+          if (kd >= 0) keepTxt = keepTxt.slice(0, kd + 4);
+          throw new Error('Keep at least ' + keepTxt + ' NEAR in your wallet for gas: NEAR sets the gas aside before a swap runs and refunds what is not used. '
             + 'You have ' + fromUnits(nearHave, 24).replace(/(\.\d{4})\d+$/, '$1') + ' NEAR.');
         }
         return { txs: txs, steps: txs.length, needOut: needOut, needWrap: needWrap, storage: dep.toString(),

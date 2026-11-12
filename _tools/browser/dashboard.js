@@ -194,11 +194,53 @@
     return '<span class="act-inl lx-actasset lx-dimg" data-logoed="1" data-l="' + l + '" data-c="' + esc(f.c || '') + '">'
       + (f.ic ? '<img src="' + esc(f.ic) + '" alt="" onerror="this.remove()">' : '') + '</span>';
   }
+  // SUBSCRIPT ZEROS FOR THE TINY (RAZA 2026-11-12, ticket 367: "0.000006199" where Stellar's feed reads "0.0₅6199"):
+  // trade.js's subZero, the site's NEAR helper -- the subscript counts the zeros after the decimal point, then up to four
+  // significant digits (no padding: 0.0001 reads 0.0₃1) -- from three zeros up, where counting them by eye starts to fail.
+  function subZero(v) {
+    var ex = v.toExponential(3).split('e');
+    var zeros = -parseInt(ex[1], 10) - 1;
+    var m = ex[0].replace('.', '').replace(/0+$/, '') || '0';
+    var SUB = '₀₁₂₃₄₅₆₇₈₉';
+    return '0.0' + String(zeros).split('').map(function (ch) { return SUB.charAt(+ch); }).join('') + m;
+  }
+  function num(v) {
+    if (v >= 1000) return v.toLocaleString('en-US', { maximumFractionDigits: 2 });
+    if (v > 0 && v < 0.001) return subZero(v);
+    return String(+v.toPrecision(6));
+  }
   function tok(f) {
     if (!f) return '';
-    var v = f.v == null ? '' : Number(f.v);
-    var n = v === '' ? '' : (v >= 1000 ? v.toLocaleString('en-US', { maximumFractionDigits: 2 }) : String(+v.toPrecision(6)));
+    var v = f.v == null || !isFinite(Number(f.v)) ? '' : Number(f.v);
+    var n = v === '' ? '' : num(v);
     return '<b>' + (n ? esc(n) + ' ' : '') + inl(f) + esc(f.s) + '</b>';
+  }
+  // A bridge row, Stellar's cross-chain row (_realdata.js lxXcBuild, RAZA 2026-11-12, ticket 353): "0.1 NEAR → 0.0998
+  // NEAR on Arbitrum", the network's mark before its name, and the route as Stellar's "via" badge in the meta line. The
+  // destination is what /lxapi/nearactivity decoded from the transfer, never the bridge's contract.
+  var NI_TOK = { AAVE: 1, ADA: 1, ARB: 1, AVAX: 1, BCH: 1, BERA: 1, BNB: 1, BTC: 1, DAI: 1, DASH: 1, DOGE: 1, ETH: 1, GMX: 1,
+    LINK: 1, LTC: 1, MON: 1, NEAR: 1, OP: 1, POL: 1, SOL: 1, SUI: 1, TRX: 1, UNI: 1, USDC: 1, USDT: 1, USDT0: 1, WBTC: 1,
+    WETH: 1, XPL: 1, XRP: 1, ZEC: 1, cbBTC: 1 };
+  var NETF = { abstract: 1, adi: 1, aleo: 1, aptos: 1, arbitrum: 1, avalanche: 1, base: 1, berachain: 1, bitcoin: 1, bitcoincash: 1,
+    bnbchain: 1, cardano: 1, dash: 1, dogecoin: 1, ethereum: 1, fogo: 1, gnosis: 1, hood: 1, hyperliquid: 1, litecoin: 1, monad: 1,
+    movement: 1, optimism: 1, plasma: 1, polygon: 1, scroll: 1, solana: 1, starknet: 1, stellar: 1, sui: 1, ton: 1, tron: 1,
+    xlayer: 1, xrpl: 1, zcash: 1 };
+  var VIA_IMG = { 'NEAR Intents': '/assets/networks/nearintents.png', Wormhole: '/assets/networks/wormhole.png' };
+  function netKey(name) { var k = String(name || '').toLowerCase().replace(/[^a-z0-9]/g, ''); return k === 'xrpledger' ? 'xrpl' : k; }
+  function bridgeType(r) {
+    var x = r.x, dest = '';
+    if (x.s) {
+      var ic = x.ic || (NI_TOK[x.s] ? '/assets/tokens/ni/' + x.s + '.png' : (x.s === 'XLM' ? '/assets/tokens/xlm.png' : ''));
+      dest = tok({ s: x.s, v: x.v, ic: ic });
+    }
+    var net = x.chain ? ('<b class="lx-actnet">' + (NETF[netKey(x.chain)] ? '<img class="lx-netlg" src="/assets/networks/' + netKey(x.chain) + '.png" alt="" onerror="this.remove()">' : '')
+      + esc(x.chain) + '</b>') : '';
+    return tok(r.give) + (dest || net ? ' <span class="lx-actto">→</span> ' : '') + (dest || net)
+      + (dest && net ? ' <span class="lx-acton">on</span> ' + net : '')
+      + (x.note ? ' <span class="lx-actnote">' + esc(x.note) + '</span>' : '');
+  }
+  function viaBadge(v) {
+    return v ? '<span class="lx-via" data-logoed="1">' + (VIA_IMG[v] ? '<img src="' + VIA_IMG[v] + '" alt="">' : '') + NOICON + 'via ' + esc(v) + '</span>' : '';
   }
   var INFO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>';
   function actRow(r) {
@@ -208,8 +250,10 @@
       unread = true; verb = ''; cls = 'unread'; type = 'Couldn’t read this transaction';
     } else if (/limit order/i.test(m)) { verb = 'Order placed'; cls = 'swap'; type = tok(r.give) + ' limit order'; }
     else if (/^lx:(ni|om|wh)$/.test(m)) {
-      verb = 'Bridge'; cls = 'bridge';
-      type = tok(r.give) + ' → ' + ({ 'lx:ni': 'NEAR Intents', 'lx:om': 'Omni Bridge', 'lx:wh': 'Wormhole' })[m];
+      verb = 'Cross-chain'; cls = 'xchain';
+      // Without the decoded transfer (the browser fallback, or a row not read yet) the sent amount stands alone.
+      type = r.x ? bridgeType(r) : tok(r.give);
+      var via = r.x ? r.x.via : ({ 'lx:ni': 'NEAR Intents', 'lx:om': 'Omni Bridge', 'lx:wh': 'Wormhole' })[m];
     } else if (r.give && r.get) { verb = 'Swap'; cls = 'swap'; type = tok(r.give) + ' → ' + tok(r.get); }
     else { verb = 'Trade'; cls = 'swap'; type = tok(r.give || r.get); }
     var b = (verb === 'Swap') ? r.get : null;
@@ -218,7 +262,7 @@
       + (b ? '<span class="lx-fgb">' + logo(b) + '</span>' : '') + '</span>';
     return '<div class="activity-feed-row lx-fr' + (unread ? ' lx-frfail' : '') + '" data-lx-noswap="1">' + glyph
       + '<div class="info"><div class="type">' + type + '</div><div class="meta lx-actmeta">'
-      + (verb ? '<span class="lx-actverb ' + cls + '" data-logoed="1">' + NOICON + verb + '</span>' : '') + who(r.who) + '</div></div>'
+      + (verb ? '<span class="lx-actverb ' + cls + '" data-logoed="1">' + NOICON + verb + '</span>' : '') + viaBadge(via) + who(r.who) + '</div></div>'
       + '<div class="lx-frr"><div class="time">' + ago(r.ts) + '</div>'
       + '<a class="lx-actlink" href="' + TX + encodeURIComponent(r.h) + '" target="_blank" rel="noopener nofollow" title="View transaction">' + XPI + '</a></div></div>';
   }

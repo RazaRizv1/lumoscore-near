@@ -743,7 +743,17 @@
       }
     }
     var nm = $('.hero-name'); if (nm) nm.textContent = d.name || '—';
-    var tk = $('.hero-ticker'); if (tk) tk.textContent = '$' + ticker;
+    // "$LOL" is four characters, which is what the page's logo engine takes for a ticker badge: it painted a tiny Stellar
+    // mark there and emptied the text (RAZA 2026-11-12, ticket 371). Stellar's review shows the pill as text; data-logoed
+    // is the engine's own "leave this alone", and a mark it already painted is wiped.
+    var tk = $('.hero-ticker');
+    if (tk) {
+      tk.removeAttribute('data-logo');
+      tk.setAttribute('data-logoed', '1');
+      tk.style.backgroundImage = '';
+      tk.style.background = '';
+      tk.textContent = '$' + ticker;
+    }
     var desc = $('.hero-desc'); if (desc) desc.textContent = d.desc || '';
 
     setRow(['token name'], d.name || '—');

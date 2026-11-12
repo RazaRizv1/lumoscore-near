@@ -17,6 +17,8 @@
 // icon, which can be 50 KB a token. A failure is never cached and never answers "no activity": it is a 200 {ok:false}.
 import { CURATED } from './_nearcurated.js';
 import { FEE, WNEAR, post, feeIndex, decodeNew } from './_nearfeetx.js';
+import { decodeBridge, whLeg } from './nearbridgetx.js';
+import { niDelivery } from './nearoneclick.js';
 
 const RPC = 'https://free.rpc.fastnear.com';
 const IDX = 'https://near-pool-indexer.usa282.workers.dev';
@@ -74,7 +76,33 @@ function decode(T) {
   const a = actor(T);
   const memo = feeMemo(a.acts);
   if (!memo) return null;
-  return { h: a.h, who: a.me, memo, ts: a.ts, legs: legsOf(T, a.me) };
+  const r = { h: a.h, who: a.me, memo, ts: a.ts, legs: legsOf(T, a.me) };
+  if (/^lx:(ni|om|wh)$/.test(memo)) r.br = decodeBridge(T) || 0;      // the transfer itself, read as the Bridge page reads it
+  return r;
+}
+
+// BRIDGE ROWS AS STELLAR'S CROSS-CHAIN ROWS (RAZA 2026-11-12, ticket 353: "0.1 NEAR → Omni Bridge" is the contract's name,
+// not a destination). What was sent, what arrives and on which network, decoded from the transfer: Omni's recipient
+// ("arb:0x…") and Wormhole's message name the chain and carry the token itself; NEAR Intents' deposit is asked of 1Click,
+// which says what it delivered. A destination nothing has answered for yet is left out of the row, never guessed.
+const NI_LABEL = { eth: 'Ethereum', arb: 'Arbitrum', base: 'Base', op: 'Optimism', pol: 'Polygon', avax: 'Avalanche',
+  bsc: 'BNB Chain', scroll: 'Scroll', gnosis: 'Gnosis', bera: 'Berachain', monad: 'Monad', plasma: 'Plasma', xlayer: 'X Layer',
+  abs: 'Abstract', hood: 'Hood', hypercore: 'Hyperliquid', sol: 'Solana', sui: 'Sui', starknet: 'Starknet', aptos: 'Aptos',
+  movement: 'Movement', ton: 'TON', tron: 'Tron', cardano: 'Cardano', btc: 'Bitcoin', ltc: 'Litecoin', doge: 'Dogecoin',
+  bch: 'Bitcoin Cash', dash: 'Dash', zec: 'Zcash', aleo: 'Aleo', fogo: 'Fogo', adi: 'ADI', stellar: 'Stellar', xrp: 'XRP Ledger' };
+const VIA = { ni: 'NEAR Intents', om: 'Omni Bridge', wh: 'Wormhole' };
+const NI_DONE = { SUCCESS: 1, REFUNDED: 1, FAILED: 1 };
+const BR_PER_RUN = 4;
+async function enrichBridge(r, env) {
+  const b = r.br;
+  if (!b) return false;
+  if (b.whNative && !b.leg && !(b.tries > 3)) { await whLeg(b, b.hash); return true; }
+  if (b.route === 'ni' && b.dep && !(b.ni && NI_DONE[b.ni.status]) && !((b.nt || 0) > 8)) {
+    b.nt = (b.nt || 0) + 1;
+    try { const d = await niDelivery(env, b.dep); if (d) b.ni = d; } catch (e) {}
+    return true;
+  }
+  return false;
 }
 // The signer's token movements in one transaction, netted per token, in the order first seen.
 function legsOf(T, me) {
@@ -206,9 +234,16 @@ async function metaFor(ids) {
   return out;
 }
 
-async function build(cache) {
+async function build(cache, env) {
   const list = (await feeIndex(cache)).slice(0, NEWEST);
-  const D = await decodeNew(cache, 'activity', list, decode, PER_RUN), map = D.map;
+  // 'activity2': rows decoded before bridge rows carried their transfer are read again once.
+  const D = await decodeNew(cache, 'activity2', list, decode, PER_RUN), map = D.map;
+  let brAsks = 0;
+  for (const x of list.slice(0, N + 5)) {
+    const r = map[x.h];
+    if (!r || !r.br || brAsks >= BR_PER_RUN) continue;
+    if (await enrichBridge(r, env)) { brAsks++; D.touch(); }
+  }
   // The second legs, for the newest rows only, a few asks a request.
   let asks = 0;
   for (const x of list.slice(0, N + 5)) {
@@ -232,16 +267,37 @@ async function build(cache) {
   if (cut < 0) cut = list.length;
   const recs = list.slice(0, cut).map((x) => map[x.h]).filter((r) => r && okBy[r.h] !== false).sort((a, b) => b.ts - a.ts).slice(0, N);
   const ids = {};
-  recs.forEach((r) => { r.legs.forEach((g) => { ids[g.c] = 1; }); if (r.p) ids[r.p.get.c] = 1; });
+  recs.forEach((r) => { r.legs.forEach((g) => { ids[g.c] = 1; }); if (r.p) ids[r.p.get.c] = 1; if (r.br && !r.br.native) ids[r.br.token] = 1; });
   const meta = await metaFor(Object.keys(ids));
   const leg = (g) => {
     if (!g) return null;
     const m = meta[g.c];
     return { s: m.s, v: m.d == null ? null : units(g.raw, m.d), ic: m.ic, c: g.c };
   };
-  const rows = recs.map((r) => ({ h: r.h, who: r.who, memo: r.memo, ts: r.ts,
-    give: leg(r.legs.filter((g) => g.neg)[0]), get: leg(r.p ? r.p.get : r.legs.filter((g) => !g.neg).slice(-1)[0]),
-    h2: r.p ? r.p.h : undefined }));
+  const rows = recs.map((r) => {
+    const row = { h: r.h, who: r.who, memo: r.memo, ts: r.ts,
+      give: leg(r.legs.filter((g) => g.neg)[0]), get: leg(r.p ? r.p.get : r.legs.filter((g) => !g.neg).slice(-1)[0]),
+      h2: r.p ? r.p.h : undefined };
+    const b = r.br;
+    if (b && !(b.whNative && !b.leg)) {
+      const tk = b.native ? 'near' : b.token, m = meta[tk];
+      if (m && m.d != null) {
+        // What was sent: LumosCore's fee and the transfer together, as the Bridge page lists it.
+        row.give = { s: m.s, v: units((BigInt(b.fee || '0') + BigInt(b.carried || '0')).toString(), m.d), ic: m.ic, c: tk };
+        if (b.leg) row.h = b.leg;
+        const x = { via: VIA[b.route] };
+        if (b.route === 'ni') {
+          if (b.ni && b.ni.sym) { x.s = b.ni.sym; x.v = b.ni.out != null && isFinite(+b.ni.out) ? +b.ni.out : null; x.chain = NI_LABEL[b.ni.chain] || null;
+            if (b.ni.status === 'REFUNDED' || b.ni.status === 'FAILED') x.note = b.ni.status === 'REFUNDED' ? 'refunded' : 'failed'; }
+        } else {
+          x.s = m.s; x.v = units(b.carried || '0', m.d); x.ic = m.ic; x.chain = b.chain || null;
+        }
+        row.x = x;
+        row.get = null;
+      }
+    }
+    return row;
+  });
   // Not all of the newest transactions decoded yet (a cold start, or more new ones than one run reads): served, not kept.
   const partial = list.some((x) => !(x.h in map));
   return { ok: true, at: Date.now(), rows, partial: partial || undefined };
@@ -254,7 +310,7 @@ export async function onRequestGet(context) {
   const hit = await cache.match(fresh);
   if (hit) return json(await hit.json(), 20);
   try {
-    const body = await build(cache);
+    const body = await build(cache, context.env);
     const put = (req, ttl) => cache.put(req, new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=' + ttl } }));
     // A partial answer is kept for seconds, and only replaces the day-long copy when there is none.
     const keptRes = await cache.match(kept), keptHas = !!keptRes;

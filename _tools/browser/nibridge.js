@@ -384,10 +384,25 @@
     }, function () { HOLD = {}; HOLD_ME = ''; });
     return Promise.all([pNear, pFt]);
   }
-  // The raw balance of an asset, or null when it is not known.
+  // WHAT CAN BE SENT, OR null WHEN NOT KNOWN -- THE ONE FUNCTION THAT SAYS SO (RAZA 2026-11-12, ticket 358: the full
+  // balance typed, or MAX pressed, and Review transfer stayed disabled). MAX, the "available" figure, the over-balance
+  // banner and the gas check all read this, so none can offer what another refuses. A token: what is held (its gas is
+  // NEAR's, checked by gasShort). Native NEAR: what is left after the route's own keep -- the 0.05 NEAR every send
+  // keeps (maxSpend), or for Omni and Wormhole the gas they attach (nearbridges.js KEEP) plus Omni's relayer fee once
+  // quoted. LumosCore's fee comes out of the amount itself (amounts()), so it needs no keep of its own.
   function balRaw(a) {
     if (!a) return null;
-    if (a.native) return NEAR_SPEND;
+    if (a.native) {
+      if (NEAR_SPEND == null) return null;
+      var r = curRoute();
+      if (r !== 'om' && r !== 'wh') return NEAR_SPEND;
+      if (NEAR_RAW == null || !BRX()) return null;
+      var k = big(BRX().KEEP[r]);
+      if (r === 'om' && OMQ && OMQ.nativeFee != null) k += big(OMQ.nativeFee);
+      var v = big(NEAR_RAW) - k;
+      if (v < BigInt(0)) v = BigInt(0);
+      return (v < big(NEAR_SPEND) ? v : big(NEAR_SPEND)).toString();
+    }
     if (HOLD_ME !== addr()) return null;
     return HOLD[a.contract] != null ? HOLD[a.contract] : '0';
   }
@@ -1129,8 +1144,23 @@
   // to NEAR Intents). Here a swap would be worse than a different price -- each route delivers a
   // different asset, so falling back would change what arrives. The pick's own reason is shown instead.
   // With nothing picked, the first route that answered, in routesFor's order.
+  // MAX FOLLOWS ITS OWN FIGURE: Omni's relayer fee is known only once quoted, and it comes off what native NEAR can send.
+  // An amount MAX wrote, still untouched, moves down to the new figure and is quoted again; it can only move down, so
+  // this settles in one step.
+  var MAXED = '';
+  function remax() {
+    var inp = amtInput();
+    if (!MAXED || !inp || inp.value !== MAXED || !SRC || !SRC.native) return false;
+    var raw = balRaw(SRC), now = raw == null ? '' : fromUnits(raw, SRC.decimals);
+    if (!now || now === inp.value || Number(now) > Number(inp.value)) return false;
+    inp.value = now; MAXED = now;
+    try { paintSourceUsd(); } catch (_) {}
+    requote();
+    return true;
+  }
   function settle() {
     QUOTING = false;
+    if (remax()) return;
     var key = destChain(), rs = routesFor(SRC, key);
     BEST = '';
     if (PICKED && PICKED_FOR === key && rs.indexOf(PICKED) >= 0) BEST = answered(PICKED) ? PICKED : '';
@@ -1394,6 +1424,9 @@
     var n = amounts(), b = balRaw(SRC);
     if (!n || b == null) return '';
     if (!(big(n.gross) > big(b))) return '';
+    if (SRC.native && NEAR_RAW != null && !(big(n.gross) > big(NEAR_RAW))) {
+      return 'At most ' + fmt(fromUnits(b, 24), 6) + ' NEAR: the rest pays this route’s gas';
+    }
     return 'More than your ' + SRC.symbol + ' balance';
   }
   function balFigure(raw, a) {
@@ -1643,39 +1676,13 @@
     return '<span class="lx-buse-r">'
       + (img ? ('<img src="' + esc2(img) + '" alt="" '
         + 'style="width:18px;height:18px;border-radius:50%;object-fit:cover;display:inline-block;vertical-align:-4px;margin-right:6px">') : '')
-      + '<span>' + esc2(m.name) + '</span></span>' + (r ? txState(r) : '');
+      + '<span>' + esc2(m.name) + '</span></span>';
   }
-  // WHERE A BRIDGED TRANSFER HAS GOT TO, under the route's name. A Wormhole transfer the guardians have
-  // signed is the reader's to claim: its button lives in the Pending claims tab (paintPending), the row only says so.
+  // NO STATUS IN THE LIST, AS ON XRPL AND STELLAR (RAZA 2026-11-12, ticket 370: "NEAR Intents is delivering it"). The
+  // row is the transfer and its links; XRPL removed the same badge on 2026-10-13 ("we dont have that on stellar"). The
+  // status is still followed (follow()): it drives the sent dialog, and a Wormhole transfer waiting on its owner is
+  // listed under Pending claims, where its button lives.
   var CLAIMING = {}, CLAIM_ERR = {};
-  var ST_CSS = 'display:block;margin-top:4px;font-size:12px;line-height:1.35;color:var(--text-soft)';
-  function txState(r) {
-    // Another wallet's transfer: its status is not followed from here, so its row claims none.
-    if (r.glob && !r.status) return '';
-    if (r.route === 'wh') {
-      // THE CLAIM HAS ITS OWN TAB (RAZA 2026-11-10, tickets 321/322: "move it out" of Bridge used): the row says so.
-      if (r.status === 'READY') return '<span style="' + ST_CSS + '">Waiting to be claimed</span>';
-      if (r.status === 'SUCCESS') {
-        var ex = r.claimTx && BRX() ? BRX().evmExplorer(r.place) : '';
-        return '<span style="' + ST_CSS + '">' + (ex ? ('<a href="' + esc2(ex + '/tx/' + r.claimTx) + '" target="_blank" rel="noopener">Claimed</a>') : 'Claimed') + '</span>';
-      }
-      return '<span style="' + ST_CSS + '">Waiting for Wormhole’s guardians (~15 min)</span>';
-    }
-    // A delivered transfer says nothing here, as on Stellar (RAZA 2026-11-06: "it says Delivered below the bridge. please
-    // remove it"). Only a row that still needs the reader's attention carries a line.
-    if (r.status === 'SUCCESS') return '';
-    if (r.route === 'om') {
-      return '<span style="' + ST_CSS + '">' + (r.status === 'FAILED' ? 'Failed' : 'Omni is delivering it') + '</span>';
-    }
-    // WHAT THE HAND-OVER LINE PROMISES IS HERE (RAZA 2026-11-06): "its status is in Recent transactions"
-    // needs a NEAR Intents row to carry one, and it carried none. A row follow() stopped watching a week
-    // ago is left blank rather than still claiming to be delivering.
-    if (r.status === 'REFUNDED') return '<span style="' + ST_CSS + '">Refunded</span>';
-    if (r.status === 'FAILED') return '<span style="' + ST_CSS + '">Failed</span>';
-    if (r.status === 'INCOMPLETE_DEPOSIT') return '<span style="' + ST_CSS + '">Deposit incomplete — refundable</span>';
-    if (!r.status || Date.now() - (r.at || 0) > FOLLOW_MAX) return '';
-    return '<span style="' + ST_CSS + '">NEAR Intents is delivering it</span>';
-  }
   var TX_HEAD = '<tr><th>Time</th><th>From</th><th>Source address</th><th>To</th>'
     + '<th>Destination address</th><th>Bridge used</th>'
     + '<th class="br-xph" aria-label="Explorer">Explorer</th></tr>';
@@ -2029,6 +2036,8 @@
     if (!routesFor(SRC, chain).length) return (SRC ? SRC.symbol : 'This asset') + ' cannot reach ' + placeLabel(chain);
     var cr = curRoute();
     if (cr === 'ni' && !DEST) return 'Choose a destination asset';
+    // Nothing left after this route's gas: say that, not 'Enter an amount' (ticket 358).
+    if (SRC && SRC.native && balRaw(SRC) === '0' && NEAR_RAW != null) return 'This route needs more NEAR for its gas than the wallet holds';
     if (!amounts()) return 'Enter an amount';
     var ob = overBalance();
     if (ob) return ob;
@@ -2724,6 +2733,7 @@
           if (inp && raw != null && SRC) {
             // Native NEAR's figure already has the 0.05 NEAR gas-and-storage keep taken off (maxSpend).
             inp.value = fromUnits(raw, SRC.decimals);
+            MAXED = inp.value;
             QUOTE = null; paintSourceUsd(); paintReview(null); setCta(); requote();
           }
           return;

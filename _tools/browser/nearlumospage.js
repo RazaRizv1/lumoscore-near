@@ -60,6 +60,11 @@
   var TK = null;                                // the indexer's ticks, oldest first: { t, v (usd), vol (usd), tr }
   var NEAR_H = {}, CG = null;                   // hour -> NEAR usd; CoinGecko's [t, usd], oldest first
   var rawPx = null, rawPool = null;             // the indexer's two answers, kept to rebuild TK once CG lands
+  // From when pool 9001's record is whole (RAZA 2026-11-12, ticket 369: the tooltip's Volume and Trades, as Stellar's).
+  // Replaying every row the indexer holds, from the pool's first deposit, must land exactly on today's reserves: then no
+  // swap is missing from the record and a bucket with none really had none. Until that is proven (or if it ever fails)
+  // a bucket shows those rows only when the record has a swap in it, as before.
+  var WHOLE_FROM = Infinity;
 
   function q(s, r) { return (r || document).querySelector(s); }
   function qa(s, r) { return [].slice.call((r || document).querySelectorAll(s)); }
@@ -588,7 +593,7 @@
     for (var b = start; b < now; b += res) {
       var vol = 0, tr = 0;
       while (i < TK.length && TK[i].t < b + res) { cur = TK[i].v; vol += TK[i].vol; tr += TK[i].tr; i++; }
-      pts.push({ t: b, v: cur, vol: vol, tr: tr });
+      pts.push({ t: b, v: cur, vol: vol, tr: tr, whole: b >= WHOLE_FROM });
     }
     pts.push({ t: now, v: price() > 0 ? price() : cur, vol: 0, tr: 0 });
     return pts;
@@ -640,8 +645,8 @@
       var add = function (host, cls, text) { var d = document.createElement('div'); d.className = cls; d.textContent = text; host.appendChild(d); };
       add(tip, 'd', fullDate(p.t)); add(tip, 'l', 'Price'); add(tip, 'p', usd(p.v));
       // Only what the pool's record shows: order-book fills are not in it, so no row is not "none".
-      if (p.tr > 0) {
-        var a = document.createElement('div'); a.className = 'lxrow'; add(a, 'l', 'Volume'); add(a, 'p', p.vol >= 0.01 ? abbrUsd(p.vol) : '<$0.01'); tip.appendChild(a);
+      if (p.tr > 0 || p.whole) {
+        var a = document.createElement('div'); a.className = 'lxrow'; add(a, 'l', 'Volume'); add(a, 'p', p.tr > 0 ? (p.vol >= 0.01 ? abbrUsd(p.vol) : '<$0.01') : '$0'); tip.appendChild(a);
         var b = document.createElement('div'); b.className = 'lxrow'; add(b, 'l', 'Trades'); add(b, 'p', p.tr.toLocaleString('en-US')); tip.appendChild(b);
       }
       tip.style.opacity = 1;
@@ -679,7 +684,36 @@
       TK = buildTicks(rawPx, rawPool);
       paint();
       showChart();
+      proveWhole(rawPool);
     });
+  }
+  function proveWhole(pool) {
+    var rows = ((pool && pool.rows) || []).slice().sort(function (a, b) { return a.t - b.t; });
+    var C = window.lxnCore;
+    if (!rows.length || rows.length >= 500 || rows[0].kind !== 'add' || !C) return;
+    C.callView('v2.ref-finance.near', 'get_pool', { pool_id: +POOL }).then(function (live) {
+      var ids = (live && live.token_account_ids) || [], R = {}, bad = false;
+      ids.forEach(function (t) { R[t] = 0; });
+      rows.forEach(function (r) {
+        if (bad) return;
+        if (r.kind === 'swap') {
+          if (R[r.ta] == null || R[r.tb] == null) { bad = true; return; }
+          R[r.ta] += Number(r.aa); R[r.tb] -= Number(r.ab);
+        } else {
+          var tk = (r.extra && r.extra.tokens) || [];
+          if (!tk.length) { bad = true; return; }
+          tk.forEach(function (x) { if (R[x.t] == null) bad = true; else R[x.t] += (r.kind === 'add' ? 1 : -1) * Number(x.a); });
+        }
+      });
+      if (bad) return;
+      var ok = ids.every(function (t, i) {
+        var want = Number(live.amounts[i]), got = R[t];
+        return want > 0 && Math.abs(got - want) <= want * 1e-9;
+      });
+      if (!ok) return;
+      WHOLE_FROM = rows[0].t;
+      showChart();
+    }, function () {});
   }
   // Ticks older than the indexer's rates need NEAR's history. Asked only for a range that reaches them.
   function loadOlder() {

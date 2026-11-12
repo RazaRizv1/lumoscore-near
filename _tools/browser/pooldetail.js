@@ -1556,8 +1556,11 @@
         if (nd.nodeType === 3 && nd.nodeValue.trim()) nd.nodeValue = p.tokens.map(function (t) { return t.name; }).join(' / ');
       });
     }
-    // The two "You receive" rows on the withdraw side name the pool's assets.
+    // The two "You receive" rows on the withdraw side name the pool's assets. The box itself is hidden (RAZA 2026-11-12:
+    // Stellar's withdraw box is the LP field, 25/50/75/Max and the summary rows); it is kept in the page, unseen,
+    // because the withdraw code still reads its rows.
     var recv = $$('#dwWithdraw .dw-field')[1];
+    if (recv) recv.style.display = 'none';
     if (recv) {
       var rows = recv.querySelectorAll('.row');
       while (rows.length && rows.length < p.tokens.length) {

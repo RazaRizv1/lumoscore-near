@@ -283,7 +283,11 @@
       // Long warnings wrap inside the modal instead of running past its edge (RAZA 2026-11-03).
       + '#swapModal .lxq-err,#swapModal .lxq-note{white-space:normal;overflow-wrap:anywhere;line-height:1.45;max-width:100%}'
       // Room above and below the warning, so it never touches the field over it or the button under it.
-      + '#swapModal .lxo-pane[data-pane="limit"] .lxq-err:not(:empty){margin:12px 2px 14px;padding:0 2px}';
+      + '#swapModal .lxo-pane[data-pane="limit"] .lxq-err:not(:empty){margin:12px 2px 14px;padding:0 2px}'
+      // The swap pane's note gets its own room above the button too (RAZA 2026-11-12: it ran into "Swap").
+      + '#swapModal .lxo-pane[data-pane="swap"] .lx-swap-err:not(:empty){display:block;position:relative;margin:12px 2px 14px;padding:0 2px;white-space:normal;overflow-wrap:anywhere;line-height:1.45}'
+      // The picker's search box scrolls away with the list, as Stellar's does.
+      + '#swapModal .lxq-menu input{position:static}';
     document.head.appendChild(st);
   }
   function vtick() {
@@ -386,7 +390,8 @@
 
   // One picker body, used by both panes: a type-to-filter box over a list we already hold.
   function filterInto(m, heading, placeholder, list, rightOf, onPick) {
-    menuHead(m, heading);
+    tickCss();
+    if (heading) menuHead(m, heading);
     var inp = document.createElement('input');
     inp.type = 'text';
     inp.placeholder = placeholder;
@@ -415,10 +420,20 @@
   // THE PICKER'S WORDS FOR EVERYTHING THE PLATFORM LISTS. Stellar reads "Search any asset" over "Code or issuer
   // address"; a NEAR token has no issuer — its identity is the contract account — so the second half says
   // contract, which is what this box actually matches on.
-  var ANY_HEAD = 'Search any asset', ANY_PH = 'Code or contract address';
+  // RAZA 2026-11-12: no heading over the box, and Stellar's placeholder in NEAR's words ("Search any Stellar asset...").
+  var ANY_HEAD = '', ANY_PH = 'Search any NEAR asset...';
   function balRight(a) {
     var r = rawBal(a);
     return r == null ? '—' : show(r, a.dec, 6);
+  }
+  // EVERY ROW'S BALANCE, AS STELLAR'S PICKER SHOWS IT (RAZA 2026-11-12). A token the wallet's holdings read did not list
+  // holds none, which is 0 -- but only once that read has answered for this account; before that, or after it failed,
+  // the dash stays, because a zero nobody verified is not a balance.
+  function balAny(a) {
+    var r = rawBal(a);
+    if (r != null) return show(r, a.dec, 6);
+    if (!addr() || !settled() || H.failed || H.who !== addr()) return '—';
+    return heldOf(a) ? '—' : '0';
   }
 
   // ======================================================================================== SWAP
@@ -657,9 +672,9 @@
       var block = blockOf(pair[0]);
       if (!block) return;
       var label = block.firstElementChild;
-      // Only the PAY side carries a balance line: Stellar's "You receive" has none, and on NEAR it read
-      // "Balance: — USDC" for every token the wallet does not hold (RAZA 2026-10-31).
-      if (label && pair[1] && !$('.lx-dbal', label)) {
+      // Both sides carry a balance line, as Stellar's dialog does (RAZA 2026-11-12, reversing 2026-10-31): the receive
+      // side's is read from the chain when its token is chosen (ensureBal), so it reads 0, never a guessed dash.
+      if (label && !$('.lx-dbal', label)) {
         label.style.cssText += ';display:flex;justify-content:flex-start;align-items:center;gap:8px';
         var bal = document.createElement('span');
         bal.className = 'lx-dbal';
@@ -718,7 +733,7 @@
             var fi = $('#swapAmtIn'); if (fi) fi.value = '';
             swapSay('');
             paintSwap(); quoteRate(); clearQuote();
-            Promise.all([checkFee(sw.from), ensureBal(sw.from)]).then(function () { paintSwap(); });
+            Promise.all([checkFee(sw.from), ensureBal(sw.from), ensureBal(sw.to)]).then(function () { paintSwap(); });
           }
           // PAY WITH WHAT YOU HOLD, RECEIVE ANYTHING THE PLATFORM LISTS — the same split as the wallet
           // dialog, and the heading says which list this is because the two boxes look identical.
@@ -729,7 +744,7 @@
             filterInto(m, 'Your assets', 'Symbol or contract', mine, balRight, pick);
           } else {
             if (!list.length) { menuHead(m, 'The token list could not be loaded'); return; }
-            filterInto(m, ANY_HEAD, ANY_PH, list, null, pick);
+            filterInto(m, ANY_HEAD, ANY_PH, list, balAny, pick);
           }
         });
         return;

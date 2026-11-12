@@ -140,13 +140,31 @@ const S2_PATCH = [
   ["var full = (viaOther && dside && dside.contains(a) && de.getAttribute('data-lxroute-name')) || FULL[code] || (((window.LX_ASSETS || {})[code] || {}).dom) || '';",
    "var full = a.hasAttribute('data-lxfull') ? (a.getAttribute('data-lxfull') || '') : ((viaOther && dside && dside.contains(a) && de.getAttribute('data-lxroute-name')) || FULL[code] || '');"],
 ];
+// THE PAGE FROZE ON A SOURCE THAT REACHES NO CHOSEN DESTINATION (RAZA 2026-11-12, ticket 355: NEARLY with Arbitrum
+// picked). nibridge.js empties the destination, and lx-brstep2 then wrote 'Choose network' into the pill whenever its
+// text differed from the EMPTY name -- which 'Choose network' always does -- so every write fired its own observer
+// and wrote again, forever, on the main thread. It now compares against what it would write. Applied on its own
+// (and idempotently), so a container patched before this rule existed takes it too.
+const S2_FIX = [
+  ["if (nm && nm.textContent !== d.name) nm.textContent = d.name || 'Choose network';",
+   "if (nm && nm.textContent !== (d.name || 'Choose network')) nm.textContent = d.name || 'Choose network';"],
+];
+function fixStep2(body) {
+  for (const [from, to] of S2_FIX) {
+    if (body.indexOf(to) >= 0) continue;
+    const n = body.split(from).length - 1;
+    if (n !== 1) { console.error('  lx-brstep2 fix anchor found ' + n + ' times (want 1): ' + from.slice(0, 70)); process.exit(1); }
+    body = body.split(from).join(to);
+  }
+  return body;
+}
 function patchStep2(h) {
   const open = '<script id="lx-brstep2">';
   const i = h.indexOf(open);
   if (i < 0) return { html: h, state: 'absent' };
   const j = h.indexOf('</' + 'script>', i);
-  let body = h.slice(i + open.length, j);
-  if (body.indexOf(MARK) >= 0) return { html: h, state: 'already' };
+  let body = fixStep2(h.slice(i + open.length, j));
+  if (body.indexOf(MARK) >= 0) return { html: h.slice(0, i + open.length) + body + h.slice(j), state: 'already' };
   for (const [from, to] of S2_PATCH) {
     const n = body.split(from).length - 1;
     if (n !== 1) { console.error('  lx-brstep2 anchor found ' + n + ' times (want 1): ' + from.slice(0, 70)); process.exit(1); }
