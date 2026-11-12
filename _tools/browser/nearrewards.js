@@ -5,10 +5,12 @@
 // Stellar wallet" and its round reports carried Stellar addresses and figures. _tools/_nearrewards.js fixes the
 // static copy (the countdown's first date, the descriptions, the FAQ, the distributed bars); this file does what
 // needs the chain or the connected account:
-//   * WHAT YOU QUALIFY FOR, read from NEAR: the LUMOS the account holds (lumos.lumoscore.near) and its share of
-//     LUMOS/wNEAR pool 9001, the pool the Native LP programme names on NEAR. NO PAYOUT ESTIMATE: what each programme
-//     pays per round on NEAR is not recorded anywhere in this repo, so a "~1,234 LUMOS" here would be invented. Each
-//     row says what the account has and that rounds begin on 1 December 2026.
+//   * WHAT YOU QUALIFY FOR, exactly as Stellar's lx-rewardsdata (RAZA 2026-11-12: "make it exactly like Stellar"; the
+//     amounts are Stellar's, confirmed): skeleton bars, then each programme's "~N" estimate and "Your estimated total
+//     this round". Native = 1,000,000 x the account's share of LUMOS/wNEAR pool 9001; Ecosystem = 100,000 x its share
+//     of each LUMOS pool paired with one of the ten; Whale = 1,000,000 x its 5M-shares over every holder's, LumosCore's
+//     own wallets and the two exchange contracts left out of both (Stellar's EXCLUDE). An excluded wallet still sees its
+//     rows (RAZA: no "This is a LumosCore wallet" card) but holds no shares and is estimated nothing.
 //   * ROUND REPORTS: no round has run on NEAR, so the table says so. The design's own report script draws sample
 //     rows (generated G-addresses) whenever a tab, the network button or the round menu changes; those controls are
 //     claimed first and repaint this state instead, and the CSV and on-chain-record buttons, which would describe
@@ -21,6 +23,15 @@
 
   var LUMOS = 'lumos.lumoscore.near', POOL = 9001, REF = 'v2.ref-finance.near';
   var START = new Date(2026, 11, 1);                       // the first round on NEAR, as RAZA set it
+  var WHALE_UNIT = 5e6, WHALE_POOL = 1000000, NATIVE_POOL = 1000000, ECO_PER_POOL = 100000;   // Stellar's terms
+  // Never paid and never in a denominator: the treasury, the fee account, and the two exchange contracts, whose LUMOS
+  // is the pools' and the order book's (the LUMOS page's list).
+  var EXCLUDE = { 'treasury.lumoscore.near': 1, 'fees-lumoscore.near': 1, 'dclv2.ref-labs.near': 1, 'v2.ref-finance.near': 1 };
+  // The ten Ecosystem assets (RAZA, ticket 270; the LUMOS page's list): contract -> ticker.
+  var ECO = { '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1': 'USDC', 'usdt.tether-token.near': 'USDt',
+    'qtc.omft.near': 'QTC', 'zec.omft.near': 'ZEC', 'batman-4.nearlytrade.near': 'BATMAN', 'token.rhealab.near': 'RHEA',
+    'nearly-993927.nearlytrade.near': 'NEARLY', 'hoot-8ecf65.launchpad.justhoot.near': 'HOOT', 'lst.rhealab.near': 'rNEAR',
+    'dac17f958d2ee523a2206206994597c13d831ec7.factory.bridge.near': 'USDT.e' };
   var NEAR_LOGO = '/assets/networks/near.png';
 
   var $ = function (s, r) { return (r || document).querySelector(s); };
@@ -66,10 +77,13 @@
       if (r[0]) { var dot = el('span', 'd'); dot.style.background = r[0]; ek.appendChild(dot); }
       var w = el('div');
       w.appendChild(el('div', 't', r[1]));
-      if (r[2]) w.appendChild(el('div', 's', r[2]));
+      if (r[2] === null) { var sb = el('div', 's'); sb.appendChild(el('span', 'lxrw-bar')); w.appendChild(sb); }
+      else if (r[2]) w.appendChild(el('div', 's', r[2]));
       ek.appendChild(w);
       er.appendChild(ek);
-      er.appendChild(el('div', 'ev mono', r[3]));
+      var ev = el('div', 'ev mono', r[3] == null ? '' : r[3]);
+      if (r[3] == null) ev.appendChild(el('span', 'lxrw-bar'));
+      er.appendChild(ev);
       b.appendChild(er);
     });
   }
@@ -77,32 +91,95 @@
   // NO FLASH ON A RE-CHECK (RAZA 2026-11-12): the 1.5s safety re-read used to repaint 'Reading NEAR…' over rows
   // already on screen. Rows painted for this same account stay up while it re-reads, and through a failed re-read.
   function showing(a) { return shown === a && !!$('#eligBox .er'); }
+  function num(n) { return Math.round(+n || 0).toLocaleString('en-US'); }
+  function getJSON(u) { return fetch(u).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }); }
+  // Every holder's whale shares, the exclusions left out. Kept once read (Stellar's __lxWhaleTS); a failure is never
+  // kept, and a list that may be cut short (100 rows, the last still 5M+) is not a total: null, shown as "—".
+  var WTS;
+  function whaleTotal() {
+    if (WTS !== undefined) return Promise.resolve(WTS);
+    return getJSON('/lxapi/nearholders?i=' + encodeURIComponent(LUMOS)).then(function (j) {
+      if (!j || !j.ok || !j.holders) return null;
+      var C = window.lxnCore, t = 0, hs = j.holders, last = 0;
+      hs.forEach(function (h) {
+        var v = C.units(h.raw || '0', 18); last = v;
+        if (!EXCLUDE[h.a] && v >= WHALE_UNIT) t += Math.floor(v / WHALE_UNIT);
+      });
+      WTS = (hs.length >= 100 && last >= WHALE_UNIT) ? null : t;
+      return WTS;
+    });
+  }
+  // The account's Ecosystem positions: LUMOS pools paired with one of the ten, and its share of each.
+  // Null when the pools could not be read (then the row and the total say "—", never "not in any pool").
+  function ecoMine(a) {
+    var C = window.lxnCore;
+    return getJSON('/lxapi/nearpools?q=' + encodeURIComponent(LUMOS) + '&full=1').then(function (j) {
+      if (!j || !j.ok) return null;
+      var ps = (j.rows || []).filter(function (r) {
+        var ts = r.tokens || [];
+        return ts.length === 2 && ts.some(function (t) { return t.i === LUMOS; }) && ts.some(function (t) { return ECO[t.i]; });
+      });
+      return Promise.all(ps.map(function (r) {
+        var o = r.tokens.filter(function (t) { return t.i !== LUMOS; })[0];
+        return Promise.all([C.callView(REF, 'get_pool_shares', { pool_id: +r.id, account_id: a }), C.callView(REF, 'get_pool', { pool_id: +r.id })])
+          .then(function (x) {
+            var mine = Number(x[0] || '0'), tot = Number((x[1] && x[1].shares_total_supply) || '0');
+            return mine > 0 && tot > 0 ? { code: ECO[o.i], share: mine / tot } : null;
+          });
+      })).then(function (xs) { return xs.filter(Boolean); });
+    }).catch(function () { return null; });
+  }
   function eligibility() {
     var a = me(), C = window.lxnCore;
-    if (!a) { asked = ''; shown = ''; box('Connect your NEAR wallet', 'See your LUMOS balance and pool position on NEAR. ' + WHEN + '.'); return; }
+    if (!a) { asked = ''; shown = ''; box('Connect your NEAR wallet', 'See your live LUMOS balance and pool positions, and what you would earn this round.'); return; }
     if (a === asked) return;
     asked = a;
     if (!C) { asked = ''; box('Could not read your NEAR account right now', 'Reload the page to try again.'); return; }
-    if (!showing(a)) box('Reading NEAR…', 'Checking your LUMOS balance and pool position.');
+    if (!showing(a)) erBox([['var(--accent)', 'Native LP Rewards', null, null], ['var(--blue)', 'Ecosystem LP Rewards', null, null],
+      ['var(--green)', 'Whale Holder Rewards', null, null], ['', 'Your estimated total this round', '', null, true]]);
+    var excl = !!EXCLUDE[a];
     Promise.all([
       C.callView(LUMOS, 'ft_balance_of', { account_id: a }),
       C.callView(REF, 'get_pool_shares', { pool_id: POOL, account_id: a }),
-      C.callView(REF, 'get_pool', { pool_id: POOL })
+      C.callView(REF, 'get_pool', { pool_id: POOL }),
+      ecoMine(a)
     ]).then(function (r) {
       if (me() !== a) return;
       var lumos = C.units(r[0] || '0', 18);
       var mine = Number(r[1] || '0'), total = Number((r[2] && r[2].shares_total_supply) || '0');
-      var share = total > 0 ? mine / total : 0;
-      var shares = Math.floor(lumos / 5e6);
-      var tail = started() ? '' : ' · from 1 December 2026';
-      shown = a;
-      erBox([
-        ['var(--accent)', 'Native LP Rewards', mine > 0 ? ('LUMOS/wNEAR · ' + pc(share) + ' of the pool' + tail) : 'Add LUMOS/wNEAR liquidity to qualify', '—'],
-        ['var(--blue)', 'Ecosystem LP Rewards', 'Join an eligible LUMOS pool to qualify' + tail, '—'],
-        ['var(--green)', 'Whale Holder Rewards', shares > 0 ? (whole(lumos) + ' LUMOS · ' + shares + ' share' + (shares > 1 ? 's' : '') + tail)
-          : (lumos > 0 ? whole(lumos) + ' LUMOS · below 5M' : 'Hold 5M+ LUMOS to qualify'), '—'],
-        ['', started() ? 'Your estimated total this round' : WHEN, '', '—', true]
-      ]);
+      var nShare = total > 0 ? mine / total : 0, nReward = excl ? 0 : NATIVE_POOL * nShare;
+      var eco = r[3], eReward = 0;
+      (eco || []).forEach(function (x) { eReward += excl ? 0 : ECO_PER_POOL * x.share; });
+      var myShares = excl ? 0 : (lumos >= WHALE_UNIT ? Math.floor(lumos / WHALE_UNIT) : 0);
+      var nSub = mine > 0 ? ('LUMOS/wNEAR · ' + pc(nShare) + ' of the pool') : 'Add LUMOS/wNEAR liquidity to qualify';
+      var nVal = mine > 0 && !excl ? '~' + num(nReward) : '—';
+      var codes = (eco || []).map(function (x) { return x.code; });
+      var eSub = eco == null ? 'Could not read the Ecosystem pools right now'
+        : codes.length ? (codes.length === 1 ? 'LUMOS/' + codes[0] + ' pool' : codes.length + ' pools · ' + codes.slice(0, 3).join(', ') + (codes.length > 3 ? '…' : ''))
+        : 'Join an eligible LUMOS pool to qualify';
+      var eVal = codes.length && !excl ? '~' + num(eReward) : '—';
+      var wSub = excl ? (lumos > 0 ? whole(lumos) + ' LUMOS · ' : '') + 'LumosCore wallet, no shares'
+        : myShares > 0 ? whole(lumos) + ' LUMOS · ' + myShares + ' share' + (myShares > 1 ? 's' : '')
+        : (lumos > 0 ? whole(lumos) + ' LUMOS · below 5M' : 'Hold 5M+ LUMOS to qualify');
+      function render(wReward, pending) {
+        var wVal = myShares > 0 ? (pending ? '~…' : (wReward == null ? '—' : '~' + num(wReward))) : '—';
+        var unknown = eco == null || (myShares > 0 && wReward == null && !pending);
+        var tVal = pending ? '~… LUMOS' : unknown ? '—' : '~' + num(nReward + eReward + (wReward || 0)) + ' LUMOS';
+        shown = a;
+        erBox([
+          ['var(--accent)', 'Native LP Rewards', nSub, nVal],
+          ['var(--blue)', 'Ecosystem LP Rewards', eSub, eVal],
+          ['var(--green)', 'Whale Holder Rewards', wSub, wVal],
+          ['', 'Your estimated total this round', '', tVal, true]
+        ]);
+      }
+      if (myShares <= 0) { render(0, false); return; }
+      // A re-check with the total already read goes straight to the figures: no "~…" flash.
+      if (WTS === undefined) render(0, true);
+      whaleTotal().then(function (ts) {
+        if (me() !== a) return;
+        render(ts == null ? null : (ts > 0 ? WHALE_POOL * Math.min(1, myShares / ts) : 0), false);
+      });
     }, function () {
       if (me() !== a) return;
       asked = '';
