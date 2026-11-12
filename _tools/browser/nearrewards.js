@@ -13,14 +13,14 @@
 //     rows (generated G-addresses) whenever a tab, the network button or the round menu changes; those controls are
 //     claimed first and repaint this state instead, and the CSV and on-chain-record buttons, which would describe
 //     the sample, are hidden.
-// LumosCore's own wallets earn nothing (the Stellar layer's EXCLUDE rule; the LUMOS page's list for NEAR).
+// EVERY WALLET GETS THE THREE ROWS (RAZA 2026-11-12): the 'This is a LumosCore wallet' card that replaced them for
+// treasury/fees accounts is gone; the rows show holdings only, never a payout, so nothing is promised to a team wallet.
 (function () {
   if (window.__lxnRewards) return;
   window.__lxnRewards = 1;
 
   var LUMOS = 'lumos.lumoscore.near', POOL = 9001, REF = 'v2.ref-finance.near';
   var START = new Date(2026, 11, 1);                       // the first round on NEAR, as RAZA set it
-  var TEAM = { 'treasury.lumoscore.near': 1, 'fees-lumoscore.near': 1 };
   var NEAR_LOGO = '/assets/networks/near.png';
 
   var $ = function (s, r) { return (r || document).querySelector(s); };
@@ -75,10 +75,6 @@
     if (!a) { asked = ''; box('Connect your NEAR wallet', 'See your LUMOS balance and pool position on NEAR. ' + WHEN + '.'); return; }
     if (a === asked) return;
     asked = a;
-    if (TEAM[a]) {
-      box('This is a LumosCore wallet', 'Team and treasury wallets are excluded from reward distributions, so this account earns nothing regardless of its balance.');
-      return;
-    }
     if (!C) { asked = ''; box('Could not read your NEAR account right now', 'Reload the page to try again.'); return; }
     box('Reading NEAR…', 'Checking your LUMOS balance and pool position.');
     Promise.all([
@@ -94,7 +90,7 @@
       var tail = started() ? '' : ' · from 1 December 2026';
       erBox([
         ['var(--accent)', 'Native LP Rewards', mine > 0 ? ('LUMOS/wNEAR · ' + pc(share) + ' of the pool' + tail) : 'Add LUMOS/wNEAR liquidity to qualify', '—'],
-        ['var(--blue)', 'Ecosystem LP Rewards', 'Ten LUMOS pools on NEAR' + tail, '—'],
+        ['var(--blue)', 'Ecosystem LP Rewards', 'Join an eligible LUMOS pool to qualify' + tail, '—'],
         ['var(--green)', 'Whale Holder Rewards', shares > 0 ? (whole(lumos) + ' LUMOS · ' + shares + ' share' + (shares > 1 ? 's' : '') + tail)
           : (lumos > 0 ? whole(lumos) + ' LUMOS · below 5M' : 'Hold 5M+ LUMOS to qualify'), '—'],
         ['', started() ? 'Your estimated total this round' : WHEN, '', '—', true]
