@@ -38,6 +38,16 @@
   }
 
   function short(a) { return C.short(a); }
+  // A token contract on the right of a row (RAZA 2026-11-12: two "Loadstone Ring" rows, loadstone.nearlytrade.near and
+  // loadstone-2.nearlytrade.near, both cut to "loads…near"). A named account keeps its whole first label, the part that
+  // tells two launches apart, up to 14 characters; a hex id keeps the usual cut. The full id is the hover title.
+  function shortId(a) {
+    a = String(a || "");
+    var d = a.indexOf(".");
+    if (d < 0 || a.length <= 16) return short(a);
+    var head = a.slice(0, d);
+    return (head.length > 14 ? head.slice(0, 13) + "…" : head + "…") + a.slice(a.lastIndexOf(".") + 1);
+  }
   // 129.2K, as Stellar's and XRPL's rows print a holder count.
   function compact(n) {
     n = +n || 0;
@@ -189,7 +199,8 @@
     a.appendChild(info);
 
     var right = el('div', 'sp-right');
-    var mini = el('div', 'sp-addr-mini', short(t.i));
+    var mini = el('div', 'sp-addr-mini', shortId(t.i));
+    mini.title = t.i;
     mini.setAttribute('data-copy', t.i);
     mini.setAttribute('data-copy-label', (t.n || 'Token') + ' contract');
     mini.setAttribute('data-logoed', '1');
