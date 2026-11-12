@@ -16,7 +16,7 @@
 // Logos: the curated list's when it is a url or our own /assets path, else the pool indexer's /icon url -- never a data:
 // icon, which can be 50 KB a token. A failure is never cached and never answers "no activity": it is a 200 {ok:false}.
 import { CURATED } from './_nearcurated.js';
-import { FEE, WNEAR, feeIndex, decodeNew } from './_nearfeetx.js';
+import { FEE, WNEAR, post, feeIndex, decodeNew } from './_nearfeetx.js';
 
 const RPC = 'https://free.rpc.fastnear.com';
 const IDX = 'https://near-pool-indexer.usa282.workers.dev';
@@ -61,15 +61,23 @@ function feeMemo(acts) {
 
 // decodeTx, as nearcore.js, for the signer: -> { h, who, memo, ts, legs: [{ neg, raw, c }] }, or null when the
 // transaction pays no fee of ours.
-function decode(T) {
-  const tx = T.transaction || {}, h = tx.hash || '';
+function actor(T) {
+  const tx = T.transaction || {};
   let me = tx.signer_id || '', acts = tx.actions || [];
   if (acts.length === 1 && actPair(acts[0])[0] === 'Delegate') {
     const da = actPair(acts[0])[1].delegate_action || {};
     me = da.sender_id || me; acts = da.actions || [];
   }
-  const memo = feeMemo(acts);
+  return { h: tx.hash || '', me, acts, ts: nsMs((T.execution_outcome && T.execution_outcome.block_timestamp) || '') };
+}
+function decode(T) {
+  const a = actor(T);
+  const memo = feeMemo(a.acts);
   if (!memo) return null;
+  return { h: a.h, who: a.me, memo, ts: a.ts, legs: legsOf(T, a.me) };
+}
+// The signer's token movements in one transaction, netted per token, in the order first seen.
+function legsOf(T, me) {
   const net = {}, order = [];
   function add(c, amt) { if (!(c in net)) { net[c] = BigInt(0); order.push(c); } net[c] += amt; }
   const wd = {};
@@ -125,7 +133,44 @@ function decode(T) {
     if (c === 'near' && (neg ? -v : v) < BigInt('1000000000000000000')) return;   // dust, not a payment
     legs.push({ neg, raw: String(neg ? -v : v), c });
   });
-  return { h, who: me, memo, ts: nsMs((T.execution_outcome && T.execution_outcome.block_timestamp) || ''), legs };
+  return legs;
+}
+
+// ONE SWAP, TWO TRANSACTIONS (RAZA 2026-11-12, ticket 347: "0.247512 GEAR → 0.00086206 wNEAR" where he swapped GEAR to
+// NEARLY). A route through a hub token on two contracts is two swaps in a row (nearswap.js route.split): X to the hub,
+// which carries our fee, then the hub to Y, which carries neither fee nor marker. Collapsed into one row the way
+// Stellar shows a path payment, and only when it cannot be someone else's swap: the SAME signer, within PAIR_MS after,
+// paying no fee of ours, spending the hub token the first leg delivered and no more of it than that, and receiving
+// another token. Looked up as Wormhole's native leg is (nearbridgetx.js): the signer's own transactions just after.
+// Until it is found the row shows the first leg as before; after PAIR_TRIES asks, or once PAIR_GIVEUP has passed, it
+// stops asking and stays a one-leg row.
+const HUBS = { 'wrap.near': 1, '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1': 1, 'usdt.tether-token.near': 1 };
+const PAIR_MS = 90000, PAIR_TRIES = 4, PAIR_GIVEUP = 900000, PAIR_PER_RUN = 3;
+function hubOut(r) {
+  if (!r || /^lx:|limit order/i.test(r.memo)) return null;
+  const outs = r.legs.filter((g) => g.neg), ins = r.legs.filter((g) => !g.neg), last = ins[ins.length - 1];
+  if (!outs.length || !last || !HUBS[last.c] || HUBS[outs[0].c] || ins.some((g) => !HUBS[g.c])) return null;
+  return last;
+}
+async function findSecond(r) {
+  const hub = hubOut(r);
+  const own = await post('account', { account_id: r.who });
+  const hs = ((own && own.account_txs) || []).filter((x) => x && x.is_success !== false && x.transaction_hash !== r.h)
+    .filter((x) => { const t = Math.floor(Number(x.tx_block_timestamp) / 1e6); return t > r.ts && t - r.ts <= PAIR_MS; })
+    .map((x) => x.transaction_hash).slice(0, 5);
+  if (!hs.length) return null;
+  const g = await post('transactions', { tx_hashes: hs });
+  const cands = ((g && g.transactions) || []).map((T) => ({ T, a: actor(T) }))
+    .filter((x) => x.a.me === r.who && !feeMemo(x.a.acts)).sort((x, y) => x.a.ts - y.a.ts);
+  for (const x of cands) {
+    const legs = legsOf(x.T, r.who);
+    const spent = legs.filter((l) => l.neg && l.c === hub.c)[0];
+    const got = legs.filter((l) => !l.neg && l.c !== hub.c);
+    if (!spent || !got.length || BigInt(spent.raw) > BigInt(hub.raw)) continue;
+    if (legs.some((l) => l.neg && l.c !== hub.c && !(l.c === 'near'))) continue;   // it spent something else too: not this
+    return { h: x.a.h, get: got[got.length - 1] };
+  }
+  return null;
 }
 
 // withMeta, as nearcore.js: NEAR and wNEAR known, the curated list next, ft_metadata for the rest (a few a request; one
@@ -164,6 +209,19 @@ async function metaFor(ids) {
 async function build(cache) {
   const list = (await feeIndex(cache)).slice(0, NEWEST);
   const D = await decodeNew(cache, 'activity', list, decode, PER_RUN), map = D.map;
+  // The second legs, for the newest rows only, a few asks a request.
+  let asks = 0;
+  for (const x of list.slice(0, N + 5)) {
+    const r = map[x.h];
+    if (!r || r.p !== undefined || !hubOut(r) || asks >= PAIR_PER_RUN) continue;
+    asks++;
+    try {
+      const two = await findSecond(r);
+      if (two) r.p = two;
+      else if ((r.pt = (r.pt || 0) + 1) >= PAIR_TRIES || Date.now() - r.ts > PAIR_GIVEUP) r.p = 0;
+    } catch (e) {}
+    D.touch();
+  }
   await D.save();
   const okBy = {};
   list.forEach((x) => { okBy[x.h] = x.ok; });
@@ -174,7 +232,7 @@ async function build(cache) {
   if (cut < 0) cut = list.length;
   const recs = list.slice(0, cut).map((x) => map[x.h]).filter((r) => r && okBy[r.h] !== false).sort((a, b) => b.ts - a.ts).slice(0, N);
   const ids = {};
-  recs.forEach((r) => r.legs.forEach((g) => { ids[g.c] = 1; }));
+  recs.forEach((r) => { r.legs.forEach((g) => { ids[g.c] = 1; }); if (r.p) ids[r.p.get.c] = 1; });
   const meta = await metaFor(Object.keys(ids));
   const leg = (g) => {
     if (!g) return null;
@@ -182,7 +240,8 @@ async function build(cache) {
     return { s: m.s, v: m.d == null ? null : units(g.raw, m.d), ic: m.ic, c: g.c };
   };
   const rows = recs.map((r) => ({ h: r.h, who: r.who, memo: r.memo, ts: r.ts,
-    give: leg(r.legs.filter((g) => g.neg)[0]), get: leg(r.legs.filter((g) => !g.neg).slice(-1)[0]) }));
+    give: leg(r.legs.filter((g) => g.neg)[0]), get: leg(r.p ? r.p.get : r.legs.filter((g) => !g.neg).slice(-1)[0]),
+    h2: r.p ? r.p.h : undefined }));
   // Not all of the newest transactions decoded yet (a cold start, or more new ones than one run reads): served, not kept.
   const partial = list.some((x) => !(x.h in map));
   return { ok: true, at: Date.now(), rows, partial: partial || undefined };

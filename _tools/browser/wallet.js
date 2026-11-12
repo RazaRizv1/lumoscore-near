@@ -2047,6 +2047,80 @@
     return out;
   }
 
+  // ---- pending cross-chain claims ------------------------------------------------------------------------
+  // Stellar's section above Recent Activity (_walletdata.js lxPendClaims; RAZA 2026-11-12, ticket 351), same markup and
+  // classes, whose rules ship in the inherited sheet. On NEAR the only transfer that waits on its owner is a Wormhole one,
+  // and the rule is the bridge page's (nibridge.js pendCandidates / pendList), from the same two sources: this browser's
+  // records and /lxapi/nearbridgetx, the connected wallet's Wormhole sends not yet marked SUCCESS or FAILED, listed only
+  // once Wormholescan has said READY on THIS visit. A stored status never lists a row, and a read that fails lists nothing.
+  // Omni and NEAR Intents deliver by themselves: nothing to claim. No row, no section.
+  var PEND_WH = {};
+  // MUST MATCH whStatus in browser/nearbridges.js (not loaded on this page): the same question, answered the same way.
+  function whStatus(hash) {
+    return fetch('https://api.wormholescan.io/api/v1/operations?txHash=' + encodeURIComponent(hash)).then(function (r) {
+      if (r.status >= 400 && r.status < 500) return {};
+      if (!r.ok) throw new Error('wormholescan ' + r.status);
+      return r.json();
+    }).then(function (j) {
+      var op = j && j.operations && j.operations[0];
+      if (!op) return { status: 'PENDING' };
+      var tc = op.targetChain;
+      if (tc && /completed|confirmed/i.test(String(tc.status || '')) && tc.transaction && tc.transaction.txHash) return { status: 'SUCCESS' };
+      if (op.vaa && op.vaa.raw) return { status: 'READY' };
+      return { status: 'PENDING' };
+    });
+  }
+  function pendCands(me) {
+    var mine = bridgeRecs(me), have = {}, out = [];
+    mine.forEach(function (r) {
+      if (r.hash) have[r.hash] = 1;
+      if (r.route === 'wh' && r.hash && r.status !== 'SUCCESS' && r.status !== 'FAILED') out.push({ hash: r.hash, out: r.out, sym: r.sym, chain: r.chain });
+    });
+    return fetch('/lxapi/nearbridgetx').then(function (x) { return x.json(); }).then(function (j) {
+      ((j && j.ok && j.rows) || []).forEach(function (r) {
+        if (!r || r.route !== 'wh' || r.from !== me || !r.hash || have[r.hash] || (r.feeTx && have[r.feeTx])) return;
+        have[r.hash] = 1;
+        out.push({ hash: r.hash, out: r.out, sym: r.sym, chain: r.chain });
+      });
+      return out;
+    }, function () { return out; });
+  }
+  function pendClaims(me, block) {
+    pendCands(me).then(function (cands) {
+      return Promise.all(cands.slice(0, 12).map(function (c) {
+        var p = PEND_WH[c.hash] || (PEND_WH[c.hash] = whStatus(c.hash).catch(function () { delete PEND_WH[c.hash]; return null; }));
+        return p.then(function (st) { return st && st.status === 'READY' ? c : null; });
+      }));
+    }).then(function (rows) {
+      if (addr() !== me || !document.contains(block)) return;
+      [].forEach.call(block.querySelectorAll('[data-lxpend]'), function (n) { n.parentNode.removeChild(n); });
+      rows = rows.filter(Boolean);
+      if (!rows.length) return;
+      var first = block.firstChild, dv = el('div', 'day-divider lxp', 'Pending cross-chain claims');
+      dv.setAttribute('data-lxpend', '1');
+      block.insertBefore(dv, first);
+      rows.forEach(function (c) {
+        // The bridge page opens its Pending claims tab for #pending (see the report: nibridge.js reads it).
+        var a = el('a', 'activity-row lx-pendclaim');
+        a.href = '/bridge/near#pending';
+        a.setAttribute('data-lxpend', '1');
+        a.setAttribute('data-h', c.hash);
+        a.setAttribute('data-lxnonav', '1');             // the label bridge's opt-out: this is a real link
+        var ic = el('div', 'activity-icon bridge');
+        ic.innerHTML = actIcon('bridge');
+        var info = el('div', 'activity-info');
+        info.appendChild(el('div', 'type', 'Cross-chain → ' + (c.chain || 'destination chain')));
+        info.appendChild(el('div', 'meta lxp lx-pcs', 'Open Bridge to claim'));
+        var am = el('div', 'activity-amt');
+        var n = Number(c.out);
+        am.appendChild(el('div', 'a1 lxp', (isFinite(n) && n > 0 ? fmt(n, 8) + ' ' : '') + (c.sym || '')));
+        am.appendChild(el('div', 'a2', 'Not claimed yet'));
+        a.appendChild(ic); a.appendChild(info); a.appendChild(am);
+        block.insertBefore(a, first);
+      });
+    });
+  }
+
   function paintActivity(me) {
     var block = $('.activity-block');
     if (!block) return;
@@ -2140,6 +2214,7 @@
         block.appendChild(row);
       });
       block.setAttribute('data-lxact', '1');
+      pendClaims(me, block);
     }).catch(function (e) {
       // A refusal from the rate limit is not "no activity": it says so, and the next view asks again.
       activityNote(e && e.code === 429 ? 'Activity is busy right now — try again in a minute.'

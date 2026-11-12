@@ -444,6 +444,50 @@
     });
     return memo;
   }
+  // ONE SWAP, TWO TRANSACTIONS (RAZA 2026-11-12, ticket 347), as functions/lxapi/nearactivity.js reads it: a route through
+  // a hub token on two contracts is X -> hub (carrying our fee), then hub -> Y (no fee, no marker). The second leg is the
+  // SAME signer's transaction within 90 s after, paying no fee of ours, spending no more of the hub than the first leg
+  // delivered and nothing else, and receiving another token. Its received leg joins the first row under the first hash.
+  // Two lookups at most per read, each failure leaving the one-leg row as it was.
+  var HUBS = { 'wrap.near': 1, '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1': 1, 'usdt.tether-token.near': 1 };
+  function hubOut(r) {
+    if (/^lx:|limit order/i.test(r.memo)) return null;
+    var outs = r.legs.filter(function (g) { return g.neg; }), ins = r.legs.filter(function (g) { return !g.neg; }), last = ins[ins.length - 1];
+    if (!outs.length || !last || !HUBS[last.c] || HUBS[outs[0].c] || ins.some(function (g) { return !HUBS[g.c]; })) return null;
+    return last;
+  }
+  function pairSecond(rows) {
+    var want = rows.filter(function (r) { return hubOut(r); }).slice(0, 2);
+    return Promise.all(want.map(function (r) {
+      var hub = hubOut(r);
+      return fnPost('account', { account_id: r.who }).then(function (j) {
+        var hs = ((j && j.account_txs) || []).filter(function (x) {
+          var t = Math.floor(Number(x.tx_block_timestamp) / 1e6);
+          return x.is_success !== false && x.transaction_hash !== r.h && t > r.ts && t - r.ts <= 90000;
+        }).map(function (x) { return x.transaction_hash; }).slice(0, 5);
+        if (!hs.length) return [];
+        return fnPost('transactions', { tx_hashes: hs }).then(function (g) {
+          var ts = ((g && g.transactions) || []).slice().sort(function (a, b) {
+            return nsMs(a.execution_outcome && a.execution_outcome.block_timestamp) - nsMs(b.execution_outcome && b.execution_outcome.block_timestamp);
+          });
+          for (var i = 0; i < ts.length; i++) {
+            var T = ts[i], tx = T.transaction || {}, sg = tx.signer_id || '', acts = tx.actions || [];
+            if (acts.length === 1 && actPair(acts[0])[0] === 'Delegate') { var da = actPair(acts[0])[1].delegate_action || {}; sg = da.sender_id || sg; acts = da.actions || []; }
+            if (sg !== r.who || feeMemo(acts)) continue;
+            var l2 = [];
+            decodeTx(r.who, T, {}, [], l2);
+            var spent = l2.filter(function (x) { return x.neg && x.c === hub.c; })[0];
+            var got = l2.filter(function (x) { return !x.neg && x.c !== hub.c; });
+            if (!spent || !got.length || big(spent.raw) > big(hub.raw)) continue;
+            if (l2.some(function (x) { return x.neg && x.c !== hub.c && x.c !== 'near'; })) continue;
+            var leg = got[got.length - 1];
+            return [{ ts: r.ts, h: r.h, neg: false, raw: leg.raw, c: leg.c, inv: leg.inv, ok: true }];
+          }
+          return [];
+        });
+      }).catch(function () { return []; });
+    })).then(function (lists) { return [].concat.apply([], lists); });
+  }
   function platformActivity(n) {
     var key = 'lxn.pact';
     try {
@@ -471,13 +515,14 @@
             var mine = [];
             decodeTx(sg, T, okBy, [], mine);
             legs = legs.concat(mine);
-            rows.push({ h: tx.hash, who: sg, memo: memo, ts: nsMs((T.execution_outcome && T.execution_outcome.block_timestamp) || '') });
+            rows.push({ h: tx.hash, who: sg, memo: memo, ts: nsMs((T.execution_outcome && T.execution_outcome.block_timestamp) || ''), legs: mine });
           });
         });
-        return withMeta(legs).then(function (ft) {
+        return pairSecond(rows).then(function (more) { legs = legs.concat(more); return withMeta(legs); }).then(function (ft) {
           var by = {};
           ft.forEach(function (f) { (by[f.h] = by[f.h] || []).push(f); });
           rows.forEach(function (r) {
+            delete r.legs;
             var g = by[r.h] || [];
             r.give = g.filter(function (f) { return f.neg; })[0] || null;
             r.get = g.filter(function (f) { return !f.neg; }).slice(-1)[0] || null;

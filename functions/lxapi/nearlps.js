@@ -18,7 +18,8 @@
 // What this cannot see: someone who joined after February and never staked. The page says "largest known".
 //
 // Cached at the edge 6 hours, the last good answer kept a week, a failure never cached.
-const TTL = 21600, KEEP = 604800, VER = 'v2';   // v2: indexer candidates (2026-11-04); v1 answers cached an empty list for new pools
+const TTL = 21600, KEEP = 604800, VER = 'v3';   // v3: the indexer's found holders (lpc) as candidates (2026-11-12)
+//   // v2: indexer candidates (2026-11-04); v1 answers cached an empty list for new pools
 const DS = 'https://api.data-service.ref.finance';
 const IDX = 'https://near-pool-indexer.usa282.workers.dev';
 const EX = 'v2.ref-finance.near';
@@ -76,7 +77,7 @@ async function pool(n, fn) {
 
 export async function build(id) {
   const seed = EX + '@' + id;
-  const [p, lp, sd, ix] = await Promise.all([
+  const [p, lp, sd, ix, lc] = await Promise.all([
     view(EX, 'get_pool', { pool_id: id }),
     getJson(DS + '/api/pool/' + id + '/lp').catch(() => null),
     getJson(DS + '/api/seedv2/' + encodeURIComponent(seed) + '/accounts').catch(() => null),
@@ -84,6 +85,10 @@ export async function build(id) {
     // the part Rhea's February list cannot know: a new pool's providers (RAZA 2026-11-04, LUMOS/wNEAR 9001 read
     // "No liquidity providers found" with the treasury's deposit in it).
     getJson(IDX + '/pool?id=' + id + '&kind=add&limit=200').catch(() => null),
+    // THE ACCOUNTS THE COUNT IS MADE OF (RAZA 2026-11-12: NEAR20 / wNEAR read "Participants 2" over "No liquidity providers
+    // found"). The indexer's holder job finds holders no list here knows (lpc) and counts them; they are candidates too,
+    // so the list is never shorter than the count it sits under. An older indexer without /lpc answers nothing.
+    getJson(IDX + '/lpc?pool=' + id).catch(() => null),
   ]);
   const total = big(p && p.shares_total_supply);
   if (total <= 0n) throw new Error('pool has no shares');
@@ -98,7 +103,8 @@ export async function build(id) {
   const ixRows = [];
   ((ix && ix.ok && ix.rows) || []).forEach((r) => { const a = String((r && r.who) || ''); if (validId(a) && ixRows.indexOf(a) < 0) ixRows.push(a); });
   const seen = {}, cand = [];
-  [ixRows.slice(0, PER_LIST), lpRows, farmRows].forEach((list) => list.forEach((a) => {
+  const lcRows = ((lc && lc.ok && lc.a) || []).filter((a) => validId(String(a || ''))).slice(0, PER_LIST);
+  [lcRows, ixRows.slice(0, PER_LIST), lpRows, farmRows].forEach((list) => list.forEach((a) => {
     if (a === FARM || a === EX || seen[a] || cand.length >= MAX_CAND) return;
     seen[a] = 1; cand.push(a);
   }));

@@ -165,6 +165,9 @@
     // NAME ON TOP, CODE BELOW (RAZA 2026-11-12, as Stellar's "Stellar Gold" over "XLMG · 11.8K holders"): the name heads
     // the row and the second line is the code and holders only. A token with no name of its own keeps its code on top.
     var nm = String(t.nm || '').trim();
+    // LUMOS IS LUMOS (RAZA 2026-11-12: the row read "LumosCore", the platform's name, where Stellar's reads LUMOS). Our
+    // own token's metadata name is the company's, so its code heads the row instead.
+    if (t.i === 'lumos.lumoscore.near') nm = '';
     var nameRow = el('div', 'sp-name-row', nm || t.n || short(t.i));
     if (t.cur) nameRow.appendChild(vBadge());
     // THE DOMAIN BADGE, STELLAR'S "lumoscore.com" (RAZA 2026-11-10, ticket 318). On NEAR it is the site the curated list

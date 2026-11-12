@@ -530,6 +530,14 @@ async function lpJob(env, bigTurn) {
   }
   return { lp: done, spent };
 }
+// GET /lpc?pool=<id> -> { ok, a: [account, ...] }: the holders the holder job found for that pool (lpc), each confirmed by
+// get_pool_shares when found. Candidates for /lxapi/nearlps, which reads every share again before it lists one.
+async function lpcList(url, env) {
+  const id = String(url.searchParams.get('pool') || '');
+  if (!/^[0-9]{1,7}$/.test(id)) return json({ ok: false, error: 'bad pool id' }, 0);
+  const r = await env.DB.prepare('SELECT who FROM lpc WHERE pool = ?1 LIMIT 200').bind(+id).all();
+  return json({ ok: true, a: (r.results || []).map((x) => x.who) }, 300);
+}
 // GET /lps?ids=1,2,3 -> { ok, c: { id: [count, approximate] } }. Asking registers the pool for the job, as /prices does.
 async function lps(url, env) {
   const ids = [...new Set(String(url.searchParams.get('ids') || '').split(',').filter((x) => /^[0-9]{1,7}$/.test(x)))].slice(0, 600).map(Number);
@@ -892,6 +900,9 @@ export default {
     }
     if (url.pathname === '/netstats') {
       try { return await netstats(env); } catch (e) { return json({ ok: false, error: 'read failed' }, 0); }
+    }
+    if (url.pathname === '/lpc') {
+      try { return await lpcList(url, env); } catch (e) { return json({ ok: false, error: 'read failed' }, 0); }
     }
     if (url.pathname === '/lps') {
       try { return await lps(url, env); } catch (e) { return json({ ok: false, error: 'read failed' }, 0); }

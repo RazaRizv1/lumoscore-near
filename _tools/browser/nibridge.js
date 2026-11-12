@@ -117,7 +117,7 @@
     if (m && SRC) {
       var bps = BigInt(feeBps());
       var gross = (big(m[1]) * BigInt(10000) + (BigInt(10000) - bps) - BigInt(1)) / (BigInt(10000) - bps);
-      return 'Minimum ' + fmt(fromUnits(gross.toString(), SRC.decimals), 6) + ' ' + SRC.symbol;
+      return 'Minimum for this route is ' + fmt(fromUnits(gross.toString(), SRC.decimals), 6) + ' ' + SRC.symbol;
     }
     return s ? (s.charAt(0).toUpperCase() + s.slice(1)) : s;
   }
@@ -1137,7 +1137,7 @@
     // NEAR INTENTS WAITING ON THE READER IS NOT NEAR INTENTS REFUSING. It cannot quote until there is a
     // wallet and an address; Omni can. Moving to Omni meanwhile would flip the asset on screen (ETH ->
     // Omni's NEAR) and flip it back the moment the address is typed. Measured on staging 644957c0.
-    else if (rs[0] === 'ni' && !QUOTE && /^(Enter a destination|Connect a NEAR)/.test(NOTE.ni || '')) BEST = '';
+    else if (rs[0] === 'ni' && !QUOTE && /^(Enter a destination|Connect a NEAR|Minimum for this route)/.test(NOTE.ni || '')) BEST = '';
     else rs.some(function (r) { if (answered(r)) { BEST = r; return true; } return false; });
     try { paintSteps(); } catch (_) {}
     paintQuote(BEST === 'ni' ? QUOTE : null, BEST ? '' : quoteReason());
@@ -1149,6 +1149,33 @@
       || (LAST_NOTE && LAST_NOTE.indexOf('…') < 0 ? LAST_NOTE : '') || 'No route for this amount';
   }
 
+  // THE ROUTE'S MINIMUM BEFORE ANY ADDRESS (RAZA 2026-11-12, ticket 350: the amount looked fine until a pasted address
+  // brought up a refusal). A dry quote needs a recipient, so this one names a placeholder of the destination's own shape
+  // -- an address nobody holds -- and nothing it returns is shown or kept but 1Click's own "try at least" floor, which
+  // does not depend on who receives. A chain with no such placeholder is not probed. Asked once per pair and amount.
+  var PROBE_TO = { evm: '0x000000000000000000000000000000000000dEaD', stellar: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+    solana: '11111111111111111111111111111111', xrpl: 'rrrrrrrrrrrrrrrrrrrrrhoLvTp' };
+  var PROBED = {};
+  function probeMin(n, me, seq) {
+    var k = norm(destChain()), to = EVM_DEST[k] ? PROBE_TO.evm : PROBE_TO[k];
+    var wait = 'Enter a destination address';
+    if (!to || !SRC || !DEST || !DEST.token) { NOTE.ni = LAST_NOTE = wait; return Promise.resolve(); }
+    var pk = SRC.assetId + '|' + DEST.token.assetId + '|' + n.net;
+    var use = function (msg) { if (seq !== qSeq) return; NOTE.ni = LAST_NOTE = msg || wait; };
+    if (PROBED[pk] !== undefined) { use(PROBED[pk]); return Promise.resolve(); }
+    use(wait);
+    return fetch(API + '?op=quote', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ dry: true, originAsset: SRC.assetId, destinationAsset: DEST.token.assetId, amount: n.net, refundTo: me, recipient: to })
+    }).then(function (r) { return r.json().catch(function () { return null; }); }).then(function (j) {
+      var m = String((j && (j.message || j.error)) || '');
+      // Only the floor is an answer about the amount. Anything else is said once the real address is in.
+      var note = /try at least +[0-9]+/i.test(m) ? upstreamNote(m) : '';
+      PROBED[pk] = note;
+      use(note);
+    }, function () { use(''); });
+  }
+
   function quoteNi(chain, seq) {
     var n = amounts(), me = addr();
     if (!n || !DEST || !chain) return Promise.resolve();
@@ -1156,7 +1183,7 @@
     // that is a real NEAR account would be naming a stranger -- so pricing waits for the wallet.
     if (!me) { NOTE.ni = LAST_NOTE = 'Connect a NEAR wallet to get a quote'; return Promise.resolve(); }
     var to = recipient();
-    if (!to) { NOTE.ni = LAST_NOTE = 'Enter a destination address'; return Promise.resolve(); }
+    if (!to) return probeMin(n, me, seq);
     var ae = destAddrError(destChain(), to);
     if (ae) { NOTE.ni = LAST_NOTE = ae; return Promise.resolve(); }
     return fetch(API + '?op=quote', {
@@ -1835,8 +1862,9 @@
     var rows = list.map(function (r) {
       var busy = CLAIMING[r.hash];
       return '<div class="lx-brp-row" data-h="' + esc2(r.hash) + '">'
-        + '<div class="lx-brp-main"><div class="lx-brp-amt">' + txAmt(r.sent, r.sentSym, 'NEAR') + '<span class="lx-brp-ar">→</span>'
-        + txAmt(r.recv, r.recvSym, r.place) + '</div></div>'
+        + '<div class="lx-brp-main"><div class="lx-brp-amt">' + pendIco(r.sentSym, 'NEAR') + '<span>' + esc2(pendNum(r.sent) + ' ' + (r.sentSym || '')) + '</span>'
+        + '<span class="lx-brp-ar">→</span>' + pendIco(r.recvSym, r.place)
+        + '<span>' + esc2(pendNum(r.recv) + ' ' + (r.recvSym || '') + ' on ' + (r.place || '')) + '</span></div></div>'
         + '<div class="lx-brp-meta"><div class="lx-brp-sub">Sent ' + esc2(txWhen(r.at)) + ' · <a class="mono" target="_blank" rel="noopener" href="'
         + esc2(txExplorer(r.hash)) + '">' + esc2(short(r.hash)) + '</a>' + (r.to ? ' · to ' + txDest(r.place, r.to) : '') + '</div>'
         + (CLAIM_ERR[r.hash] ? '<div class="lx-brp-sub lx-brp-warn">' + esc2(CLAIM_ERR[r.hash]) + '</div>' : '') + '</div>'
@@ -1855,6 +1883,31 @@
       if (open) { var d = p.querySelector('.lx-brhow'); if (d) d.open = true; }
     }
     if (!host.tabbed) p.style.display = '';
+    // THE WALLET PAGE'S PENDING ROWS LINK HERE AS /bridge/near#pending (2026-11-12): the tab opens, once, as soon as it
+    // has rows, and comes into view.
+    if (host.tabbed && location.hash === '#pending' && !paintPending.opened) {
+      var pt = host.wrap.querySelector('.lx-brtab[data-brtab="pend"]');
+      if (pt && !pt.hidden) {
+        paintPending.opened = 1;
+        if (!pt.classList.contains('active')) pt.click();
+        // Again after the page settles: the wizard's own first paint moves the page back up.
+        // Clear of the fixed header, so the tab row itself is what shows first.
+        var into = function () { try { window.scrollTo(0, Math.max(0, host.wrap.getBoundingClientRect().top + window.pageYOffset - 96)); } catch (e) {} };
+        into(); setTimeout(into, 400); setTimeout(into, 1200);
+      }
+    }
+  }
+  // Stellar's pending-row mark (lxBrPairIco): the token's disc, badged with its network (RAZA 2026-11-12, ticket 351).
+  function pendIco(sym, place) {
+    var tok = txAssetLogo(sym, place), net = place === 'NEAR' ? NEAR_LOGO : netFile(place);
+    var main = tok || net;
+    return '<span class="lx-brp-ico" data-logoed="1" title="' + esc2((sym || '') + ' on ' + (place || '')) + '">'
+      + (main ? '<img src="' + esc2(main) + '" alt="">' : '')
+      + (tok && net ? '<i><img src="' + esc2(net) + '" alt="" style="width:100%;height:100%;display:block;object-fit:cover"></i>' : '') + '</span>';
+  }
+  function pendNum(v) {
+    var n = (v === null || v === undefined || v === '') ? NaN : Number(v);
+    return isFinite(n) ? fmt(n, (n > 0 && n < 1) ? 8 : 6) : '—';
   }
   function redeemData(hash) {
     var r = txRecords().filter(function (x) { return x.hash === hash; })[0] || {}, w = WH[hash] || {};

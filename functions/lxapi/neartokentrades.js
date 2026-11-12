@@ -14,6 +14,11 @@
 // together give the price in NEAR; another token is named, with no NEAR price. A route that merely passes through the
 // token leaves the signer's balance of it unchanged and is not a trade of it.
 //
+// ONE POOL'S SWAPS (?pool=<Rhea pool id>, RAZA 2026-11-12: the NEAR20 / wNEAR pool page read "No swaps in this pool
+// recently"). The same reading, kept to the transactions whose own swap message names that pool: a classic action's
+// pool_id, or a DCL Swap's pool_ids. Asked with the pool's own token as i (not wNEAR, whose history is every pool's).
+// scanned and total say how much of the token's history that covered, so the page can say what was read.
+//
 // BUDGET (10 ms CPU, 50 subrequests): one index call, at most PER_RUN new transactions five to a call, two or three
 // ft_metadata reads. The answer is kept two minutes. A partial read lists only the unbroken run from the newest down, as
 // /lxapi/nearactivity does. A failure is a 200 { ok:false }, never cached, never "no trades".
@@ -22,7 +27,7 @@ import { WNEAR, post, decodeNew } from './_nearfeetx.js';
 
 const RPC = 'https://free.rpc.fastnear.com';
 const REF = 'v2.ref-finance.near', DCL = 'dclv2.ref-labs.near';
-const VER = 'v2', TTL = 120, N = 50, NEWEST = 120, PER_RUN = 40;
+const VER = 'v3', TTL = 120, N = 50, NEWEST = 120, PER_RUN = 40;
 const ID_RE = /^(?=.{2,64}$)(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/;
 const CUR = {};
 for (const c of CURATED) CUR[c.i] = c;
@@ -52,6 +57,17 @@ function decoder(token) {
     if (acts.length === 1 && actPair(acts[0])[0] === 'Delegate') {
       const da = actPair(acts[0])[1].delegate_action || {};
       me = da.sender_id || me; acts = da.actions || [];
+    }
+    // The pools this transaction's own swap messages name (classic actions' pool_id, DCL Swap's pool_ids).
+    const pools = [];
+    for (const a of acts) {
+      const p = actPair(a), b = p[1];
+      if (p[0] !== 'FunctionCall' || b.method_name !== 'ft_transfer_call') continue;
+      try {
+        const args = JSON.parse(atob(b.args || '')), m = JSON.parse(String((args && args.msg) || '{}'));
+        for (const x of (m.actions || [])) if (x && x.pool_id != null) pools.push(String(x.pool_id));
+        for (const x of ((m.Swap && m.Swap.pool_ids) || [])) pools.push(String(x));
+      } catch (e) {}
     }
     const net = {}, order = [];
     let viaRhea = false;
@@ -117,7 +133,7 @@ function decoder(token) {
     }
     // Nothing came back the other way: a limit order resting on DCL, or a transfer Rhea refunded, not a trade.
     if (!oth) return null;
-    return { h, who: me, ts: nsMs((T.execution_outcome && T.execution_outcome.block_timestamp) || ''), tok: String(tok), oth };
+    return { h, who: me, pools, ts: nsMs((T.execution_outcome && T.execution_outcome.block_timestamp) || ''), tok: String(tok), oth };
   };
 }
 
@@ -137,18 +153,19 @@ async function ftMeta(id) {
   return META[id];
 }
 
-async function build(cache, id) {
+async function build(cache, id, pool) {
   const j = await post('account', { account_id: id });
   if (!j || !Array.isArray(j.account_txs)) throw new Error('fastnear: no index');
   const list = j.account_txs.filter((x) => x && x.transaction_hash)
     .map((x) => ({ h: x.transaction_hash, ok: x.is_success !== false, height: Number(x.tx_block_height) || 0 }))
     .sort((a, b) => b.height - a.height).slice(0, NEWEST);
-  const D = await decodeNew(cache, 'trades2/' + id, list.filter((x) => x.ok), decoder(id), PER_RUN), map = D.map;
+  const D = await decodeNew(cache, 'trades3/' + id, list.filter((x) => x.ok), decoder(id), PER_RUN), map = D.map;
   await D.save();
   // Only the unbroken run from the newest down: a row past the first undecoded transaction could sit in the wrong place.
   let cut = list.findIndex((x) => x.ok && !(x.h in map));
   if (cut < 0) cut = list.length;
-  const recs = list.slice(0, cut).filter((x) => x.ok).map((x) => map[x.h]).filter(Boolean).sort((a, b) => b.ts - a.ts).slice(0, N);
+  const recs = list.slice(0, cut).filter((x) => x.ok).map((x) => map[x.h])
+    .filter((r) => r && (!pool || (r.pools || []).indexOf(pool) >= 0)).sort((a, b) => b.ts - a.ts).slice(0, N);
   const tm = await ftMeta(id);
   if (!tm) throw new Error('token metadata unread');
   const others = {};
@@ -163,21 +180,24 @@ async function build(cache, id) {
     if (r.oth && r.oth.c === 'near') near = units(r.oth.raw, 24);
     else if (r.oth) { const m = om[r.oth.c]; oth = { v: m ? units(r.oth.raw, m.d) : null, s: m ? m.s : r.oth.c.slice(0, 12) }; }
     rows.push({ addr: r.who, side: sell ? 'sell' : 'buy', amt, near: near > 0 ? near : null, px: near > 0 ? near / amt : null,
-      t: r.ts, hash: /^[A-Za-z0-9]{20,64}$/.test(r.h) ? r.h : '', oth });
+      t: r.ts, hash: /^[A-Za-z0-9]{20,64}$/.test(r.h) ? r.h : '', oth, ...(pool ? { oc: r.oth ? r.oth.c : null } : {}) });
   }
   const partial = list.some((x) => x.ok && !(x.h in map));
-  return { ok: true, i: id, at: Date.now(), rows, partial: partial || undefined };
+  return { ok: true, i: id, pool: pool || undefined, at: Date.now(), rows, partial: partial || undefined,
+    scanned: cut, total: Number(j.txs_count) || j.account_txs.length };
 }
 
 export async function onRequestGet(context) {
   const id = String(new URL(context.request.url).searchParams.get('i') || '').trim().toLowerCase();
   if (!ID_RE.test(id)) return json({ ok: false, error: 'bad token id' }, 0);
+  const pool = String(new URL(context.request.url).searchParams.get('pool') || '');
+  if (pool && !/^[0-9]{1,7}$/.test(pool)) return json({ ok: false, error: 'bad pool id' }, 0);
   const cache = caches.default;
-  const key = new Request('https://lumoscore.internal/lxapi/neartokentrades/' + VER + '/' + encodeURIComponent(id));
+  const key = new Request('https://lumoscore.internal/lxapi/neartokentrades/' + VER + '/' + encodeURIComponent(id) + (pool ? '/' + pool : ''));
   const hit = await cache.match(key);
   if (hit) return json(await hit.json(), 30);
   try {
-    const body = await build(cache, id);
+    const body = await build(cache, id, pool);
     context.waitUntil(cache.put(key, new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json',
       'cache-control': 'public, max-age=' + (body.partial ? 5 : TTL) } })));
     return json(body, body.partial ? 5 : 30);

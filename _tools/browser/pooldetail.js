@@ -298,7 +298,12 @@
       if (!d || !d.ok) { emptyParticipants('Could not read the liquidity providers — try again shortly.'); return; }
       PART.rows = d.providers || [];
       PART.at = d.at || 0;
-      if (!PART.rows.length) { emptyParticipants('No liquidity providers found.'); return; }
+      var counted0 = window.__lxnPoolRow && +window.__lxnPoolRow.lps;
+      if (!PART.rows.length) {
+        emptyParticipants(counted0 > 0 ? (counted0.toLocaleString('en-US') + (counted0 === 1 ? ' provider is' : ' providers are')
+          + ' counted, but none could be listed and read just now.') : 'No liquidity providers found.');
+        return;
+      }
       renderParticipants();
     }).catch(function () { emptyParticipants('Could not read the liquidity providers — try again shortly.'); });
   }
@@ -335,7 +340,11 @@
       // "largest known", and when the chain was read, on hover: the list is the largest accounts Rhea has
       // recorded, every share read from the chain (see /lxapi/nearlps).
       if (info) {
-        info.textContent = 'Viewing ' + (from + 1) + '–' + (from + slice.length) + ' of ' + PART.rows.length + ' largest known';
+        // The card above counts the pool's providers (the indexer's lps); when that is more than could be listed and
+        // read here, the list says so rather than standing as the whole (RAZA 2026-11-12, NEAR20 / wNEAR).
+        var counted = window.__lxnPoolRow && +window.__lxnPoolRow.lps;
+        info.textContent = 'Viewing ' + (from + 1) + '–' + (from + slice.length) + ' of ' + PART.rows.length + ' largest known'
+          + (counted > PART.rows.length ? ' (' + counted.toLocaleString('en-US') + ' counted)' : '');
         info.title = 'Shares read from the chain' + (PART.at ? ' at ' + new Date(PART.at).toLocaleString() : '');
       }
       var navEl = foot.querySelector('.nav'), chip = navEl && navEl.querySelector('.lx-pppg');
@@ -970,10 +979,39 @@
   }
   // GeckoTerminal's swaps where it has them, the index's otherwise; deposits and withdrawals always the index's.
   var GTROWS = null;
+  // THE CHAIN'S SWAPS OF THIS POOL (RAZA 2026-11-12: NEAR20 / wNEAR read "No swaps in this pool recently" on every tab).
+  // GeckoTerminal sends a pool's last 24 hours, and the indexer records a two-token pool's deposits and withdrawals, not
+  // its swaps. When the feed has none, /lxapi/neartokentrades reads the swaps whose own message names this pool from the
+  // history of its non-wNEAR token, and says how much of that history it read (scanned of total). Two-token pools only.
+  var CHAIN = { rows: null, scanned: 0, total: 0, sym: '', failed: false, asked: false };
+  function chainSwaps(attempt) {
+    var p = window.__lxnPool, at = attempt || 0;
+    if (!p || p.tokens.length !== 2) return;
+    var tok = p.a.i === WNEAR ? p.b : p.a, oth = tok === p.a ? p.b : p.a;
+    CHAIN.asked = true;
+    fetch('/lxapi/neartokentrades?i=' + encodeURIComponent(tok.i) + '&pool=' + encodeURIComponent(p.id))
+      .then(function (r) { return r.json(); }).then(function (j) {
+        if (!j || !j.ok || !Array.isArray(j.rows)) throw new Error('chain');
+        CHAIN.rows = j.rows.map(function (x) {
+          var mine = +x.amt, other = x.near != null ? +x.near : (x.oth && x.oth.v != null ? +x.oth.v : 0);
+          var sell = x.side === 'sell';
+          return { kind: 'swap', a: tok === p.a ? mine : other, b: tok === p.a ? other : mine, who: ACCT_RE.test(x.addr || '') ? x.addr : '',
+            t: +x.t || 0, hash: x.hash || '', from: sell ? tok.name : oth.name, to: sell ? oth.name : tok.name,
+            fromAmt: sell ? mine : other, toAmt: sell ? other : mine };
+        });
+        CHAIN.scanned = +j.scanned || 0; CHAIN.total = +j.total || 0; CHAIN.sym = tok.name; CHAIN.failed = false;
+        mergeTx();
+        if (j.partial && at < 3) setTimeout(function () { chainSwaps(at + 1); }, 6000);
+      }).catch(function () {
+        if (at < 3) { setTimeout(function () { chainSwaps(at + 1); }, [3000, 10000, 30000][at]); return; }
+        CHAIN.failed = true; renderTx();
+      });
+  }
   function mergeTx() {
     var gt = GTROWS, idx = TXI.rows;
     if (gt == null && idx == null && !TXI.failed && TX.err !== 'untracked' && !TX.err) return;   // nothing back yet
     var swaps = (gt && gt.length) ? gt : (idx || []).filter(function (r) { return r.kind === 'swap'; });
+    if (!swaps.length && CHAIN.rows && CHAIN.rows.length) swaps = CHAIN.rows;
     var liq = (idx || []).filter(function (r) { return r.kind !== 'swap'; });
     var all = swaps.concat(liq).sort(function (x, y) { return (y.t || 0) - (x.t || 0); });
     if (all.length || idx != null) { TX.rows = all; if (all.length) TX.err = false; }
@@ -1003,11 +1041,12 @@
         GTROWS = TX.rows;
         TX.err = false;
         mergeTx();
+        if (!GTROWS.length && !CHAIN.asked) chainSwaps(0);      // a quiet day on the feed: the chain's older swaps
       }, function (e) {
         // A 404 IS AN ANSWER, NOT A HICCUP (RAZA 2026-10-30: "why aren't pool trxs loading for such pools?").
         // GeckoTerminal does not track Rhea's 3- and 4-token stable pools at all; retrying for 48 seconds and
         // then saying "could not be loaded" told the reader to try again for something that will never come.
-        if (String(e && e.message) === '404') { TX.err = 'untracked'; GTROWS = []; mergeTx(); return; }
+        if (String(e && e.message) === '404') { TX.err = 'untracked'; GTROWS = []; mergeTx(); if (!CHAIN.asked) chainSwaps(0); return; }
         if (at < 3) { at++; setTimeout(go, [3000, 15000, 30000][at - 1]); return; }
         TX.err = true; renderTx();
       });
@@ -1025,6 +1064,12 @@
       if (TXI.cap) return 'No ' + what + ' in the last ' + TX_IDX_LIMIT.toLocaleString('en-US') + ' pool operations.';
       return 'No ' + what + ' in this pool' + (since ? ' since ' + since : '') + '.';
     }
+    // What the chain's read covered, when it was the one asked (chainSwaps).
+    if (CHAIN.rows && !CHAIN.rows.length) {
+      return CHAIN.total && CHAIN.scanned >= CHAIN.total ? 'No swaps of this pool in ' + CHAIN.sym + '’s history on chain.'
+        : 'No swaps of this pool among ' + CHAIN.sym + '’s latest ' + CHAIN.scanned.toLocaleString('en-US') + ' transactions on chain.';
+    }
+    if (CHAIN.asked && !CHAIN.rows && !CHAIN.failed) return 'Reading this pool’s swaps from the chain…';
     if (TX.err === 'untracked' && TXI.off) return 'This pool’s swaps are not published by any feed LumosCore reads yet (GeckoTerminal does not track it), so they cannot be listed here.';
     if (TX.err === 'untracked' && TXI.rows == null && !TXI.failed) return 'Reading this pool’s recent swaps…';
     if (TX.err === 'untracked' && TXI.cap) return 'No swaps in the last ' + TX_IDX_LIMIT.toLocaleString('en-US') + ' pool operations.';
