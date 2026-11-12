@@ -11,9 +11,8 @@
 //   * the copy: the NEAR wallet, the LUMOS/wNEAR pool, NEAR's ten Ecosystem assets (RAZA's list, ticket 270, the
 //     same ten browser/nearlumospage.js shows), "Distributed" at zero, and the FAQ with its FAQPage ld+json;
 //   * injects lx-nearrewards (browser/nearrewards.js) before </body>.
-// NOT CHANGED, AND SAID SO: the per-round and total-allocation figures (3,000,000 / 530,000,000; 1,000,000 per
-// programme; 240M / 50M caps). They are the programmes' Stellar terms and nothing in this repo says whether NEAR's
-// rounds pay the same; that is RAZA's to confirm, not this file's to guess.
+// THE AMOUNTS ARE STELLAR'S, CONFIRMED (RAZA 2026-11-12, "yes, the rewards are same"): 3,000,000 per round,
+// 530,000,000 allocation, 1,000,000 per programme, 100,000 per Ecosystem pool, 240M / 50M caps. Left as they are.
 //
 // Every replacement must match (or already be in its NEAR form) on every key, or the build aborts. Idempotent.
 const fs = require('fs');
@@ -46,8 +45,11 @@ const COPY = [
    'All three programmes begin on NEAR with the first round on 1 December 2026.'],
   ['Every round, and rounds run from the 1st and 15th of each month, so twice a month and twelve rounds over a six-month cycle. Ecosystem LP began on 15 April 2026, making 1 October 2026 its twelfth and final round.',
    'Every round, and rounds run from the 1st and 15th of each month, so twice a month. The first round on NEAR is 1 December 2026.'],
+  // a container built before RAZA confirmed the amounts carries the shorter answer
+  ['Ten pools, each pairing LUMOS with one other asset. On NEAR the ten are ' + ECO_NEAR + ', and they are reselected every 6 months.',
+   'Ten pools, each pairing LUMOS with one other asset. On NEAR the ten are ' + ECO_NEAR + '. Each pays 100,000 LUMOS per round, and the ten are reselected every 6 months.', 'optional'],
   ['Ten pools, each pairing LUMOS with one other asset: currently LMNR, yXLM, sages, AQUA, SSLX, SHX, TKG, LIBERATOR, KALE and USDC. Each pays 100,000 LUMOS per round, and the ten are reselected every 6 months.',
-   'Ten pools, each pairing LUMOS with one other asset. On NEAR the ten are ' + ECO_NEAR + ', and they are reselected every 6 months.'],
+   'Ten pools, each pairing LUMOS with one other asset. On NEAR the ten are ' + ECO_NEAR + '. Each pays 100,000 LUMOS per round, and the ten are reselected every 6 months.'],
   ['69,000,000<small>LUMOS</small></div><div class="k">Distributed so far', '0<small>LUMOS</small></div><div class="k">Distributed so far'],
 ];
 // The three "Distributed 23M / cap" bars: nothing has been paid on NEAR.
@@ -68,10 +70,10 @@ for (const dev of ['desktop', 'mobile']) {
     if (nd) h = h.split(ND_OLD).join(ND_NEW);
     if (h.indexOf(ND_NEW) < 0) { console.error('near rewards ABORT: ' + key + ' — the countdown function moved'); process.exit(1); }
 
-    for (const [from, to] of COPY) {
+    for (const [from, to, optional] of COPY) {
       const n = h.split(from).length - 1;
       if (n) h = h.split(from).join(to);
-      else if (!to || h.indexOf(to) < 0) {
+      else if (!optional && (!to || h.indexOf(to) < 0)) {
         // An emptied string has nothing to find afterwards: absent is done.
         if (to) { console.error('near rewards ABORT: ' + key + ' — not found: ' + from.slice(0, 70)); process.exit(1); }
       }
