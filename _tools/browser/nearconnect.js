@@ -54,6 +54,40 @@
   var MANIFEST = '/assets/vendor/near-wallets-manifest.json';
   var NET = 'near';
 
+  // HOT'S "OPEN MOBILE" OPENS THE APP, NOT HOT'S WEBSITE (RAZA 2026-11-13: "it opens hot wallet website", the app
+  // installed). HOT's executor answers that button with https://app.hot-labs.org/link?hotcall-<id>, which NEAR Connect
+  // hands to window.open(url, '_blank'): a link opened that way loads as a browser tab and never reaches the app
+  // on iPhone, and on Android it only comes here once HOT's own intent:// try has failed. The app's own scheme is the
+  // one HOT's Android intent names: hotwallet://hotcall-<id>. So on a phone that link goes to the scheme first,
+  // still inside the tap. If the page is not hidden within 2.5s, the app did not open, and the NEXT tap on
+  // Open Mobile goes to HOT's website exactly as before: nothing is lost where the app is missing.
+  (function hotAppLink() {
+    var ua = navigator.userAgent || '';
+    var phone = /iPhone|iPad|iPod|Android/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+    if (!phone || window.__lxnHotOpen) return;
+    window.__lxnHotOpen = 1;
+    var LINK = 'https://app.hot-labs.org/link?', webNext = false;
+    var open0 = window.open;
+    window.open = function (url) {
+      var u = String(url || '');
+      if (u.indexOf(LINK) !== 0 || webNext) { webNext = false; return open0.apply(window, arguments); }
+      var call = u.slice(LINK.length);
+      if (!/^hotcall-[A-Za-z0-9_-]+$/.test(call)) return open0.apply(window, arguments);
+      var left = false;
+      function gone() { if (document.hidden) left = true; }
+      document.addEventListener('visibilitychange', gone);
+      window.addEventListener('pagehide', gone);
+      window.addEventListener('blur', function onBlur() { left = true; window.removeEventListener('blur', onBlur); });
+      setTimeout(function () {
+        document.removeEventListener('visibilitychange', gone);
+        window.removeEventListener('pagehide', gone);
+        if (!left) webNext = true;              // the app did not take it: the next tap opens HOT's website
+      }, 2500);
+      try { window.location.href = 'hotwallet://' + call; } catch (e) { webNext = false; return open0.apply(window, arguments); }
+      return null;                                // NEAR Connect treats null as "no panel to watch"
+    };
+  })();
+
   // The design row's data-wallet, normalised, -> NEAR Connect's wallet id.
   var IDS = {
     hotwallet: 'hot-wallet', meteorwallet: 'meteor-wallet', nearmobile: 'near-mobile',
