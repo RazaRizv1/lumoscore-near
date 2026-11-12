@@ -44,6 +44,7 @@
   function box(title, sub) {
     var b = $('#eligBox');
     if (!b) return;
+    b.__lxk = '';
     b.classList.add('lxrw');
     b.innerHTML = '';
     var w = el('div', 'lxrw-empty');
@@ -54,6 +55,9 @@
   function erBox(rows) {
     var b = $('#eligBox');
     if (!b) return;
+    var key = JSON.stringify(rows);
+    if (b.__lxk === key && b.querySelector('.er')) return;   // same rows already up: no repaint
+    b.__lxk = key;
     b.classList.add('lxrw');
     b.innerHTML = '';
     rows.forEach(function (r) {
@@ -69,14 +73,17 @@
       b.appendChild(er);
     });
   }
-  var asked = '';
+  var asked = '', shown = '';
+  // NO FLASH ON A RE-CHECK (RAZA 2026-11-12): the 1.5s safety re-read used to repaint 'Reading NEAR…' over rows
+  // already on screen. Rows painted for this same account stay up while it re-reads, and through a failed re-read.
+  function showing(a) { return shown === a && !!$('#eligBox .er'); }
   function eligibility() {
     var a = me(), C = window.lxnCore;
-    if (!a) { asked = ''; box('Connect your NEAR wallet', 'See your LUMOS balance and pool position on NEAR. ' + WHEN + '.'); return; }
+    if (!a) { asked = ''; shown = ''; box('Connect your NEAR wallet', 'See your LUMOS balance and pool position on NEAR. ' + WHEN + '.'); return; }
     if (a === asked) return;
     asked = a;
     if (!C) { asked = ''; box('Could not read your NEAR account right now', 'Reload the page to try again.'); return; }
-    box('Reading NEAR…', 'Checking your LUMOS balance and pool position.');
+    if (!showing(a)) box('Reading NEAR…', 'Checking your LUMOS balance and pool position.');
     Promise.all([
       C.callView(LUMOS, 'ft_balance_of', { account_id: a }),
       C.callView(REF, 'get_pool_shares', { pool_id: POOL, account_id: a }),
@@ -88,6 +95,7 @@
       var share = total > 0 ? mine / total : 0;
       var shares = Math.floor(lumos / 5e6);
       var tail = started() ? '' : ' · from 1 December 2026';
+      shown = a;
       erBox([
         ['var(--accent)', 'Native LP Rewards', mine > 0 ? ('LUMOS/wNEAR · ' + pc(share) + ' of the pool' + tail) : 'Add LUMOS/wNEAR liquidity to qualify', '—'],
         ['var(--blue)', 'Ecosystem LP Rewards', 'Join an eligible LUMOS pool to qualify' + tail, '—'],
@@ -98,6 +106,7 @@
     }, function () {
       if (me() !== a) return;
       asked = '';
+      if (showing(a)) return;
       box('Could not read your NEAR account right now', 'NEAR did not answer. Reload the page to try again.');
     });
   }
