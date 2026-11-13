@@ -238,9 +238,10 @@
     if (a >= 1) return String(Math.round(v * 100) / 100);
     return num(v);
   }
-  function lpTok(f) {
+  // Stellar's markup exactly: the sign AND the amount in one coloured span, then the mark and the code.
+  function lpTok(f, dep) {
     var v = f && f.v != null && isFinite(Number(f.v)) ? Number(f.v) : null;
-    return '<b>' + (v != null ? esc(lpAmt(v)) + ' ' : '') + inl(f) + esc(f.s) + '</b>';
+    return '<b>' + (v != null ? '<span class="' + (dep ? 'lx-lppos' : 'lx-lpneg') + '">' + (dep ? '+' : '-') + esc(lpAmt(v)) + '</span> ' : '') + inl(f) + esc(f.s) + '</b>';
   }
   function tok(f) {
     if (!f) return '';
@@ -293,7 +294,7 @@
       // then each token signed, '+' in green for a deposit, '-' for a withdrawal.
       var dep = m === 'lx:lp+';
       verb = dep ? 'Liquidity Added' : 'Liquidity Withdrawn'; cls = 'lp';
-      type = r.lp.map(function (x) { return '<span class="' + (dep ? 'lx-lppos' : 'lx-lpneg') + '">' + (dep ? '+' : '-') + '</span>' + lpTok(x); }).join(' · ');
+      type = r.lp.map(function (x) { return lpTok(x, dep); }).join(' · ');
     } else if (r.give && r.get) { verb = 'Swap'; cls = 'swap'; type = tok(r.give) + ' → ' + tok(r.get); }
     else { verb = 'Trade'; cls = 'swap'; type = tok(r.give || r.get); }
     var b = (verb === 'Swap') ? r.get : null;
