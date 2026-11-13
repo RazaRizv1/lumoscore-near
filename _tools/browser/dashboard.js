@@ -176,9 +176,29 @@
     var l = esc(String((f && f.s) || '?').charAt(0).toUpperCase());
     return '<span class="act-inl lx-dimg lx-fgi" data-l="' + l + '">' + (f && f.ic ? '<img src="' + esc(f.ic) + '" alt="" onerror="this.remove()">' : '') + '</span>';
   }
+  // STELLAR'S AVATAR, THE SAME FUNCTION (RAZA 2026-11-13: "liquidity added ... needs to be like on stellar"). This used
+  // window.lxIdent, which only the account page carries, so no NEAR row had one. Ported from _realdata.js iavatar: FNV-1a
+  // of the address, two hues across a disc, a mirrored 3x5 pattern; ids per address so two avatars never share a gradient.
+  function ih(t) { var v = 2166136261; for (var i = 0; i < t.length; i++) { v ^= t.charCodeAt(i); v = (v * 16777619) >>> 0; } return v >>> 0; }
+  function iavatar(a, size) {
+    a = String(a || ''); size = size || 20;
+    var h = ih(a), hue = h % 360, hue2 = (hue + 52) % 360, cells = '';
+    for (var x = 0; x < 3; x++) for (var y = 0; y < 5; y++) {
+      if (!((ih(a + ':' + x + ':' + y) >>> 3) & 1)) continue;
+      cells += '<rect x="' + (x * 8) + '" y="' + (y * 8) + '" width="8" height="8"/>';
+      if (x < 2) cells += '<rect x="' + ((4 - x) * 8) + '" y="' + (y * 8) + '" width="8" height="8"/>';
+    }
+    var gid = 'lxav' + h, cid = 'lxac' + h;
+    return '<svg class="lx-actident" width="' + size + '" height="' + size + '" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">'
+      + '<defs><linearGradient id="' + gid + '" x1="0" y1="0" x2="1" y2="1">'
+      + '<stop offset="0%" stop-color="hsl(' + hue + ',62%,52%)"/><stop offset="100%" stop-color="hsl(' + hue2 + ',60%,38%)"/>'
+      + '</linearGradient><clipPath id="' + cid + '"><circle cx="20" cy="20" r="20"/></clipPath></defs>'
+      + '<g clip-path="url(#' + cid + ')"><rect width="40" height="40" fill="url(#' + gid + ')"/>'
+      + '<g fill="rgba(255,255,255,.92)">' + cells + '</g></g></svg>';
+  }
   function who(a) {
     var av = '';
-    try { if (window.lxIdent) av = '<img class="lx-actav" width="20" height="20" alt="" src="data:image/svg+xml;utf8,' + encodeURIComponent(String(window.lxIdent(a, 20))) + '">'; } catch (e) {}
+    try { av = iavatar(a, 20); } catch (e) {}
     var sh = a.length > 22 ? a.slice(0, 8) + '…' + a.slice(-6) : a;
     return '<a class="lx-actwho" href="/account/near/' + encodeURIComponent(a) + '" title="' + esc(a) + '">' + av + esc(sh) + '</a>';
   }
@@ -208,6 +228,19 @@
     if (v >= 1000) return v.toLocaleString('en-US', { maximumFractionDigits: 2 });
     if (v > 0 && v < 0.001) return subZero(v);
     return String(+v.toPrecision(6));
+  }
+  // Stellar's amt() for a liquidity row: 2 decimals from 1, then K / M / B (164.27 XLM, 579.2K LUMOS).
+  function lpAmt(v) {
+    var a = Math.abs(v);
+    if (a >= 1e9) return (v / 1e9).toFixed(2) + 'B';
+    if (a >= 1e6) return (v / 1e6).toFixed(2) + 'M';
+    if (a >= 1e3) return (v / 1e3).toFixed(1) + 'K';
+    if (a >= 1) return String(Math.round(v * 100) / 100);
+    return num(v);
+  }
+  function lpTok(f) {
+    var v = f && f.v != null && isFinite(Number(f.v)) ? Number(f.v) : null;
+    return '<b>' + (v != null ? esc(lpAmt(v)) + ' ' : '') + inl(f) + esc(f.s) + '</b>';
   }
   function tok(f) {
     if (!f) return '';
@@ -242,6 +275,7 @@
   function viaBadge(v) {
     return v ? '<span class="lx-via" data-logoed="1">' + (VIA_IMG[v] ? '<img src="' + VIA_IMG[v] + '" alt="">' : '') + NOICON + 'via ' + esc(v) + '</span>' : '';
   }
+  var DROP = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>';
   var INFO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>';
   function actRow(r) {
     var m = String(r.memo || ''), verb, cls, type, unread = false;
@@ -259,11 +293,13 @@
       // then each token signed, '+' in green for a deposit, '-' for a withdrawal.
       var dep = m === 'lx:lp+';
       verb = dep ? 'Liquidity Added' : 'Liquidity Withdrawn'; cls = 'lp';
-      type = r.lp.map(function (x) { return '<span class="' + (dep ? 'lx-lppos' : 'lx-lpneg') + '">' + (dep ? '+' : '-') + '</span>' + tok(x); }).join(' · ');
+      type = r.lp.map(function (x) { return '<span class="' + (dep ? 'lx-lppos' : 'lx-lpneg') + '">' + (dep ? '+' : '-') + '</span>' + lpTok(x); }).join(' · ');
     } else if (r.give && r.get) { verb = 'Swap'; cls = 'swap'; type = tok(r.give) + ' → ' + tok(r.get); }
     else { verb = 'Trade'; cls = 'swap'; type = tok(r.give || r.get); }
-    var b = (verb === 'Swap') ? r.get : (cls === 'lp' && r.lp && r.lp[1]) ? r.lp[1] : null;
+    var b = (verb === 'Swap') ? r.get : null;
+    // A liquidity row carries Stellar's teal droplet on its tinted disc (.lx-fgt.lp), not the tokens' logos.
     var glyph = unread ? ('<span class="lx-fg lx-fgt" aria-hidden="true">' + INFO + '</span>')
+      : cls === 'lp' ? ('<span class="lx-fg lx-fgt lp" aria-hidden="true">' + DROP + '</span>')
       : '<span class="lx-fg' + (b ? ' lx-fg2' : '') + '" aria-hidden="true"><span class="lx-fga">' + logo(r.give || r.get) + '</span>'
       + (b ? '<span class="lx-fgb">' + logo(b) + '</span>' : '') + '</span>';
     return '<div class="activity-feed-row lx-fr' + (unread ? ' lx-frfail' : '') + '" data-lx-noswap="1">' + glyph
