@@ -53,7 +53,7 @@ const SCRIPT = CSS + '<script id="' + ID + '">\n' + page + '\n</' + 'script>';
 
 // The wallet table entry lives in near-wallets.js, because the combine (chains/near.js) writes the
 // same entry into the OTHER build's pages — see its header. Two copies would drift.
-const { SUB, SUB_RE, NEAR_ENTRY, NEAR_MARK, NETS_ANCHOR, NAMES_ANCHOR, NAMES_ADD } = require(__dirname + '/near-wallets.js');
+const { SUB, SUB_RE, MNW_OLD, NEAR_ENTRY, NEAR_MARK, NETS_ANCHOR, NAMES_ANCHOR, NAMES_ADD } = require(__dirname + '/near-wallets.js');
 
 const once = (s, a) => s.split(a).length - 1;
 let pages = 0, nets = 0, stripped = 0, files = 0, subs = 0;
@@ -86,6 +86,7 @@ for (const dev of ['desktop', 'mobile']) {
     // `node _tools/rebuild.js` could never change a word of it again — only a --base run could, and
     // the two builds would disagree. Keep the entry's sub in step with SUB on every run.
     const before = h;
+    h = h.split(MNW_OLD).join('');                 // MyNearWallet removed (RAZA 2026-11-13)
     h = h.replace(SUB_RE, '$1' + SUB + '$2');
     if (h !== before) subs++;
 

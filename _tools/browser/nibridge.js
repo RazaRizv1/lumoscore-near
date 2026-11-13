@@ -956,7 +956,7 @@
       var sub = a.native ? 'Native asset' : (a.contract.length > 22 ? a.contract.slice(0, 8) + '…' + a.contract.slice(-6) : a.contract);
       listHost.appendChild(menuRow(rowLogo(a), a.symbol, a.symbol, sub,
         a.symbol + ' ' + (a.name || '') + ' ' + a.contract, function () {
-          SRC = a; QUOTE = null; BEST = ''; NOTE = { ni: '', om: '', wh: '' }; OMQ = null; WHQ = null;
+          SRC = a; QUOTE = null; BEST = ''; NOTE = { ni: '', om: '', wh: '' }; OMQ = null; WHQ = null; MAX_TRIED = false;
           try { checkFee(); } catch (_) {}
           refreshDestinations();
           paintSteps(); requote();
@@ -1434,8 +1434,25 @@
     var dp = v >= 1000 ? 2 : 4, p = Math.pow(10, dp);
     return fmt(Math.floor(v * p) / p, dp) + ' ' + a.symbol;
   }
+  // NOT ENOUGH NEAR FOR THE ROUTE'S GAS (RAZA 2026-11-13, ticket 383: Omni or Wormhole picked with too little NEAR, and MAX
+  // wrote a silent 0). Said in Stellar's place for an amount problem -- the step's .br-errslot, under the amount -- once
+  // the reader has typed an amount or pressed MAX, with the figure the route needs: its gas keep (nearbridges.js KEEP),
+  // plus Omni's relayer fee once quoted. The same figures balRaw() takes off, so the two cannot disagree.
+  var MAX_TRIED = false;
+  function routeShort() {
+    var r = curRoute();
+    if ((r !== 'om' && r !== 'wh') || !SRC || NEAR_RAW == null || !BRX()) return '';
+    var need = big(BRX().KEEP[r]);
+    if (r === 'om' && OMQ && OMQ.nativeFee != null) need += big(OMQ.nativeFee);
+    var name = (ROUTE_META[r] || {}).name || 'This route';
+    if (SRC.native ? balRaw(SRC) !== '0' : big(NEAR_RAW) >= need) return '';
+    return 'Not enough NEAR for ' + name + ': it needs about ' + fmt(fromUnits(need.toString(), 24), 3)
+      + ' NEAR for gas, and you have ' + fmt(fromUnits(NEAR_RAW, 24), 4) + ' NEAR.';
+  }
   function formBanner() {
     if (overBalance()) return 'Amount exceeds your balance (' + balFigure(balRaw(SRC), SRC) + ').';
+    var gs = (MAX_TRIED || amounts()) ? routeShort() : '';
+    if (gs) return gs;
     var dc = destChain();
     if (dc) { var ae = destAddrError(dc, recipient()); if (ae) return ae; }
     var rn = NOTE[curRoute()] || '';
@@ -2734,6 +2751,7 @@
             // Native NEAR's figure already has the 0.05 NEAR gas-and-storage keep taken off (maxSpend).
             inp.value = fromUnits(raw, SRC.decimals);
             MAXED = inp.value;
+            MAX_TRIED = true;
             QUOTE = null; paintSourceUsd(); paintReview(null); setCta(); requote();
           }
           return;
@@ -2743,6 +2761,7 @@
         var t = e.target;
         if (!t || !t.classList) return;
         if (t.classList.contains('lx-amt-in')) {
+          MAX_TRIED = false;
           cleanAmount(t);
           QUOTE = null; paintSourceUsd(); paintReview(null); setCta(); requote();
           return;

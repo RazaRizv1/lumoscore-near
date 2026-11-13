@@ -35,7 +35,8 @@ const KEEP = 86400;
 const WNEAR = 'wrap.near';
 const RPC = 'https://free.rpc.fastnear.com';
 const PAIRS = 'https://api.dexscreener.com/token-pairs/v1/near/';
-const VER = 'v8';   // v2: web, x, desc; v3: curated logo first (2026-10-29); v5: own pools; v6: their count (2026-11-04); v7: 30 pools (2026-11-05); v8: DCL pool (2026-11-12)
+const VER = 'v10';  // v10: its order-book pool first, the baked classic one only without it (2026-11-13); v9: baked classic pool
+// earlier: v2: web, x, desc; v3: curated logo first (2026-10-29); v5: own pools; v6: their count (2026-11-04); v7: 30 pools (2026-11-05); v8: DCL pool (2026-11-12)
 const DCL = 'dclv2.ref-labs.near', DCL_FEES = [100, 400, 2000, 10000];
 const INTEAR = 'https://prices.intear.tech/token?token_id=';
 
@@ -300,6 +301,38 @@ async function build(id, context) {
       liqUsd: nearUsd ? dcl.liq * nearUsd : 0, volUsd: extra && extra.volUsd != null ? extra.volUsd : 0,
       liq: dcl.liq, vol: v24, id: dcl.id, url: '' });
     if (logos[id] === undefined) logos[id] = logo;
+  }
+  // A CURATED TOKEN WHOSE POOL NO FEED LISTS (RAZA 2026-11-13, CLAW on a phone: "Where's the graph"). Its price came
+  // from the market table, so neither DexScreener nor the DCL read ran, and the page had no pool to chart: an empty box,
+  // on every screen. The token's classic pools are baked per curated token (_tools/_nearpoolcounts.js,
+  // /assets/tokenpools/<id>.json, served from this deploy, so no outside call); the deepest one against wNEAR joins the
+  // list, and the chart and the trades read it as they read any pool.
+  // THE ORDER-BOOK POOL FIRST: CLAW's baked classic pool held 0.0024 NEAR ($0.008) and its candles spiked to ~300x
+  // the price, a "-99.91% (24h)" made by one dust trade; its real market is its order-book pool (about 100 NEAR deep).
+  // So the order-book pool is read first, as for a token off the curated list; the classic one only when there is none.
+  if (cur && id !== WNEAR && !pools.some((p) => p.base.i === WNEAR || p.quote.i === WNEAR)) {
+    try {
+      const d2 = await dclMarket(id, decimals);
+      if (d2) {
+        pools.unshift({ pair: symbol + ' / wNEAR', base: { i: id, s: symbol }, quote: { i: WNEAR, s: 'wNEAR' }, dex: 'ref-dcl',
+          liqUsd: nearUsd ? d2.liq * nearUsd : 0, volUsd: 0, liq: d2.liq, vol: null, id: d2.id, url: '' });
+        if (logos[id] === undefined) logos[id] = logo;
+      }
+    } catch (e) {}
+  }
+  if (cur && id !== WNEAR && !pools.some((p) => p.base.i === WNEAR || p.quote.i === WNEAR)) {
+    try {
+      const r = await context.env.ASSETS.fetch(new URL('/assets/tokenpools/' + encodeURIComponent(id) + '.json', context.request.url));
+      const list = r.ok ? await r.json() : [];
+      const best = (Array.isArray(list) ? list : []).filter((b) => b && Array.isArray(b[2]) && b[2].length === 2 && b[2].some((t) => t[0] === WNEAR))
+        .sort((a, b) => (+b[1] || 0) - (+a[1] || 0))[0];
+      if (best) {
+        pools.push({ pair: symbol + ' / wNEAR', base: { i: id, s: symbol }, quote: { i: WNEAR, s: 'wNEAR' }, dex: 'ref',
+          liqUsd: nearUsd && best[1] > 0 ? best[1] * nearUsd : 0, volUsd: 0, liq: +best[1] || null, vol: 0,
+          id: 'refv1-' + String(best[0]), url: '' });
+        if (logos[id] === undefined) logos[id] = logo;
+      }
+    } catch (e) {}
   }
   for (const k of Object.keys(logos)) if (!logos[k]) delete logos[k];
 

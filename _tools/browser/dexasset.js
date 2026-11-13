@@ -3167,6 +3167,7 @@
       var r = seq[i];
       var row = el('div', 'dxa-ob-row mdxa-ob-row ' + side);
       row.setAttribute('data-logoed', '1');
+      row.__lxPx = r.px;
       row.appendChild(el('span', 'px', xrpPx(r.px)));
       row.appendChild(el('span', 'am', amount(r.amt)));
       row.appendChild(el('span', 'sm', amount(r.sum)));
@@ -3176,6 +3177,48 @@
       node.appendChild(row);
     }
     if (side === 'ask') pinAsks(node);
+  }
+  // MY OPEN ORDERS ON THE BOOK (RAZA 2026-11-13: "Indicate where my open order is ... a small yellow triangle"). Read from
+  // the order book contract itself, the source the Orders tab and the wallet's Open orders use (neardcl activeOrders),
+  // kept to this token's pool, each priced at its own point and marked on the level nearest it -- only when that level
+  // is within one level's step, so an order far outside the rows shown marks nothing. No wallet, a failed read, no
+  // order: no mark.
+  var MINE_OB = { who: '', at: 0, list: null };
+  function markMine(asset, d) {
+    var who = myAcct(), Dl = window.lxnDcl, dec = d && d.decimals != null ? +d.decimals : null;
+    var clear = function () { $$('.lx-obmine').forEach(function (n) { if (n.parentNode) n.parentNode.removeChild(n); }); };
+    if (!who || !Dl || dec == null) { clear(); return; }
+    var fresh = MINE_OB.who === who && MINE_OB.list && Date.now() - MINE_OB.at < 25000;
+    Promise.all([Dl.poolFor(asset.id), fresh ? MINE_OB.list : Dl.activeOrders(who)]).then(function (r) {
+      var pool = r[0], list = r[1] || [];
+      MINE_OB = { who: who, at: fresh ? MINE_OB.at : Date.now(), list: list };
+      clear();
+      if (!pool || myAcct() !== who) return;
+      list.forEach(function (o) {
+        if (!o || o.pool_id !== pool.id || !(+o.remain_amount > 0)) return;
+        var px = 0;
+        try { px = Dl.tokenPriceAt(pool, dec, +o.point); } catch (e) { px = 0; }
+        if (!(px > 0)) return;
+        var side = o.sell_token === asset.id ? 'ask' : 'bid';
+        var host = side === 'ask' ? ($('#dxaObAsks') || $('#mdxaObAsks')) : ($('#dxaObBids') || $('#mdxaObBids'));
+        if (!host) return;
+        var rows = [].filter.call(host.children, function (n) { return n.__lxPx > 0; });
+        if (!rows.length) return;
+        var best = null, bd = Infinity;
+        rows.forEach(function (n) { var dd = Math.abs(Math.log(n.__lxPx / px)); if (dd < bd) { bd = dd; best = n; } });
+        var steps = [];
+        for (var i = 1; i < rows.length; i++) steps.push(Math.abs(Math.log(rows[i].__lxPx / rows[i - 1].__lxPx)));
+        var step = steps.length ? Math.max.apply(null, steps) : 0.02;
+        if (!best || bd > step || best.querySelector('.lx-obmine')) return;
+        var m = el('span', 'lx-obmine');
+        m.title = 'Your open order';
+        m.setAttribute('data-logoed', '1');
+        m.style.cssText = 'position:absolute;left:1px;top:50%;margin-top:-4px;width:0;height:0;border-top:4px solid transparent;'
+          + 'border-bottom:4px solid transparent;border-left:6px solid #f5c542;pointer-events:none;z-index:2';
+        if (getComputedStyle(best).position === 'static') best.style.position = 'relative';
+        best.appendChild(m);
+      });
+    }, function () { clear(); });
   }
   var BOOKT = null;
   function loadBook(asset, d) {
@@ -3192,6 +3235,7 @@
         paintBook($('#dxaObAsks') || $('#mdxaObAsks'), b.asks, 'ask');
         paintBook($('#dxaObBids') || $('#mdxaObBids'), b.bids, 'bid');
         paintBookHead(asset, b);
+        markMine(asset, window.__lxnAssetData || d);
         try { window.dispatchEvent(new CustomEvent('lxn:book')); } catch (e) {}
       });
     };

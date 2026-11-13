@@ -6,8 +6,9 @@
 // drift the moment a wallet is added or renamed, and the two builds would then offer different
 // wallets for the same chain — so neither file owns it.
 //
-// Five wallets, as RAZA approved: HOT, Meteor and NEAR Mobile under Popular; MyNearWallet and Intear
-// under All wallets. Logos are self-hosted under /assets/wallets/near/ (each wallet's manifest icon).
+// Four wallets: HOT, Meteor and NEAR Mobile under Popular; Intear under All wallets. MyNearWallet was
+// removed (RAZA 2026-11-13: "Remove mynear wallet from near network"); MNW_OLD is its entry as it was written,
+// so _nearconnect.js can take it out of containers that already carry the table. Logos are self-hosted under /assets/wallets/near/ (each wallet's manifest icon).
 // The ids here are the design's data-wallet values; browser/nearconnect.js maps them to NEAR Connect
 // wallet ids in its own IDS table, so a change here needs a matching entry there.
 
@@ -27,12 +28,14 @@ const NEAR_ENTRY = "near:{ label:'NEAR', chip:'NEAR', addr:'', sub:'" + SUB + "'
   + W('MeteorWallet', 'Meteor Wallet', 'Extension & web', 'meteor-wallet.svg') + ','
   + W('NEARMobile', 'NEAR Mobile', 'Mobile app', 'near-mobile.webp')
   + "]},{section:'All wallets', wallets:["
-  + W('MyNearWallet', 'MyNearWallet', 'Web wallet · No install', 'mynearwallet.png') + ','
   + W('IntearWallet', 'Intear Wallet', 'Web wallet', 'intear-wallet.svg')
   + "]}]},";
 
+const MNW_OLD = W('MyNearWallet', 'MyNearWallet', 'Web wallet · No install', 'mynearwallet.png') + ',';
+
 module.exports = {
   SUB,
+  MNW_OLD,
   NEAR_ENTRY,
   NEAR_MARK: "near:{ label:'NEAR'",
   NETS_ANCHOR: 'var NETS={',

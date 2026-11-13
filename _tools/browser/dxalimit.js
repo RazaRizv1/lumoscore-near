@@ -357,6 +357,16 @@
     recalc(p);
   }
 
+  // The gas an order's transactions set aside before they run: their attached gas at NEAR's floor price (10^8 yocto a unit),
+  // three times over for the price the protocol may charge ahead, refunded unused. 3 x (30 + 20 + 180) TGas = 0.069 NEAR for
+  // a first buy, against the 0.2 a NEAR swap keeps (nearswap.js SWAP_KEEP).
+  var LIM_GAS_PRICE = '100000000', LIM_GAS_HOLD = 3, LIM_GAS_TYPICAL = 230;
+  function limitGasKeep(txs) {
+    var tg = 0;
+    (txs || []).forEach(function (t) { (t.actions || []).forEach(function (x) { tg += Number(String((x.params && x.params.gas) || '0').slice(0, -12) || 0); }); });
+    if (!(tg > 0)) tg = LIM_GAS_TYPICAL;
+    return BigInt(Math.ceil(tg * LIM_GAS_HOLD)) * D().big(LIM_GAS_PRICE) * BigInt(1000000000000);
+  }
   function fillMax(p) {
     var f = fields(p), ai = input(f[1]), a = asset();
     if (!ai || !a) return;
@@ -371,7 +381,7 @@
       if (acct.bal[a.id] != null && dec != null) out = trunc6(D().fromUnits(acct.bal[a.id], dec));
     }
     else if (price > 0 && acct.bal.near != null && SW()) {
-      // Leave room for the DCL storage a first order adds.
+      // Leave room for HOT's 0.2 NEAR floor (SWAP_KEEP; see place()) and the DCL storage a first order adds.
       var room = D().big(SW().swapRoom('near', acct.bal.near));
       if (acct.reg === false) room -= D().big('500000000000000000000000');
       var amt = room > BigInt(0) ? D().toNum(room.toString(), 24) / price : 0;
@@ -497,14 +507,30 @@
     function stop(text) { busy = false; if (b) { b.textContent = label; b.classList.remove('lx-btnload'); } setCta(p); if (text) say(p, text); }
     Promise.all([D().prereqs(who, o), SW().balance(who, 'near'), o.sell === D().WNEAR ? null : SW().balance(who, o.sell)]).then(function (r) {
       var pre = r[0], nearBal = D().big(r[1]);
-      var keep = D().big(SW().SWAP_KEEP);                            // 0.2 NEAR for gas, as a swap keeps
+      var txs = D().buildPlace(who, o, pre);
+      // WHAT THE ORDER REALLY NEEDS IN NATIVE NEAR (RAZA 2026-11-13, iOS Buy: "I have enough Near but it still won't let me
+      // place"). It held back SWAP_KEEP, 0.2: Rhea's and HOT's figure for a SWAP that spends NEAR. An order needs the gas
+      // its own transactions attach, set aside ahead and refunded unused: limitGasKeep. Storage is the chain's answer
+      // (prereqs): 0.5 only when storage_balance_of on the order book is null, 0.1 when its room is spent, else none. And
+      // the figure is the spendable balance, which leaves out NEAR the account locks for its own storage -- a wallet can
+      // show 5 NEAR where 1.8 can move (lumoscore.near: 338 KB of contract storage) -- so the refusal names both.
+      // EXCEPT WHEN THE ORDER SPENDS NEAR: HOT refuses those itself with "Must have 0.2N or more left in wallet for gas
+      // fee" (its words, recorded 2026-11-03), so a Buy keeps SWAP_KEEP exactly as a swap does. The smaller hold is for
+      // a token sale, where NEAR only pays gas.
+      var keep = o.sell === D().WNEAR ? D().big(SW().SWAP_KEEP) : limitGasKeep(txs);
       // What leaves the wallet is the order itself (neardcl plan().spendRaw; limit orders carry no fee).
       var needNear = D().big(pre.storage) + (o.sell === D().WNEAR ? D().big(o.spendRaw) : BigInt(0));
-      // JUST THE VERDICT (RAZA 2026-11-05, replacing 2026-11-04's sentence with the figures): inline above the button,
-      // "Not enough NEAR" / "Not enough <TOKEN>", the same words as Stellar. The Avail line beside it has the figure.
+      // JUST THE VERDICT (RAZA 2026-11-05) for the token; for NEAR the parts, because "enough" is not visible from the Avail line.
       if (o.sell !== D().WNEAR && D().big(o.spendRaw) > D().big(r[2])) throw new Error('Not enough ' + code());
-      if (needNear + keep > nearBal) throw new Error('Not enough NEAR');
-      var txs = D().buildPlace(who, o, pre);
+      if (needNear + keep > nearBal) {
+        var parts = [];
+        if (pre.dcl === 'register') parts.push(fmt(D().toNum(pre.dclDeposit, 24), 4) + ' first-time order-book storage');
+        else if (pre.dcl === 'topup') parts.push(fmt(D().toNum(pre.dclDeposit, 24), 4) + ' order-book storage top-up');
+        if (o.sell === D().WNEAR) parts.push(fmt(D().toNum(o.spendRaw, 24), 6) + ' for the order');
+        parts.push(fmt(D().toNum(keep.toString(), 24), 4) + ' for gas');
+        throw new Error('Not enough NEAR: this order needs ' + fmt(D().toNum((needNear + keep).toString(), 24), 4) + ' native NEAR ('
+          + parts.join(', ') + '), and ' + fmt(D().toNum(String(r[1]), 24), 4) + ' NEAR can be spent from this account.');
+      }
       window.__lxnLastLimit = { plan: o, pre: pre, txs: txs };
       if (b) b.textContent = 'Confirm in wallet…';
       return D().sign(txs);

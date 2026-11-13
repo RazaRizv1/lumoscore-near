@@ -14,7 +14,7 @@
 // library's own wallet picker — the design's list already is the picker.
 //
 // THE WALLET LIST IS PINNED, not fetched: /assets/vendor/near-wallets-manifest.json carries exactly the
-// five wallets RAZA approved (HOT, Meteor, NEAR Mobile, MyNearWallet, Intear), so a wallet added to the
+// four wallets RAZA approved (HOT, Meteor, NEAR Mobile, Intear; MyNearWallet removed 2026-11-13), so a wallet added to the
 // public registry cannot appear here unannounced. Each wallet's own code still loads from where that
 // wallet publishes it, inside a sandboxed iframe — that is how NEAR Connect works, and it is what lets a
 // wallet update without a LumosCore release.
@@ -91,7 +91,7 @@
   // The design row's data-wallet, normalised, -> NEAR Connect's wallet id.
   var IDS = {
     hotwallet: 'hot-wallet', meteorwallet: 'meteor-wallet', nearmobile: 'near-mobile',
-    mynearwallet: 'mynearwallet', intearwallet: 'intear-wallet'
+    intearwallet: 'intear-wallet'
   };
   function norm(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
 

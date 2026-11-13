@@ -389,7 +389,7 @@
   }
 
   // One picker body, used by both panes: a type-to-filter box over a list we already hold.
-  function filterInto(m, heading, placeholder, list, rightOf, onPick) {
+  function filterInto(m, heading, placeholder, list, rightOf, onPick, rest) {
     tickCss();
     if (heading) menuHead(m, heading);
     var inp = document.createElement('input');
@@ -402,7 +402,7 @@
     function draw() {
       var q = (inp.value || '').trim().toLowerCase();
       res.innerHTML = '';
-      var rows = !q ? list : list.filter(function (a) {
+      var rows = !q ? (rest || list) : list.filter(function (a) {
         return ((a.code || '').toLowerCase().indexOf(q) >= 0) || ((a.id || '').toLowerCase().indexOf(q) >= 0);
       });
       if (!rows.length) { menuHead(res, 'No matches'); return; }
@@ -422,6 +422,17 @@
   // contract, which is what this box actually matches on.
   // RAZA 2026-11-12: no heading over the box, and Stellar's placeholder in NEAR's words ("Search any Stellar asset...").
   var ANY_HEAD = '', ANY_PH = 'Search any NEAR asset...';
+  // THE BUY SIDE AT REST IS A SHORTLIST, AS STELLAR'S (RAZA 2026-11-13, ticket 387: every asset was listed). Stellar's
+  // _swapcalc.js qPick shows the search box over the native asset and five it names (USDC, EURC, SHX, AQUA, LUMOS) --
+  // not the wallet's holdings -- and finds everything else by typing. NEAR's five: the two dollars, LUMOS, then the
+  // curated list's leaders in its own order. Typing still searches the whole list.
+  var BUY_FIRST = ['near', '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1', 'usdt.tether-token.near', 'lumos.lumoscore.near'];
+  function buyShort(list) {
+    var out = [];
+    BUY_FIRST.forEach(function (id) { var a = list.filter(function (x) { return x.id === id; })[0]; if (a) out.push(a); });
+    for (var i = 0; i < list.length && out.length < 6; i++) if (out.indexOf(list[i]) < 0 && list[i].id !== 'wrap.near') out.push(list[i]);
+    return out;
+  }
   function balRight(a) {
     var r = rawBal(a);
     return r == null ? '—' : show(r, a.dec, 6);
@@ -930,7 +941,7 @@
             listInto(m, mine, balRight, pick);
           } else {
             if (!list.length) { menuHead(m, 'The token list could not be loaded'); return; }
-            filterInto(m, ANY_HEAD, ANY_PH, list, null, pick);
+            filterInto(m, ANY_HEAD, ANY_PH, list, null, pick, buyShort(list));
           }
         });
         return;
@@ -1192,12 +1203,19 @@
       lim.regFor = regKey; lim.reg = undefined;
       D().storageOf(D().DCL, addr()).then(function (v) { if (lim.regFor === regKey) { lim.reg = v || false; limitSync(); } }, function () {});
     }
-    var needR = S().big(S().SWAP_KEEP), parts = [];
-    if (lim.reg === false) {
-      needR += S().big('500000000000000000000000');
-      parts.push('0.5 first-time order-book storage');
+    // THE FIRST-ORDER STORAGE IS THE CONTRACT'S OWN MINIMUM (RAZA 2026-11-13, ticket 384: "Needs 0.7 native NEAR: 0.5 ..."),
+    // read from storage_balance_bounds and asked only of an account the order book has never registered. Until it has
+    // answered no figure is claimed: the press reads both again before anything is signed.
+    if (lim.reg === false && lim.regMin === undefined) {
+      lim.regMin = null;
+      D().storageMin(D().DCL).then(function (m) { lim.regMin = String(m); limitSync(); }, function () { lim.regMin = undefined; });
+    }
+    var parts = [], needR = BigInt(0), tg = 180;                    // TGas: the order's ft_transfer_call (neardcl GAS_ORDER)
+    if (lim.reg === false && lim.regMin) {
+      needR += S().big(lim.regMin); tg += 30;
+      parts.push(show(lim.regMin, 24, 4) + ' first-time order-book storage');
     } else if (lim.reg && S().big(lim.reg.available) < S().big(D().ORDER_STORAGE)) {
-      needR += S().big(D().STORAGE_TOPUP);
+      needR += S().big(D().STORAGE_TOPUP); tg += 30;
       parts.push(show(D().STORAGE_TOPUP, 24, 4) + ' order-book storage top-up');
     }
     if (open) {
@@ -1208,7 +1226,13 @@
       needR += S().big(ord.spendRaw);
       parts.push(show(ord.spendRaw, 24, 4) + ' for the order');
     }
-    parts.push('0.2 kept for gas');
+    if (open) tg += 240;                                            // create_pool 180 + the two token registrations
+    // THE GAS KEPT BACK IS THE SWAP'S RULE (nearswap.js build): an order that spends NEAR keeps SWAP_KEEP, which is what
+    // HOT refuses to sign below; one that sells a token keeps three times the gas its transactions attach, at NEAR's
+    // floor price, refunded unused. Same figure here and at the press, so the two cannot disagree.
+    var keep = limKeep(ord, tg);
+    needR += S().big(keep);
+    parts.push(show(keep, 24, 4) + ' kept for gas');
     if (H.bal.near != null && needR > S().big(H.bal.near)) {
       limSay('Needs ' + show(needR.toString(), 24, 4) + ' native NEAR: ' + parts.join(', ') + '. You have ' + show(H.bal.near, 24, 4) + ' NEAR.');
       limGo(false, 'Place limit order');
@@ -1225,6 +1249,9 @@
     limGo(true, 'Place limit order');
   }
 
+  function limKeep(ord, tgas) {
+    return (ord && ord.sell === D().WNEAR) || !S().gasKeep ? S().SWAP_KEEP : S().gasKeep(tgas);
+  }
   function placeLimit() {
     if (lim.busy) return;
     var pr = limPair(), who = addr();
@@ -1259,13 +1286,16 @@
       return D().prereqs(who, ord);
     }).then(function (pre) {
       return Promise.all([S().balance(who, 'near'), open ? D().buildCreate(who, open) : []]).then(function (got) {
-        var haveRaw = got[0], made = got[1], have = S().big(haveRaw), need = S().big(pre.storage) + S().big(S().SWAP_KEEP);
+        var haveRaw = got[0], made = got[1], have = S().big(haveRaw), need = S().big(pre.storage);
         if (ord.sell === D().WNEAR) need += S().big(ord.spendRaw);
         made.forEach(function (t) { t.actions.forEach(function (x) { need += S().big(x.params.deposit); }); });
-        if (need > have) throw new Error('Needs ' + show(need.toString(), 24, 4) + ' native NEAR, 0.2 kept for gas included. You have ' + show(String(haveRaw), 24, 4) + ' NEAR.');
         // Each transaction has one receiver, so opening and ordering are several, in this order, signed as one batch: the
         // wallet's single approval (neardcl.js sign). A wallet that sends them apart still sends the pool first.
-        var txs = made.concat(D().buildPlace(who, ord, pre));
+        var txs = made.concat(D().buildPlace(who, ord, pre)), tg = 0;
+        txs.forEach(function (t) { t.actions.forEach(function (x) { tg += Number(String(x.params.gas || '0').slice(0, -12) || 0); }); });
+        var keep = limKeep(ord, tg);
+        need += S().big(keep);
+        if (need > have) throw new Error('Needs ' + show(need.toString(), 24, 4) + ' native NEAR, ' + show(keep, 24, 4) + ' kept for gas included. You have ' + show(String(haveRaw), 24, 4) + ' NEAR.');
         limGo(false, 'Confirm in wallet…');
         window.__lxnLastLimit = { order: ord, txs: txs };
         return D().sign(txs);

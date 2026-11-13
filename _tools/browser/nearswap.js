@@ -707,6 +707,12 @@
     });
   }
 
+  // The NEAR a token-spending write keeps back for its gas, from the TGas its transactions attach: the rule build()
+  // applies to a token sale, published so the Limit pane holds back the same (RAZA 2026-11-13, ticket 384).
+  function gasKeep(tgas) {
+    return (BigInt(Math.ceil((+tgas || 0) * GAS_HOLD)) * big(GAS_PRICE_FLOOR) * BigInt(1000000000000)).toString();
+  }
+
   // Sign through NEAR Connect. One transaction -> signAndSendTransaction; registration + swap ->
   // signAndSendTransactions (all five pinned launch wallets list it in their manifest features).
   var LASTSIGN = null, LASTBUILT = null;
@@ -840,7 +846,7 @@
 
   window.lxnSwap = {
     get FEE_BPS() { return feeBps(); }, get ROUTED() { return !!router(); }, SLIP_BPS: SLIP_BPS, REF: REF, WNEAR: WNEAR, USDC: USDC, NET_FEE_EST: NET_FEE_EST,
-    feeAccount: feeAccount, feeReady: feeReady, feeOf: feeOf, minOut: minOut, swapRoom: swapRoom, SWAP_KEEP: SWAP_KEEP,
+    feeAccount: feeAccount, feeReady: feeReady, feeOf: feeOf, minOut: minOut, swapRoom: swapRoom, SWAP_KEEP: SWAP_KEEP, gasKeep: gasKeep,
     toUnits: toUnits, fromUnits: fromUnits, toNum: toNum, big: big,
     tokenInfo: tokenInfo, remember: remember, meta: function (id) { return META[id] || null; },
     pools: pools, quote: quote, along: along, balance: balance, maxSpend: maxSpend,
