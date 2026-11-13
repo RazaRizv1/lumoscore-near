@@ -90,9 +90,15 @@
     if (n == null || !isFinite(n)) return '—';
     return commas(trunc(n.toFixed(Math.min(20, dp == null ? 6 : dp)), dp == null ? 6 : dp));
   }
+  // A named account keeps its whole first label (up to 14), the part that tells two launches apart: loadstone…near and
+  // loadstone-2…near, not both 'loadstone…ade.near' (RAZA 2026-11-13, as the header search). A hex id keeps the old cut.
   function shortId(a) {
     a = String(a || '');
-    return a.length > 20 ? a.slice(0, 9) + '…' + a.slice(-8) : a;
+    if (a.length <= 20) return a;
+    var d = a.indexOf('.');
+    if (d < 0) return a.slice(0, 9) + '…' + a.slice(-8);
+    var head = a.slice(0, d);
+    return (head.length > 14 ? head.slice(0, 13) : head) + '…' + a.slice(a.lastIndexOf('.') + 1);
   }
 
   function asset(id, code, dec, logo) { return { id: id, code: code, dec: +dec, logo: logo || '' }; }
@@ -237,10 +243,9 @@
   }
 
   // ---- the curated roster (the receive side's universe) ----------------------------------------------
-  // NEAR HAS NO LEDGER-WIDE TOKEN SEARCH, so there is no searchInto() here as there is on XRPL. The
-  // platform's curated list IS the universe for a NEAR swap (/lxapi/nearmarket, the Trade roster, shared
-  // through the promise prices.js publishes), and it is filtered locally — which is the same box to type
-  // into, answering from a list instead of an index.
+  // The platform's curated list is what the menus list at rest (/lxapi/nearmarket, the Trade roster, shared through the
+  // promise prices.js publishes). Typing also asks NEAR's token index, /lxapi/neartokensearch, for the rest: see wide()
+  // in filterInto (RAZA 2026-11-13, ticket 406).
   function curatedList() {
     var p = window.__lxnMarketP;
     if (!p) {
@@ -399,14 +404,51 @@
     m.appendChild(inp);
     var res = document.createElement('div');
     m.appendChild(res);
+    var seq = 0;
     function draw() {
       var q = (inp.value || '').trim().toLowerCase();
       res.innerHTML = '';
       var rows = !q ? (rest || list) : list.filter(function (a) {
         return ((a.code || '').toLowerCase().indexOf(q) >= 0) || ((a.id || '').toLowerCase().indexOf(q) >= 0);
       });
-      if (!rows.length) { menuHead(res, 'No matches'); return; }
+      if (!rows.length) menuHead(res, 'No matches');
       rows.forEach(function (a) { res.appendChild(menuRow(a, rightOf ? rightOf(a) : '', onPick)); });
+      wide(q);
+    }
+    // ANY NEAR TOKEN ONCE YOU TYPE, AS STELLAR'S "SEARCH ANY ASSET" (RAZA 2026-11-13, ticket 406: the list at rest is the
+    // shortlist, and typing must reach past the curated list). NEAR's token index (/lxapi/neartokensearch, the header
+    // search's source) answers from two letters; what it finds that the list does not hold follows under its own heading,
+    // with no curated tick. A token's decimals are read from its contract when it is picked, never assumed.
+    function wide(q) {
+      var my = ++seq;
+      if (q.length < 2) return;
+      setTimeout(function () {
+        if (my !== seq || !m.parentNode) return;
+        fetch('/lxapi/neartokensearch?q=' + encodeURIComponent(q)).then(function (r) { return r.json(); }).then(function (j) {
+          if (my !== seq || !m.parentNode || !j || !j.ok || !Array.isArray(j.rows)) return;
+          var have = {};
+          list.forEach(function (a) { have[a.id] = 1; });
+          var C = window.lxnCore;
+          var add = j.rows.filter(function (r) { return r && r.i && !have[r.i] && (!C || !C.isAccountId || C.isAccountId(r.i)); }).slice(0, 8);
+          if (!add.length) return;
+          var only = res.children.length === 1 && res.firstChild.className === 'h';
+          if (only) res.innerHTML = '';
+          menuHead(res, 'More on NEAR');
+          add.forEach(function (r) {
+            var code = (C && C.cleanSym ? C.cleanSym(r.n) : String(r.n || '')) || shortId(r.i);
+            var a0 = asset(r.i, code, null, '');
+            res.appendChild(menuRow(a0, '', function () {
+              if (!C || !C.tokenMeta) return;
+              C.tokenMeta(r.i).then(function (mt) {
+                if (!mt || mt.d == null) { toast('Could not read ' + code + '’s contract just now. Try again in a moment.', true); return; }
+                var a = asset(r.i, (C.cleanSym ? C.cleanSym(mt.s) : mt.s) || code, mt.d, mt.ic || '');
+                try { S().remember(a.id, a.code, a.dec, a.logo); } catch (e) {}
+                onPick(a);
+              }, function () { toast('Could not read ' + code + '’s contract just now. Try again in a moment.', true); });
+            }));
+          });
+        }).catch(function () {});
+      }, 250);
     }
     inp.addEventListener('input', draw);
     draw();
