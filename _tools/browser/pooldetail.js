@@ -294,11 +294,20 @@
     var plist = $('#partList');
     if (plist) { plist.style.contain = 'size'; plist.style.minHeight = '320px'; }
     participants('Reading the liquidity providers…');
-    fetch('/lxapi/nearlps?pool=' + encodeURIComponent(id)).then(function (r) { return r.json(); }).then(function (d) {
+    readLps(0);
+  }
+  // A POOL MADE A MOMENT AGO (RAZA 2026-11-13, LUMOS/ZEC 9017 straight after creating it): its deposit reaches the indexer
+  // seconds later, so an empty list over a pool that has shares is asked again, four times 15s apart, before the page
+  // says none could be listed. Until then it still says it is reading.
+  function readLps(at) {
+    var id = window.__lxnPool && window.__lxnPool.id;
+    if (id == null) return;
+    fetch('/lxapi/nearlps?pool=' + encodeURIComponent(id) + (at ? '&r=' + at : '')).then(function (r) { return r.json(); }).then(function (d) {
       if (!d || !d.ok) { emptyParticipants('Could not read the liquidity providers — try again shortly.'); return; }
       PART.rows = d.providers || [];
       PART.at = d.at || 0;
       var counted0 = window.__lxnPoolRow && +window.__lxnPoolRow.lps;
+      if (!PART.rows.length && d.total && d.total !== '0' && at < 4) { setTimeout(function () { readLps(at + 1); }, 15000); return; }
       if (!PART.rows.length) {
         emptyParticipants(counted0 > 0 ? (counted0.toLocaleString('en-US') + (counted0 === 1 ? ' provider is' : ' providers are')
           + ' counted, but none could be listed and read just now.') : 'No liquidity providers found.');
@@ -974,6 +983,8 @@
         });
         TXI.failed = false;
         mergeTx();
+        // Same for its transactions: a deposit made a moment ago reaches the index seconds later.
+        if (!TXI.rows.length && (TXI.tries = (TXI.tries || 0) + 1) <= 4) setTimeout(loadIdx, 15000);
       });
     }).catch(function () { TXI.failed = true; mergeTx(); });
   }

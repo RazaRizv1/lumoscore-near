@@ -720,16 +720,25 @@
     LASTSIGN = { me: b && b.txs && b.txs[0] && b.txs[0].signerId, b: b };
     LASTBUILT = b;
     if (!window.lxn || typeof window.lxn.wallet !== 'function') return Promise.reject(new Error('Connect a NEAR wallet first.'));
+    // A SIGNED SWAP TELLS THE PAGE (RAZA 2026-11-13: "i just did a swap ... Why its not showing in recent activity"): the
+    // account's cached activity (nearcore activityData, kept 60s) is dropped and 'lxn:signed' fires, so lists that show
+    // the account's own trades read them again instead of waiting out a cache.
+    var signer = LASTSIGN.me || '';
+    function landed(r) {
+      try { if (signer) sessionStorage.removeItem('lxn.act.' + signer); } catch (e) {}
+      try { window.dispatchEvent(new CustomEvent('lxn:signed', { detail: { me: signer } })); } catch (e) {}
+      return r;
+    }
     return window.lxn.wallet().then(function (w) {
       if (!w) throw new Error('No NEAR wallet is connected.');
       if (b.txs.length === 1) {
         if (typeof w.signAndSendTransaction !== 'function') throw new Error('This wallet cannot sign transactions here.');
-        return w.signAndSendTransaction(b.txs[0]).then(function (r) { return [r]; });
+        return w.signAndSendTransaction(b.txs[0]).then(function (r) { return landed([r]); });
       }
       if (typeof w.signAndSendTransactions !== 'function') throw new Error('This wallet cannot sign several transactions at once.');
       return w.signAndSendTransactions({ signerId: b.txs[0].signerId, transactions: b.txs.map(function (t) {
         return { receiverId: t.receiverId, actions: t.actions };
-      }) });
+      }) }).then(landed);
     });
   }
 

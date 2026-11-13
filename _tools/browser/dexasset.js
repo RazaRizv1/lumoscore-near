@@ -1544,7 +1544,7 @@
     // token charted from CoinGecko -- USDC among them -- had no bars at all, on any range. CoinGecko stays
     // as the fallback when the pool series cannot be had (the chart then draws without bars).
     if (d.cg && gtPool(d)) {
-      var gt = function () { return gtSeries(d, R, vs, label).then(function (pts) { if (pts.length < 2) throw new Error('short'); return pts; }); };
+      var gt = function () { return gtSeries(d, R, vs, label).then(function (pts) { pts = toNow(pts); if (pts.length < 2) throw new Error('short'); return pts; }); };
       // A refused GeckoTerminal call is usually its per-minute allowance: one retry after a pause, before
       // settling for CoinGecko's line, which has no volume bars.
       return gt().catch(function () { return new Promise(function (res) { setTimeout(res, 2500); }).then(gt); })
@@ -1576,7 +1576,18 @@
         return gtSeries(d, R, vs, label).then(function (pts) { if (pts.length < 2) throw new Error('short'); return pts; });
       });
     }
-    return gtSeries(d, R, vs, label).then(function (pts) { if (pts.length < 2) throw new Error('short'); return pts; });
+    return gtSeries(d, R, vs, label).then(function (pts) { pts = toNow(pts); if (pts.length < 2) throw new Error('short'); return pts; });
+  }
+  // ONE CANDLE IS A PRICE, NOT 'NO HISTORY' (RAZA 2026-11-13, LUMOS: 'why isnt the chart updating ... its been so many days').
+  // LUMOS's order-book pool had traded once, on 11-05; one candle failed the two-point test and the chart stayed blank,
+  // with no note, until a second trade. A pool that has not traded since holds that price, so the candle runs flat to
+  // now, as the indexer series already does for a quiet pool.
+  function toNow(pts) {
+    if (!pts || pts.length !== 1 || !(pts[0][1] > 0)) return pts;
+    var q = pts[0].slice(); q[0] = Date.now(); q[2] = q[1]; q[3] = q[1]; q[4] = q[1]; q[5] = 0; if (q.length > 7) q[7] = 0;
+    var out = [pts[0], q];
+    for (var k in pts) if (isNaN(+k)) out[k] = pts[k];
+    return out;
   }
 
   // 1h, in NEAR terms, from the last hour of the 1D series -- whichever unit is on screen.
@@ -1955,7 +1966,8 @@
       var d2 = window.__lxnAssetData;
       if (!d2 || d2.i !== want) return;
       if (!j || !j.ok || !Array.isArray(j.rows)) throw new Error('chain trades');
-      if (TR.rows && TR.rows.length && !TR.chain) return;   // the feed answered with rows: they stand
+      TR.chainRows = j.rows;                                  // kept for mergeChain: the history before the feed's day
+      if (TR.rows && TR.rows.length && !TR.chain) { TR.at = Date.now(); syncPanel(); return; }   // the feed answered with rows: they stand
       TR.chain = true;
       if (j.rows.length || !TR.rows || !TR.rows.length) {
         TR.rows = j.rows; TR.mean = trMean(j.rows);
@@ -1973,7 +1985,10 @@
     if (!pool) { TR.none = true; TR.rows = []; syncPanel(); chainTrades(0); return; }
     TR.pool = pool;
     var at = attempt || 0;
-    if (!at && d && d.curated === false) chainTrades(0);
+    // ALWAYS, not only off the curated list (RAZA 2026-11-13, LUMOS: one trade under 'All' while the token has four).
+    // The feed sends one day; the chain's rows before that day join it (mergeChain), so a day with one trade no longer
+    // hides the history. Kept two minutes at the edge.
+    if (!at) chainTrades(0);
     if (GT_NONE[pool.id]) { idxTrades(pool, at); return; }
     // v2: the first element is { meta: 1, ts, from } for the chart readout's trade count (below).
     getJsonOnce('lumos.nearGtTr.v2.' + pool.id, 'https://api.geckoterminal.com/api/v2/networks/near/pools/'
@@ -2027,6 +2042,8 @@
     if (MINE.who !== me) MINE = { who: me, rows: null, busy: false, err: false, at: 0 };
     MINE.busy = true;
     C.activityData(me).then(function (data) {
+      // NearBlocks' stale stand-in (nearcore activityData nb): its missing swaps are not 'no trades' (RAZA 2026-11-13).
+      if (data && data.nb) { var en0 = new Error('stale'); throw en0; }
       var out = [];
       C.entriesOf(me, data).forEach(function (en) {
         if (en.kind !== 'swap' || !en.give || !en.get || en.ok === false) return;
@@ -2048,6 +2065,35 @@
       if (MINE.who !== me) return;
       MINE.busy = false; MINE.err = true; MINE.at = Date.now();
       syncPanel();
+      // asked again a few times: FastNEAR refuses bursts at page load, and answers a moment later
+      if ((MINE.tries = (MINE.tries || 0) + 1) <= 3) setTimeout(function () { if (MINE.who === me) { MINE.err = false; loadMine(); } }, 8000 * MINE.tries);
+    });
+  }
+  function mergeChain(rows) {
+    if (TR.chain || !TR.chainRows || !TR.chainRows.length || !rows.length) return rows;
+    // Matched by transaction only: the feed is ONE pool's day, the chain every pool's, so a trade through another pool
+    // (LUMOS via classic 9001 beside its order-book pool) is inside the day and still missing from the feed.
+    var seen = {};
+    rows.forEach(function (r) { if (r.hash) seen[r.hash] = 1; });
+    var add = TR.chainRows.filter(function (r) { return !(r.hash && seen[r.hash]); });
+    return add.length ? rows.concat(add).sort(function (a, b) { return b.t - a.t; }) : rows;
+  }
+  function mergeMine(rows, who) {
+    if (!who || MINE.who !== who || !MINE.rows || !MINE.rows.length) return rows;
+    var seen = {}, add = [];
+    rows.forEach(function (r) { if (r.hash) seen[r.hash] = 1; });
+    MINE.rows.forEach(function (r) {
+      if (r.hash ? seen[r.hash] : rows.some(function (x) { return x.addr === r.addr && Math.abs(x.t - r.t) < 120000 && Math.abs(x.amt - r.amt) < 1e-9; })) return;
+      add.push(r);
+    });
+    if (!add.length) return rows;
+    return rows.concat(add).sort(function (a, b) { return b.t - a.t; });
+  }
+  if (!window.__lxnSignedTrades) {
+    window.__lxnSignedTrades = 1;
+    window.addEventListener('lxn:signed', function () {
+      // The activity index needs a few seconds to list the new transaction: asked again shortly, then once more.
+      [4000, 15000].forEach(function (ms) { setTimeout(function () { MINE.err = false; MINE.busy = false; loadMine(); }, ms); });
     });
   }
   function pxTxt(r) { return r.px != null ? (xrp(r.px) + ' NEAR') : '—'; }
@@ -2099,13 +2145,18 @@
     // his QTC swap never showed). The feed is ONE pool's trades, and a swap routed through another pool -- his
     // went through a different QTC pool -- was never in it. loadMine() reads his own activity instead.
     if (TR.mine && me && (MINE.who !== me || !MINE.rows)) loadMine();
-    var src = TR.mine ? ((me && MINE.who === me && MINE.rows) || []) : TR.rows;
+    // YOUR OWN TRADE IN "ALL" AT ONCE (RAZA 2026-11-13: a 0.1 NEAR -> LUMOS swap missing from Recent Exchanges while My
+    // Trades had it). The chain list is kept two minutes at the edge and was read once at page load; the connected
+    // account's own trades (its activity, re-read when a swap is signed: lxn:signed) join it, matched by transaction.
+    var who = myAcct();
+    if (!TR.mine && who && (MINE.who !== who || (!MINE.rows && !MINE.err))) loadMine();
+    var src = TR.mine ? ((me && MINE.who === me && MINE.rows) || []) : mergeMine(mergeChain(TR.rows || []), who);
     var all = src.filter(function (r) { return (r.near == null || r.near >= TR.min) && (!TR.mine || (me && r.addr === me)); });
     var pages = Math.max(1, Math.ceil(all.length / TR_PER));
     if (TR.page > pages) TR.page = pages;
     var from = (TR.page - 1) * TR_PER, rows = all.slice(from, from + TR_PER);
     var c = (window.__lxnAssetData && window.__lxnAssetData.symbol) || '';
-    var sig = TR.at + '|' + TR.min + '|' + TR.page + '|' + rows.length + '|' + (phone ? 1 : 0) + '|' + (TR.mine ? 'm' + me + MINE.at : '');
+    var sig = TR.at + '|' + TR.min + '|' + TR.page + '|' + rows.length + '|' + (phone ? 1 : 0) + '|' + (TR.mine ? 'm' + me : '') + '|' + MINE.at;   // MINE.at always: your own rows join All too
     if (tb.__lxnSig === sig && tb.querySelector('[data-lxda]')) return;
     tb.__lxnSig = sig;
     var span = TR.rows.length ? ago(TR.rows[TR.rows.length - 1].t) : '';
@@ -2272,6 +2323,19 @@
 
   // Filter chips, the exchanges pager and the holders pager. Window capture, as on Stellar: the design's own
   // handlers repaint their mock rows on these clicks otherwise.
+  // THE EXCHANGES TAB LEAVES MY TRADES (RAZA 2026-11-13: "once i open My trades, then when i click on exchanges ... it
+  // just stays stuck on my trades"). My Trades was a filter only its own link could undo; a click on the Exchanges tab
+  // now shows everyone's trades again. EXAUTO marks the tab click My Trades makes itself, which must not undo it.
+  var EXAUTO = false;
+  if (!window.__lxnExTab) {
+    window.__lxnExTab = 1;
+    window.addEventListener('click', function (e) {
+      var tab = e.target && e.target.closest ? e.target.closest('.tabs-bar .tab') : null;
+      if (!tab || EXAUTO || !TR.mine || !/exchanges/i.test(tab.textContent || '')) return;
+      TR.mine = false; TR.page = 1;
+      setTimeout(syncPanel, 0);
+    }, true);
+  }
   if (!window.__lxnPanelClicks) {
     window.__lxnPanelClicks = 1;
     window.addEventListener('click', function (e) {
@@ -2300,7 +2364,7 @@
         myTradesBtn();
         // A filter on the Exchanges panel: take the reader there (the design owns the tab switch).
         var ex = [].filter.call(document.querySelectorAll('.tabs-bar .tab'), function (x) { return /exchanges/i.test(x.textContent || ''); })[0];
-        if (TR.mine && ex && !ex.classList.contains('active')) { try { ex.click(); } catch (er) {} }
+        if (TR.mine && ex && !ex.classList.contains('active')) { EXAUTO = true; try { ex.click(); } catch (er) {} EXAUTO = false; }
       } else if (chip) {
         [].forEach.call(chip.parentNode.querySelectorAll('.chip'), function (o) { o.classList.toggle('active', o === chip); });
         TR.min = parseFloat(chip.getAttribute('data-min-xlm')) || 0; TR.page = 1;

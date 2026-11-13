@@ -18,7 +18,7 @@
 // What this cannot see: someone who joined after February and never staked. The page says "largest known".
 //
 // Cached at the edge 6 hours, the last good answer kept a week, a failure never cached.
-const TTL = 21600, KEEP = 604800, VER = 'v3';   // v3: the indexer's found holders (lpc) as candidates (2026-11-12)
+const TTL = 21600, KEEP = 604800, VER = 'v4';   // v4: an empty list over a pool with shares is kept a minute (2026-11-13)   // v3: the indexer's found holders (lpc) as candidates (2026-11-12)
 //   // v2: indexer candidates (2026-11-04); v1 answers cached an empty list for new pools
 const DS = 'https://api.data-service.ref.finance';
 const IDX = 'https://near-pool-indexer.usa282.workers.dev';
@@ -145,6 +145,13 @@ export async function onRequestGet(context) {
     const body = await build(id);
     const put = (req, ttl) => cache.put(req, new Response(JSON.stringify(body), {
       headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=' + ttl } }));
+    // NO PROVIDERS IN A POOL THAT HAS SHARES IS "NOT FOUND YET", NOT AN ANSWER (RAZA 2026-11-13: LUMOS/ZEC 9017, opened
+    // seconds after it was made, read "No liquidity providers found" -- and that answer was kept six hours). Someone
+    // holds those shares; the indexer had simply not recorded the deposit. Kept a minute, never as the week's fallback.
+    if (!body.providers.length && big(body.total) > 0n) {
+      context.waitUntil(put(fresh, 60));
+      return json(body, 15);
+    }
     context.waitUntil(Promise.all([put(fresh, TTL), put(kept, KEEP)]));
     return json(body, 600);
   } catch (e) {

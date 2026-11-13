@@ -247,10 +247,12 @@
     return fnActivity(me).catch(function (e) {
       if (e && e.code === 429) throw e;
       return Promise.all([nbGet(me, '/txns-only?per_page=25'), nbGet(me, '/ft-txns?per_page=25')]).then(function (r) {
-        return { t: Date.now(), txns: ((r[0] && r[0].txns) || []).map(normTx), fts: ((r[1] && r[1].txns) || []).map(normFt) };
+        // nb: NearBlocks' token history is stale (since 2026-09), so this answer's swaps may simply be missing. It is
+        // never kept (below), and a page listing trades says it could not read them rather than 'none' (dexasset loadMine).
+        return { t: Date.now(), nb: 1, txns: ((r[0] && r[0].txns) || []).map(normTx), fts: ((r[1] && r[1].txns) || []).map(normFt) };
       });
     }).then(function (d) {
-      try { sessionStorage.setItem(key, JSON.stringify(d)); } catch (e) {}
+      if (!d.nb) { try { sessionStorage.setItem(key, JSON.stringify(d)); } catch (e) {} }
       return d;
     }, function (e) {
       if (e && e.code === 429) { try { sessionStorage.setItem('lxn.act.hold', String(Date.now() + 60000)); } catch (x) {} }

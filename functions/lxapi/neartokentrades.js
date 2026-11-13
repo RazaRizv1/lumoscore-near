@@ -27,7 +27,7 @@ import { WNEAR, post, decodeNew } from './_nearfeetx.js';
 
 const RPC = 'https://free.rpc.fastnear.com';
 const REF = 'v2.ref-finance.near', DCL = 'dclv2.ref-labs.near';
-const VER = 'v3', TTL = 120, N = 50, NEWEST = 120, PER_RUN = 40;
+const VER = 'v4', TTL = 120, N = 50, NEWEST = 120, PER_RUN = 40;
 const ID_RE = /^(?=.{2,64}$)(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/;
 const CUR = {};
 for (const c of CURATED) CUR[c.i] = c;
@@ -70,7 +70,7 @@ function decoder(token) {
       } catch (e) {}
     }
     const net = {}, order = [];
-    let viaRhea = false;
+    let viaRhea = false, poolNear = 0n;
     const add = (c, amt) => { if (!(c in net)) { net[c] = 0n; order.push(c); } net[c] += amt; };
     // NEAR that wrap.near paid out for a near_withdraw counts as NEAR received (Rhea unwrapping a swap's output).
     const wd = {};
@@ -92,6 +92,16 @@ function decoder(token) {
         } else if (to === me && pre !== me && p[0] === 'Transfer' && (pre === WNEAR || wd[pre + '|' + b.deposit])) add('near', big(b.deposit));
       }
       const c = out.executor_id || to;
+      // A ROUTE'S POOL LEG (RAZA 2026-11-13: "this placeholder asset NEKO in recent activity"). 10 NEKO -> wNEAR -> LUMOS
+      // moves no wNEAR in or out of the signer, so the row read "0.11 LUMOS / 10 NEKO" with no price. The classic pool's
+      // own log names the leg that traded this token: "Swapped <a> wrap.near for <b> <token>, total fee ..". Summed
+      // here, it prices the row in NEAR as the pool traded it.
+      if (c === REF) for (const l of (out.logs || [])) {
+        const w = l.split(',')[0].split(' ');
+        if (w.length !== 6 || w[0] !== 'Swapped' || w[3] !== 'for' || !/^[0-9]+$/.test(w[1]) || !/^[0-9]+$/.test(w[4])) continue;
+        if (w[2] === WNEAR && w[5] === token) poolNear += big(w[1]);
+        else if (w[2] === token && w[5] === WNEAR) poolNear += big(w[4]);
+      }
       for (const l of (out.logs || [])) {
         if (c === WNEAR) {
           const lw = l.split(' ');
@@ -133,6 +143,7 @@ function decoder(token) {
     }
     // Nothing came back the other way: a limit order resting on DCL, or a transfer Rhea refunded, not a trade.
     if (!oth) return null;
+    if (oth.c !== 'near' && poolNear > 0n) oth = { c: 'near', raw: String(poolNear) };
     return { h, who: me, pools, ts: nsMs((T.execution_outcome && T.execution_outcome.block_timestamp) || ''), tok: String(tok), oth };
   };
 }
@@ -159,7 +170,7 @@ async function build(cache, id, pool) {
   const list = j.account_txs.filter((x) => x && x.transaction_hash)
     .map((x) => ({ h: x.transaction_hash, ok: x.is_success !== false, height: Number(x.tx_block_height) || 0 }))
     .sort((a, b) => b.height - a.height).slice(0, NEWEST);
-  const D = await decodeNew(cache, 'trades3/' + id, list.filter((x) => x.ok), decoder(id), PER_RUN), map = D.map;
+  const D = await decodeNew(cache, 'trades4/' + id, list.filter((x) => x.ok), decoder(id), PER_RUN), map = D.map;
   await D.save();
   // Only the unbroken run from the newest down: a row past the first undecoded transaction could sit in the wrong place.
   let cut = list.findIndex((x) => x.ok && !(x.h in map));
