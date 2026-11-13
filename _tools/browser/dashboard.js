@@ -254,9 +254,15 @@
       // Without the decoded transfer (the browser fallback, or a row not read yet) the sent amount stands alone.
       type = r.x ? bridgeType(r) : tok(r.give);
       var via = r.x ? r.x.via : ({ 'lx:ni': 'NEAR Intents', 'lx:om': 'Omni Bridge', 'lx:wh': 'Wormhole' })[m];
+    } else if (/^lx:lp[+-]$/.test(m) && r.lp && r.lp.length) {
+      // A POOL DEPOSIT OR WITHDRAWAL made here (RAZA 2026-11-13; /lxapi/nearact), drawn as Stellar's: the verb in the tag,
+      // then each token signed, '+' in green for a deposit, '-' for a withdrawal.
+      var dep = m === 'lx:lp+';
+      verb = dep ? 'Liquidity Added' : 'Liquidity Withdrawn'; cls = 'lp';
+      type = r.lp.map(function (x) { return '<span class="' + (dep ? 'lx-lppos' : 'lx-lpneg') + '">' + (dep ? '+' : '-') + '</span>' + tok(x); }).join(' · ');
     } else if (r.give && r.get) { verb = 'Swap'; cls = 'swap'; type = tok(r.give) + ' → ' + tok(r.get); }
     else { verb = 'Trade'; cls = 'swap'; type = tok(r.give || r.get); }
-    var b = (verb === 'Swap') ? r.get : null;
+    var b = (verb === 'Swap') ? r.get : (cls === 'lp' && r.lp && r.lp[1]) ? r.lp[1] : null;
     var glyph = unread ? ('<span class="lx-fg lx-fgt" aria-hidden="true">' + INFO + '</span>')
       : '<span class="lx-fg' + (b ? ' lx-fg2' : '') + '" aria-hidden="true"><span class="lx-fga">' + logo(r.give || r.get) + '</span>'
       + (b ? '<span class="lx-fgb">' + logo(b) + '</span>' : '') + '</span>';

@@ -1547,8 +1547,9 @@
     }).catch(function (e) {
       btn.__busy = 0; btn.disabled = false; btn.textContent = label;
       var msg = (e && e.message) || '';
-      toast(e && e.lxnWallet ? D().walletErr(e, claim ? 'claimed' : collect ? 'collected' : 'cancelled')
-        : (msg || 'Could not ' + (claim ? 'claim from' : collect ? 'collect' : 'cancel') + ' the order.'), true);
+      var vb = claim ? 'claimed' : collect ? 'collected' : 'cancelled';
+      if (e && e.lxnWallet && D().walletErrFor) D().walletErrFor(e, vb, me).then(function (t) { toast(t, true); });
+      else toast(e && e.lxnWallet ? D().walletErr(e, vb) : (msg || 'Could not ' + (claim ? 'claim from' : collect ? 'collect' : 'cancel') + ' the order.'), true);
     });
   }
 

@@ -1865,8 +1865,10 @@
     if (!window.lxn || typeof window.lxn.wallet !== 'function') return Promise.reject(new Error('Connect a NEAR wallet first.'));
     return window.lxn.wallet().then(function (w) {
       if (!w) throw new Error('No NEAR wallet is connected.');
-      if (txs.length === 1) return w.signAndSendTransaction({ signerId: me, receiverId: txs[0].receiverId, actions: txs[0].actions }).then(function (r) { return [r]; });
-      return w.signAndSendTransactions({ signerId: me, transactions: txs });
+      // Reported for Platform Activity once signed (lxnCore.recordPool; only a deposit or withdrawal is kept).
+      var rec = function (r) { return window.lxnCore && window.lxnCore.recordPool ? window.lxnCore.recordPool(me, r) : r; };
+      if (txs.length === 1) return w.signAndSendTransaction({ signerId: me, receiverId: txs[0].receiverId, actions: txs[0].actions }).then(function (r) { return rec([r]); });
+      return w.signAndSendTransactions({ signerId: me, transactions: txs }).then(rec);
     });
   }
   function failed(res) {

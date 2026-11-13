@@ -1608,7 +1608,7 @@
       id: o.order_id, buy: buy, tok: tok, quo: quo, sym: mt.s || C.short(tok), qsym: mq.s || C.short(quo),
       px: px, amt: amt, tot: tot, orig: orig, filled: filled, ssym: ms.s || '',
       collect: D.big(o.remain_amount) <= BigInt(0),
-      claimV: unc > 0 ? unc : 0, claimSym: mb.s || C.short(o.buy_token)
+      claimV: unc > 0 ? unc : 0, claimSym: mb.s || C.short(o.buy_token), left: remain, leftSym: ms.s || ''
     };
   }
   function orderLogo(id) {
@@ -1701,6 +1701,7 @@
         cl.removeAttribute('id');
         plain(cl, 'Claim ' + (x.claimV >= 1 ? orderAmt(x.claimV) : String(+x.claimV.toFixed(6))) + ' ' + x.claimSym);   // 0.10956, not 0.11
         cl.setAttribute('data-claim', String(x.claimV));
+        if (x.left != null) cl.setAttribute('data-left', (x.left >= 1 ? Math.floor(x.left).toLocaleString('en-US') : orderAmt(x.left)) + ' ' + x.leftSym);   // whole units: 99,997,663, not 100.00M
         cl.style.setProperty('color', '#ea6a2c', 'important');
         cl.style.setProperty('border-color', 'rgba(234,106,44,.45)', 'important');
         cl.style.setProperty('margin-right', '8px');
@@ -1716,7 +1717,7 @@
   // #cancelModal on the phone. Its confirm button is replaced by a clean clone each time (one listener per
   // opening would cancel the same order again on the next use), and nothing signs until the person
   // approves in their wallet.
-  function cancelDialog(ids, describe, collectOnly, claimTxt) {
+  function cancelDialog(ids, describe, collectOnly, claimTxt, leftTxt) {
     var m = document.getElementById('modalCancelOrder') || document.getElementById('cancelModal');
     if (!m) return;
     var desk = m.id === 'modalCancelOrder';
@@ -1740,6 +1741,8 @@
     if (det) { det.textContent = describe || ''; det.style.display = describe ? '' : 'none'; }
     if (lbl) lbl.textContent = claimTxt ? 'Claim' : collectOnly ? 'Collect' : (many ? ('Cancel all (' + ids.length + ')') : 'Cancel order');
     if (keep) keep.textContent = '';
+    errLine(m, det, '');
+    claimLook(m, go, det, claimTxt ? { pair: describe || '', get: claimTxt, left: leftTxt || '' } : null);
     var fresh = go.cloneNode(true);
     go.parentNode.replaceChild(fresh, go);
     var flbl = fresh.querySelector('span') || fresh;
@@ -1764,11 +1767,65 @@
       }).catch(function (err) {
         fresh.disabled = false;
         var msg = (err && err.message) || '';
-        flbl.textContent = err && err.lxnWallet && window.lxnDcl.walletErr ? window.lxnDcl.walletErr(err, 'cancelled') : (msg || 'Could not cancel');
+        var verb0 = claimTxt ? 'claimed' : collectOnly ? 'collected' : 'cancelled';
+        // The reason goes in the dialog's body, in red, and the button keeps its label: a sentence inside a button was
+        // what read as broken.
+        var say = function (t) { flbl.textContent = orig; errLine(m, det, t); };
+        if (err && err.lxnWallet && window.lxnDcl.walletErrFor) { flbl.textContent = 'Checking…'; window.lxnDcl.walletErrFor(err, verb0, who).then(say); }
+        else say(err && err.lxnWallet && window.lxnDcl.walletErr ? window.lxnDcl.walletErr(err, verb0) : (msg || 'Could not ' + (claimTxt ? 'claim' : 'cancel')));
       });
     });
     m.classList.add('open');
     if (desk) document.body.style.overflow = 'hidden';
+  }
+  // THE CLAIM DIALOG (RAZA 2026-11-13: "please improve this popup when claiming. it looks terrible"). The design's
+  // cancel dialog is red throughout -- a red x badge, a red button with an x in it -- which says "destroy" for an action
+  // that only collects. In claim mode: an orange download badge and button, the two buttons side by side, and a small
+  // summary (the pair, what arrives, what stays for sale). Everything is put back as the design had it for a cancel.
+  var DL = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><polyline points="7 10 12 15 17 10"/><path d="M5 21h14"/></svg>';
+  function errLine(m, det, t) {
+    var el = m.querySelector('.lx-dlg-err');
+    if (!t) { if (el && el.parentNode) el.parentNode.removeChild(el); return; }
+    if (!el) {
+      el = document.createElement('div'); el.className = 'lx-dlg-err';
+      el.style.cssText = 'margin-top:12px;color:var(--red,#ff5b5b);font-size:14px;line-height:1.5';
+      var host = (det && det.parentNode) || m.querySelector('.modal-body') || m;
+      host.appendChild(el);
+    }
+    el.textContent = t;
+  }
+  function claimLook(m, go, det, c) {
+    var ico = m.querySelector('.modal-head .ico'), foot = go.parentNode, gsvg = go.querySelector('svg');
+    if (!m.__lxo) m.__lxo = { ico: ico ? [ico.getAttribute('style') || '', ico.innerHTML] : null,
+      go: [go.getAttribute('style') || '', gsvg ? gsvg.outerHTML : ''], foot: foot ? foot.getAttribute('style') || '' : '' };
+    var o = m.__lxo;
+    if (!c) {
+      if (ico && o.ico) { ico.setAttribute('style', o.ico[0]); ico.innerHTML = o.ico[1]; }
+      go.setAttribute('style', o.go[0]);
+      var cur = go.querySelector('svg'); if (cur && o.go[1]) cur.outerHTML = o.go[1];
+      if (foot) { foot.setAttribute('style', o.foot); [].forEach.call(foot.children, function (b) { b.style.flex = ''; }); }
+      return;
+    }
+    if (ico) { ico.style.background = 'linear-gradient(135deg,#f59a5e,#ea6a2c)'; ico.innerHTML = DL; }
+    go.style.background = '#ea6a2c'; go.style.borderColor = '#ea6a2c'; go.style.boxShadow = '0 5px 14px rgba(234,106,44,.28)';
+    var g2 = go.querySelector('svg'); if (g2) g2.outerHTML = DL;
+    if (foot) {
+      foot.style.display = 'flex'; foot.style.gap = '10px'; foot.style.flexWrap = 'nowrap';
+      [].forEach.call(foot.children, function (b) { b.style.flex = '1 1 0'; b.style.justifyContent = 'center'; b.style.whiteSpace = 'nowrap'; });
+    }
+    if (det) {
+      det.textContent = '';
+      det.style.display = '';
+      [['Pair', c.pair], ['You receive', c.get], ['Still for sale', c.left]].forEach(function (kv, i) {
+        if (!kv[1]) return;
+        var r = document.createElement('div');
+        r.style.cssText = 'display:flex;justify-content:space-between;gap:12px;' + (i ? 'margin-top:6px;' : '');
+        var k = document.createElement('span'); k.textContent = kv[0]; k.style.color = 'var(--text-muted)';
+        var v = document.createElement('span'); v.textContent = kv[1]; v.style.fontWeight = '600';
+        if (i === 1) v.style.color = 'var(--green,#35c07f)';
+        r.appendChild(k); r.appendChild(v); det.appendChild(r);
+      });
+    }
   }
   function wireCancels() {
     if (window.__lxnCancels) return;
@@ -1783,7 +1840,7 @@
         if (!crow) return;
         e.preventDefault(); e.stopImmediatePropagation();
         var cnm = ((crow.querySelector('.pair-text .name') || {}).textContent || '').trim();
-        cancelDialog([crow.getAttribute('data-oid')], cnm, false, (clb.textContent || '').replace('Claim ', '').trim());
+        cancelDialog([crow.getAttribute('data-oid')], cnm, false, (clb.textContent || '').replace('Claim ', '').trim(), clb.getAttribute('data-left') || '');
         return;
       }
       var one = t.closest('.order-cancel');

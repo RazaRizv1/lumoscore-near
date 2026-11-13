@@ -19,11 +19,12 @@ import { CURATED } from './_nearcurated.js';
 import { FEE, WNEAR, post, feeIndex, decodeNew } from './_nearfeetx.js';
 import { decodeBridge, whLeg } from './nearbridgetx.js';
 import { niDelivery } from './nearoneclick.js';
+import { readList as lpList } from './nearact.js';
 
 const RPC = 'https://free.rpc.fastnear.com';
 const IDX = 'https://near-pool-indexer.usa282.workers.dev';
 const NEAR_LOGO = '/assets/networks/near.png';
-const VER = 'v1', TTL = 60, KEEP = 86400, N = 15, NEWEST = 40, PER_RUN = 25, META_MAX = 6;
+const VER = 'v2', TTL = 60, KEEP = 86400, N = 15, NEWEST = 40, PER_RUN = 25, META_MAX = 6;
 const CUR = {};
 for (const c of CURATED) CUR[c.i] = c;
 
@@ -266,7 +267,12 @@ async function build(cache, env) {
   let cut = list.findIndex((x) => !(x.h in map));
   if (cut < 0) cut = list.length;
   const recs = list.slice(0, cut).map((x) => map[x.h]).filter((r) => r && okBy[r.h] !== false).sort((a, b) => b.ts - a.ts).slice(0, N);
+  // POOL DEPOSITS AND WITHDRAWALS MADE HERE (RAZA 2026-11-13: the LUMOS/ZEC pool he created was missing). They pay no
+  // fee, so the index above cannot see them; the site records them (/lxapi/nearact, checked against the chain there)
+  // and they join the newest rows, as Stellar's /lxapi/act rows join its feed. An unreadable store adds nothing.
+  const lps = ((await lpList(env)) || []).filter((x) => x && x.h && Array.isArray(x.t) && x.t.length).slice(0, N);
   const ids = {};
+  lps.forEach((x) => x.t.forEach((t) => { ids[t[1]] = 1; }));
   recs.forEach((r) => { r.legs.forEach((g) => { ids[g.c] = 1; }); if (r.p) ids[r.p.get.c] = 1; if (r.br && !r.br.native) ids[r.br.token] = 1; });
   const meta = await metaFor(Object.keys(ids));
   const leg = (g) => {
@@ -298,6 +304,16 @@ async function build(cache, env) {
     }
     return row;
   });
+  const feeH = {};
+  rows.forEach((r) => { feeH[r.h] = 1; });
+  lps.forEach((x) => {
+    if (feeH[x.h]) return;
+    const lp = x.t.map((t) => { const m = meta[t[1]] || {}; return m.d == null ? null : { s: m.s, v: units(t[0], m.d), ic: m.ic, c: t[1] }; }).filter(Boolean);
+    if (!lp.length) return;
+    rows.push({ h: x.h, who: x.who, memo: x.k === '-' ? 'lx:lp-' : 'lx:lp+', ts: x.ts, give: lp[0], get: null, lp });
+  });
+  rows.sort((a, b) => b.ts - a.ts);
+  if (rows.length > N) rows.length = N;
   // Not all of the newest transactions decoded yet (a cold start, or more new ones than one run reads): served, not kept.
   const partial = list.some((x) => !(x.h in map));
   return { ok: true, at: Date.now(), rows, partial: partial || undefined };

@@ -435,6 +435,22 @@
     }
     return 'Nothing was ' + verb + '. The wallet said: "' + (m || 'no reason given') + '".';
   }
+  // WHEN THE WALLET REFUSES, ASK THE ACCOUNT FIRST (RAZA 2026-11-13: he approved a Claim in HOT and the page said
+  // "Cancelled by the user"; nothing reached the chain). HOT refuses any transaction that would leave under 0.2 NEAR --
+  // its own words, "Must have 0.2N or more left in wallet for gas fee", recorded 2026-11-03 -- and sometimes says only
+  // "User rejected". The treasury had 0.1467 NEAR. So a bare refusal reads the account's spendable NEAR (balance less
+  // what its storage locks) before it is worded: under 0.2 it names that; otherwise walletErr's plain wording stands.
+  var HOT_FLOOR = 0.2;
+  function walletErrFor(e, verb, me) {
+    var plainMsg = walletErr(e, verb);
+    if (plainMsg !== 'Cancelled by the user.' || !me) return Promise.resolve(plainMsg);
+    return viewAccount(me).then(function (a) {
+      var spend = Number(big(a && a.amount) - big((a && a.storage_usage) || 0) * BigInt('10000000000000000000')) / 1e24;
+      if (!(spend >= 0) || spend >= HOT_FLOOR) return plainMsg;
+      return 'Your wallet did not send it. HOT keeps ' + HOT_FLOOR + ' NEAR for gas, and this account can spend only '
+        + (Math.floor(spend * 1e4) / 1e4) + ' NEAR. Add a little NEAR and try again.';
+    }, function () { return plainMsg; });
+  }
   // The order transaction's outcome (the last one): ft_transfer_call returns what DCL USED.
   function verdict(results) {
     var r = results && results[results.length - 1];
@@ -557,7 +573,7 @@
     poolIdFor: poolIdFor, splitPool: splitPool, poolFor: poolFor, tokenPriceAt: tokenPriceAt,
     planCreate: planCreate, buildCreate: buildCreate, forget: forget,
     plan: plan, msgFor: msgFor, prereqs: prereqs, registered: registered, buildPlace: buildPlace,
-    activeOrders: activeOrders, getOrder: getOrder, buildCancel: buildCancel,
+    activeOrders: activeOrders, getOrder: getOrder, buildCancel: buildCancel, walletErrFor: walletErrFor,
     sign: sign, walletErr: walletErr, verdict: verdict, book: book, bookFrom: bookFrom,
     callView: callView, viewAccount: viewAccount, storageOf: storageOf, storageMin: storageMin,
     toUnits: toUnits, fromUnits: fromUnits, toNum: toNum, big: big, plain: plain

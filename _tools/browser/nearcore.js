@@ -296,6 +296,26 @@
   function okOutcome(o) { var s = o && o.status; return !!s && (s.SuccessValue !== undefined || s.SuccessReceiptId !== undefined); }
   function big(v) { try { return BigInt(String(v)); } catch (e) { return BigInt(0); } }
 
+  // A POOL DEPOSIT OR WITHDRAWAL MADE HERE, reported for Platform Activity (RAZA 2026-11-13; /lxapi/nearact checks each
+  // hash against the chain before keeping it). Fire and forget: whatever happens here, the page behaves the same. A
+  // transaction the chain does not list yet is asked again twice.
+  function recordPool(me, results) {
+    try {
+      [].concat(results || []).forEach(function (r) {
+        var h = r && ((r.transaction && r.transaction.hash) || (r.transaction_outcome && r.transaction_outcome.id));
+        if (!h || !me) return;
+        var n = 0;
+        (function send() {
+          fetch('/lxapi/nearact', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ who: me, h: h }) })
+            .then(function (x) { return x.json(); }).then(function (j) {
+              if (j && !j.ok && j.reason === 'pending' && ++n < 3) setTimeout(send, 5000 * n);
+            }).catch(function () {});
+        })();
+      });
+    } catch (e) {}
+    return results;
+  }
+
   function fnActivity(me) {
     return fnPost('account', { account_id: me }).then(function (j) {
       var list = ((j && j.account_txs) || []).slice(0, 25), okBy = {};
@@ -678,6 +698,7 @@
     RPC: RPC, WNEAR: WNEAR, NEAR_LOGO: NEAR_LOGO, ICONS: ICONS,
     market: market, view: view, callView: callView, units: units, cleanSym: cleanSym,
     ftMetadata: ftMetadata, tokenMeta: tokenMeta, readHoldings: readHoldings, positions: positions,
+    recordPool: recordPool,
     activityData: activityData, platformActivity: platformActivity, entriesOf: entriesOf, isAccountId: isAccountId, short: short
   };
 })();

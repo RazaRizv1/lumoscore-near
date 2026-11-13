@@ -783,17 +783,20 @@
   // this dialog is on eight.
   function sign(txs) {
     if (!window.lxn || typeof window.lxn.wallet !== 'function') return Promise.reject(new Error('Connect a NEAR wallet first.'));
+    // The new pool's first deposit is reported for Platform Activity (lxnCore.recordPool), as the pool page's are.
+    var me0 = txs[0] && txs[0].signerId;
+    var rec = function (r) { return window.lxnCore && window.lxnCore.recordPool ? window.lxnCore.recordPool(me0, r) : r; };
     return window.lxn.wallet().then(function (w) {
       if (!w) throw new Error('No NEAR wallet is connected.');
       if (txs.length === 1) {
         if (typeof w.signAndSendTransaction !== 'function') throw new Error('This wallet cannot sign transactions here.');
-        return w.signAndSendTransaction(txs[0]).then(function (r) { return [r]; });
+        return w.signAndSendTransaction(txs[0]).then(function (r) { return rec([r]); });
       }
       if (typeof w.signAndSendTransactions !== 'function') throw new Error('This wallet cannot sign several transactions at once.');
       return w.signAndSendTransactions({
         signerId: txs[0].signerId,
         transactions: txs.map(function (t) { return { receiverId: t.receiverId, actions: t.actions }; })
-      });
+      }).then(rec);
     });
   }
   // A FunctionCall's return value, base64 in the final execution outcome.
