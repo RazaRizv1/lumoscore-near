@@ -1484,6 +1484,17 @@
           cb.setAttribute('data-off', String(o.order_id));
           if (filled) cb.setAttribute('data-collect', '1');
           cb.textContent = filled ? 'Collect' : 'Cancel';
+          // CLAIM what a resting order has bought (RAZA 2026-11-13): unclaimed_amount, in the token it buys.
+          var unc = !filled && D().big(o.unclaimed_amount || '0') > BigInt(0) ? Number(S().fromUnits(o.unclaimed_amount, ba.dec)) : 0;
+          if (unc > 0 && isFinite(unc)) {
+            var clb = document.createElement('button');
+            clb.type = 'button';
+            clb.setAttribute('data-off', String(o.order_id));
+            clb.setAttribute('data-claim', '1');
+            clb.textContent = 'Claim ' + fmtNum(unc, 6) + ' ' + ba.code;
+            clb.style.cssText = 'color:#ea6a2c;border-color:rgba(234,106,44,.45);margin-right:8px';
+            ft.appendChild(clb);
+          }
           ft.appendChild(cb);
           row.appendChild(top); row.appendChild(ft);
           list.appendChild(row);
@@ -1510,18 +1521,20 @@
     var me = addr();
     if (!me || !D()) return;
     var id = btn.getAttribute('data-off');
-    var collect = btn.getAttribute('data-collect') === '1';
+    var collect = btn.getAttribute('data-collect') === '1', claim = btn.getAttribute('data-claim') === '1';
     btn.__busy = 1; btn.disabled = true;
     var label = btn.textContent;
     btn.textContent = 'Checking…';
-    D().buildCancel(me, [id]).then(function (b) {
+    D().buildCancel(me, [id], { claim: claim }).then(function (b) {
       window.__lxnLastCancel = b;
       btn.textContent = b.txs.length > 1 ? ('Approve ' + b.txs.length + '…') : 'Confirm…';
       return D().sign(b.txs);
     }).then(function (res) {
       var v = D().verdict(res);
       btn.__busy = 0; btn.disabled = false; btn.textContent = label;
-      if (v.ok === false) { toast(collect ? 'The collect failed on chain.' : 'The cancel failed on chain.', true); return; }
+      if (v.ok === false) { toast(claim ? 'The claim failed on chain.' : collect ? 'The collect failed on chain.' : 'The cancel failed on chain.', true); return; }
+      // A claim leaves the order resting: the list is read again, not the row removed.
+      if (claim) { toast('Claimed ' + label.replace('Claim ', '')); loadAccount(true); loadOrders(); return; }
       toast(collect ? 'Collected' : 'Order cancelled');
       gone[String(id)] = 1;
       var row = btn.closest('.lxo-o');
@@ -1534,8 +1547,8 @@
     }).catch(function (e) {
       btn.__busy = 0; btn.disabled = false; btn.textContent = label;
       var msg = (e && e.message) || '';
-      toast(e && e.lxnWallet ? D().walletErr(e, collect ? 'collected' : 'cancelled')
-        : (msg || 'Could not ' + (collect ? 'collect' : 'cancel') + ' the order.'), true);
+      toast(e && e.lxnWallet ? D().walletErr(e, claim ? 'claimed' : collect ? 'collected' : 'cancelled')
+        : (msg || 'Could not ' + (claim ? 'claim from' : collect ? 'collect' : 'cancel') + ' the order.'), true);
     });
   }
 

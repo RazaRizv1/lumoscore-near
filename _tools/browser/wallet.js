@@ -1593,7 +1593,10 @@
       var pxy = Math.pow(1.0001, +o.point) * Math.pow(10, dx - dy);     // token_x in token_y
       px = xy[0] === tok ? pxy : 1 / pxy;                                // token in quote
     }
-    var D = window.lxnDcl, dec = ms.d;
+    var D = window.lxnDcl, dec = ms.d, mb = M[o.buy_token] || {};
+    // What a partly filled order has bought and not yet sent (unclaimed_amount, in the token it buys): see Claim below.
+    var unc = (mb.d != null && D.big(o.unclaimed_amount || '0') > BigInt(0) && D.big(o.remain_amount) > BigInt(0))
+      ? Number(D.fromUnits(o.unclaimed_amount, mb.d)) : 0;
     var orig = dec != null ? Number(D.fromUnits(o.original_amount, dec)) : null;
     var remain = dec != null ? Number(D.fromUnits(o.remain_amount, dec)) : null;
     var cancelled = dec != null ? Number(D.fromUnits(o.cancel_amount || '0', dec)) : 0;
@@ -1604,7 +1607,8 @@
     return {
       id: o.order_id, buy: buy, tok: tok, quo: quo, sym: mt.s || C.short(tok), qsym: mq.s || C.short(quo),
       px: px, amt: amt, tot: tot, orig: orig, filled: filled, ssym: ms.s || '',
-      collect: D.big(o.remain_amount) <= BigInt(0)
+      collect: D.big(o.remain_amount) <= BigInt(0),
+      claimV: unc > 0 ? unc : 0, claimSym: mb.s || C.short(o.buy_token)
     };
   }
   function orderLogo(id) {
@@ -1679,13 +1683,31 @@
     // No fill bar, as on Stellar (RAZA 2026-11-05: "remove filled section on near open orders").
     var prog = row.querySelector('.order-progress-wrap');
     if (prog && prog.parentNode) prog.parentNode.removeChild(prog);
-    var cb = row.querySelector('.order-cancel');
+    var cb = row.querySelector('.order-cancel:not(.lx-order-claim)');
     if (cb) {
       // COLLECT is the same button (RAZA 2026-10-21): a fully filled order's proceeds wait in the contract
       // until cancel_order with amount "0" sends them.
       var phoneBtn = /order/i.test(cb.textContent || '');
       plain(cb, x.collect ? 'Collect' : (phoneBtn ? 'Cancel Order' : 'Cancel'));
       cb.removeAttribute('data-order'); cb.removeAttribute('data-side');
+      // CLAIM, beside Cancel, while a resting order holds what it has bought (RAZA 2026-11-13, "Yes, add Claim").
+      var old = row.querySelector('.lx-order-claim');
+      if (old && old.parentNode) old.parentNode.removeChild(old);
+      if (x.claimV > 0) {
+        var cl = cb.cloneNode(false);
+        // The design's own button class, so Claim is drawn exactly as Cancel; lx-order-claim tells them apart (the
+        // click handler checks it first, and the Cancel lookups above and below skip it).
+        cl.className = String(cb.className || '') + ' lx-order-claim';
+        cl.removeAttribute('id');
+        plain(cl, 'Claim ' + (x.claimV >= 1 ? orderAmt(x.claimV) : String(+x.claimV.toFixed(6))) + ' ' + x.claimSym);   // 0.10956, not 0.11
+        cl.setAttribute('data-claim', String(x.claimV));
+        cl.style.setProperty('color', '#ea6a2c', 'important');
+        cl.style.setProperty('border-color', 'rgba(234,106,44,.45)', 'important');
+        cl.style.setProperty('margin-right', '8px');
+        cl.style.setProperty('white-space', 'nowrap');
+        cl.style.setProperty('cursor', 'pointer');
+        cb.parentNode.insertBefore(cl, cb);
+      }
     }
     return row;
   }
@@ -1694,7 +1716,7 @@
   // #cancelModal on the phone. Its confirm button is replaced by a clean clone each time (one listener per
   // opening would cancel the same order again on the next use), and nothing signs until the person
   // approves in their wallet.
-  function cancelDialog(ids, describe, collectOnly) {
+  function cancelDialog(ids, describe, collectOnly, claimTxt) {
     var m = document.getElementById('modalCancelOrder') || document.getElementById('cancelModal');
     if (!m) return;
     var desk = m.id === 'modalCancelOrder';
@@ -1706,15 +1728,17 @@
     var go = document.getElementById(desk ? 'cancelOrderConfirm' : 'cancelModalConfirm');
     if (!go) return;
     var many = ids.length > 1;
-    if (title) title.textContent = collectOnly ? 'Collect this order?' : (many ? ('Cancel ' + ids.length + ' orders?') : 'Cancel this order?');
+    if (title) title.textContent = claimTxt ? 'Claim what this order bought?' : collectOnly ? 'Collect this order?' : (many ? ('Cancel ' + ids.length + ' orders?') : 'Cancel this order?');
     if (text) {
-      text.textContent = collectOnly
+      text.textContent = claimTxt
+        ? 'This order has bought ' + claimTxt + ' so far. Claiming sends it to your wallet; the rest of the order stays open.'
+        : collectOnly
         ? 'It has filled. Collecting sends what it bought to your wallet.'
         : ((many ? 'Each order is cancelled by its own transaction, so your wallet will ask you to approve ' + ids.length + '. ' : '')
           + 'What is left of the order comes back to your wallet, together with anything it has already bought.');
     }
     if (det) { det.textContent = describe || ''; det.style.display = describe ? '' : 'none'; }
-    if (lbl) lbl.textContent = collectOnly ? 'Collect' : (many ? ('Cancel all (' + ids.length + ')') : 'Cancel order');
+    if (lbl) lbl.textContent = claimTxt ? 'Claim' : collectOnly ? 'Collect' : (many ? ('Cancel all (' + ids.length + ')') : 'Cancel order');
     if (keep) keep.textContent = '';
     var fresh = go.cloneNode(true);
     go.parentNode.replaceChild(fresh, go);
@@ -1727,7 +1751,7 @@
       if (!who) { flbl.textContent = 'Connect a NEAR wallet first'; return; }
       fresh.disabled = true;
       flbl.textContent = 'Checking…';
-      window.lxnDcl.buildCancel(who, ids).then(function (b) {
+      window.lxnDcl.buildCancel(who, ids, { claim: !!claimTxt }).then(function (b) {
         window.__lxnLastCancel = b;
         flbl.textContent = 'Confirm in wallet…';
         return window.lxnDcl.sign(b.txs);
@@ -1735,7 +1759,7 @@
         m.classList.remove('open', 'show', 'active');
         document.body.style.overflow = '';
         fresh.disabled = false; flbl.textContent = orig;
-        try { if (window.showToast) window.showToast(collectOnly ? 'Collected' : (many ? ids.length + ' orders cancelled' : 'Order cancelled')); } catch (x) {}
+        try { if (window.showToast) window.showToast(claimTxt ? 'Claimed ' + claimTxt : collectOnly ? 'Collected' : (many ? ids.length + ' orders cancelled' : 'Order cancelled')); } catch (x) {}
         paintOrders(who);
       }).catch(function (err) {
         fresh.disabled = false;
@@ -1753,6 +1777,15 @@
     window.addEventListener('click', function (e) {
       var t = e.target;
       if (!t || !t.closest || !window.lxnDcl) return;
+      var clb = t.closest('.lx-order-claim');
+      if (clb) {
+        var crow = clb.closest('[data-oid]');
+        if (!crow) return;
+        e.preventDefault(); e.stopImmediatePropagation();
+        var cnm = ((crow.querySelector('.pair-text .name') || {}).textContent || '').trim();
+        cancelDialog([crow.getAttribute('data-oid')], cnm, false, (clb.textContent || '').replace('Claim ', '').trim());
+        return;
+      }
       var one = t.closest('.order-cancel');
       if (one) {
         var row = one.closest('[data-oid]');

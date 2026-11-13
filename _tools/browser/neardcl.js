@@ -366,7 +366,11 @@
   // Cancel (anything still resting) or collect (fully filled, proceeds unclaimed): ONE cancel_order each,
   // its amount read fresh from get_order right before, as the SDK does. Registration on both tokens goes
   // first, so nothing is parked in the contract. Resolves { txs, kinds }.
-  function buildCancel(me, ids) {
+  // CLAIM (RAZA 2026-11-13: the treasury's LUMOS order had filled 829 LUMOS and "why didnt i receive any near"). A fill's
+  // proceeds stay in the contract as the order's unclaimed_amount until the owner calls cancel_order; with amount "0"
+  // that sends them and cancels nothing, so the rest of the order keeps resting. opt.claim asks for exactly that.
+  function buildCancel(me, ids, opt) {
+    var claim = !!(opt && opt.claim);
     return Promise.all(ids.map(getOrder)).then(function (os) {
       var toks = {};
       os.forEach(function (o, i) {
@@ -383,8 +387,8 @@
           var kinds = [];
           os.forEach(function (o) {
             var collect = big(o.remain_amount) <= BigInt(0);
-            kinds.push(collect ? 'collect' : 'cancel');
-            txs.push({ signerId: me, receiverId: DCL, actions: [fc('cancel_order', { order_id: o.order_id, amount: collect ? '0' : String(o.remain_amount) }, GAS_CANCEL, '0')] });
+            kinds.push(claim ? 'claim' : collect ? 'collect' : 'cancel');
+            txs.push({ signerId: me, receiverId: DCL, actions: [fc('cancel_order', { order_id: o.order_id, amount: (collect || claim) ? '0' : String(o.remain_amount) }, GAS_CANCEL, '0')] });
           });
           return { txs: txs, kinds: kinds, orders: os };
         });
