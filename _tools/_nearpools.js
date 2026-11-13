@@ -172,7 +172,67 @@ function addDropdowns(h, block) {
   return { html: h.slice(0, sl.start) + seg + h.slice(sl.end), n };
 }
 
-let files = 0, stripped = 0, injected = 0, cpInjected = 0, dds = 0;
+// THE REWARDED POOLS TAB IN THE MARKUP, AND THE HEAD GATE (RAZA 2026-11-13: "replicate onto NEAR"). Both copied from
+// the XRPL fork's _xrplpools.js, which mirrors Stellar's: the tab is baked so the bar never paints without it, and
+// lx-rwgate decides in the HEAD -- before any row paints -- that ?tab=rewarded / #rewarded hides All Pools, through
+// html.lx-rwpending. THE IDS ARE IDENTICAL TO BOTH (lx-rwgate, lx-rwgate-css, #panelAllPools, #panelAll,
+// data-tab="rewarded"), or the CSS stops matching and the panels flash. browser/pools.js clears the class once it has
+// hidden the panel for real; the 8s timeout is the safety if it never boots.
+//
+// ONE DIFFERENCE: the badge is EMPTY here. XRPL bakes its programme's count because all eleven of its pools exist;
+// on NEAR most pairs have no pool yet, so a baked 11 would be a false number. browser/pools.js writes the count of
+// pools found (/lxapi/nearrwpools) once it has it.
+const RWTAB = '<button data-tab="rewarded"><span class="lx-tabic" aria-hidden="true">'
+  + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"'
+  + ' stroke-linejoin="round"><circle cx="12" cy="9.1" r="6.1"></circle>'
+  + '<path d="M8.4 14.3 7 21.4l5-2.7 5 2.7-1.4-7.1"></path></svg></span>'
+  + 'Rewarded Pools <span class="count" data-logoed="1"></span></button>';
+const RWGATE = '<' + 'script id="lx-rwgate">(function(){try{'
+  + 'if(!/(^|[?&])tab=rewarded|#rewarded/.test((location.search||"")+" "+(location.hash||"")))return;'
+  + 'var d=document.documentElement;d.className+=" lx-rwpending";'
+  + 'var o=new MutationObserver(function(){var bar=document.getElementById("poolTabs");if(!bar)return;'
+  + 'o.disconnect();'
+  + 'var bs=bar.querySelectorAll("button[data-tab]");'
+  + 'for(var i=0;i<bs.length;i++){var t=bs[i].getAttribute("data-tab");'
+  + 'if(t==="rewarded")bs[i].classList.add("active");else bs[i].classList.remove("active");}});'
+  + 'o.observe(d,{childList:true,subtree:true});'
+  + 'setTimeout(function(){try{o.disconnect();}catch(e){}'
+  + 'd.classList.remove("lx-rwpending");},8000);'
+  + '}catch(e){}})();</' + 'script>'
+  + '<style id="lx-rwgate-css">html.lx-rwpending #panelAllPools,html.lx-rwpending #panelAll'
+  + '{display:none!important}</style>';
+// Swapped in place; only on pages with the tab bar, and REMOVED from any page without one (XRPL's syncGate).
+function syncGate(h) {
+  const open = '<' + 'script id="lx-rwgate">';
+  const at = h.indexOf(open);
+  const wants = h.indexOf('id="poolTabs"') >= 0;
+  if (at >= 0) {
+    const end = h.indexOf('</style>', at);
+    if (end < 0) return h;
+    return h.slice(0, at) + (wants ? RWGATE : '') + h.slice(end + 8);
+  }
+  if (!wants) return h;
+  const hc = h.indexOf('</head>');
+  if (hc < 0) return h;
+  return h.slice(0, hc) + RWGATE + h.slice(hc);
+}
+// The third button, before My Pools (XRPL's bakeTabs, the label renamed as there). Idempotent.
+function bakeTabs(h) {
+  const bar = h.indexOf('id="poolTabs"');
+  if (bar < 0) return h;
+  const close = h.indexOf('</div>', bar);
+  if (close < 0) return h;
+  let bl = h.slice(bar, close);
+  if (bl.indexOf('data-tab="rewarded"') >= 0) return h;
+  const m = bl.indexOf('<button data-tab="mine"');
+  const me = m < 0 ? -1 : bl.indexOf('</button>', m);
+  if (me < 0) return h;
+  const mineBtn = bl.slice(m, me + 9).replace('My Positions', 'My Pools');
+  bl = bl.slice(0, m) + RWTAB + mineBtn + bl.slice(me + 9);
+  return h.slice(0, bar) + bl + h.slice(close);
+}
+
+let files = 0, stripped = 0, injected = 0, cpInjected = 0, dds = 0, baked = 0;
 for (const dev of ['desktop', 'mobile']) {
   const file = 'lumoscore-near-' + dev + '.html';
   let data;
@@ -208,7 +268,11 @@ for (const dev of ['desktop', 'mobile']) {
     h = stripById(h, CP_ID).html;
 
     const lumos = isLumosPage(h), list = hasList(h), modal = h.indexOf('id="createPoolModal"') >= 0;   // read before injecting
-    if (list && !lumos) { h = beforeBody(h, SCRIPT, key); injected++; }
+    if (list && !lumos) {
+      const b0 = h; h = bakeTabs(h); if (h !== b0) baked++;
+      h = beforeBody(h, SCRIPT, key); injected++;
+    }
+    h = syncGate(h);                                         // head gate where the tab bar is; gone where it is not
     if (modal) {
       // The $LUMOS pages are no longer skipped: they get the design's dropdown carried over first, and
       // then the same driver as everywhere else. The Pools list layer above still skips them, because
@@ -239,6 +303,6 @@ for (const dev of ['desktop', 'mobile']) {
 
 console.log('near pools: stripped lx-ammdata from ' + stripped + ' page key(s); injected ' + ID + ' on ' + injected
   + ' and ' + CP_ID + ' on ' + cpInjected + ' page key(s) across ' + files + ' container(s)'
-  + (dds ? '; carried the asset dropdown into ' + dds + ' field(s)' : ''));
+  + (dds ? '; carried the asset dropdown into ' + dds + ' field(s)' : '') + (baked ? '; baked the Rewarded tab on ' + baked : ''));
 if (!injected) { console.error('  ! no page carried #poolsBody / #panelAll — nothing was wired'); process.exit(1); }
 if (!cpInjected) { console.error('  ! no page carried #createPoolModal — the dialog was not wired'); process.exit(1); }

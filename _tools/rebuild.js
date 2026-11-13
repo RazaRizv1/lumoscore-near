@@ -85,7 +85,10 @@ const CHAIN = [
   // LUMOS discount pieces hidden until LUMOS is minted on NEAR (deferred). Delete this line to turn them on.
   '_nearlumosdeferred', '_nearlaunchpad',
   // The Launchpad's How it works dialog (NEAR copy); the link is written by _nearlaunchpad.
-  '_nearlaunchhiw', '_nearad', '_nearlumospage',
+  '_nearlaunchhiw',
+  // The launch form's two placeholders describe the field ("Your token's name" / "ASSET"), as Stellar's _launchph.js.
+  '_nearlaunchph',
+  '_nearad', '_nearlumospage',
   // Rewards (/rewards/near): strips Stellar's lx-rewardsdata and its dead companions, NEAR copy and countdown from
   // 1 December 2026, injects lx-nearrewards. After _nearsearch (its eligibility reads window.lxnCore).
   '_nearrewards',
@@ -96,6 +99,10 @@ const CHAIN = [
   // Its wording: hero line, FAQ + FAQPage ld+json, the static modal and the lx-bhiw dialog. After
   // _nearintents and every pass that rebuilds a bridge key from the design.
   '_nearbridgecopy',
+  // The FAQ accordion (RAZA 2026-11-13, ported from XRPL's _xrplfaq.js): lifts each page's questions out of its own
+  // markup and re-renders them through the shared _faqview.js. After EVERY FAQ writer above (_nearfaq,
+  // _nearlaunchpad, _nearlumospage, _nearrewards, _nearbridgecopy), so the answers it re-renders are NEAR's.
+  '_nearfaqview',
   // Last until there is anything else: it only touches <a> tags pointing off-site, and any later pass
   // that rebuilds a page key from the design hands those tags back without rel="nofollow".
   '_nofollow',

@@ -346,9 +346,9 @@
       if (!t || !t.closest) return;
       // The phone's cards are anchors in #panelAll; the design's nav shim claims those exactly as it
       // claims the desktop rows, so both are taken here.
-      var a = t.closest('#panelAll a.pool-card[href*="/pools/near/"]');
+      var a = t.closest('#panelAll a.pool-card[href*="/pools/near/"], #lx-rwpanel a.pool-card[href*="/pools/near/"]');
       if (!a) {
-        var tr = t.closest('#poolsBody tr');
+        var tr = t.closest('#poolsBody tr, #lx-rwpanel tbody tr');
         if (!tr) return;
         a = tr.querySelector('a.pool-pair');
       }
@@ -1277,6 +1277,238 @@
       if (VIEW === d) renderPage(h, d, keep);
     }).catch(function () {});
   }
+
+
+  // ---- the Rewarded Pools tab (RAZA 2026-11-13: "replicate onto NEAR ... Rewarded Pools tab", "Rewarded pools banner") ----
+  //
+  // PORTED FROM THE XRPL FORK'S browser/pools.js, itself kept in step with Stellar's lx-ammdata, and it keeps their ids
+  // (#lx-rwpanel, #lx-rwcards, .lx-rwnote, lx-rwnote-css, data-tab="rewarded", html.lx-rwpending) so the gate's CSS in
+  // the head, baked by _nearpools.js, matches. Their notes hold for every piece; what differs on NEAR:
+  //
+  //   * WHICH POOLS. The programme names pairs: LUMOS/wNEAR (Native LP) first, then LUMOS against the ten Ecosystem
+  //     assets RAZA chose. /lxapi/nearrwpools finds the pool carrying each pair on the chain itself -- Rhea's feed,
+  //     which All Pools reads, leaves new and small pools out (LUMOS/ZEC 9017 among them) -- and each pool is then read
+  //     through /lxapi/nearpools?id=, the same call the pool page makes, so the two tabs describe a pool alike.
+  //   * THE BADGE. XRPL bakes the programme's count because all eleven of its pools exist. On NEAR most pairs have no
+  //     pool yet, so a baked 11 would be false: the badge is empty in the markup and shows the number of pools found,
+  //     read once at boot. Unread stays empty, never 0.
+  //   * THE BANNER'S STAT. Rewards on NEAR start 2026-12-01 and nothing has been paid: it says when the first payout
+  //     is, not a cadence that has not begun, and no figure.
+  //   * Participants come with each pool's read (its lps), so fillParticipants is not needed here.
+  var RWIDS = null, RWIDSTATE = 'idle', RWIDTRIES = 0;
+  var RWROWS = null, RWSTATE = 'idle', RWTRIES = 0, RWMAXTRY = 8, RWNEXT = 0;
+  function rwBackoff() { return RWTRIES < 2 ? 2500 : (RWTRIES < 4 ? 6000 : 12000); }
+  function rwBadge() {
+    var bdg = $('#poolTabs button[data-tab="rewarded"] .count');
+    if (!bdg) return;
+    var n = RWROWS && RWROWS.length ? RWROWS.length : (RWIDS ? RWIDS.length : null);
+    if (n != null && bdg.textContent !== String(n)) bdg.textContent = String(n);
+  }
+  // Which pools: one edge call, cached there five minutes. A failed read is not "no rewarded pools".
+  function loadRwIds() {
+    if (RWIDSTATE === 'loading' || RWIDSTATE === 'done' || RWIDTRIES >= 6) return Promise.resolve(RWIDS);
+    RWIDSTATE = 'loading';
+    var url = '/lxapi/nearrwpools' + (RWIDTRIES ? '?_=' + Date.now() : '');
+    RWIDTRIES++;
+    return fetch(url).then(function (r) { return r.json(); }).then(function (d) {
+      if (!d || !d.ok || !Array.isArray(d.pools)) throw new Error('unread');
+      RWIDS = d.pools; RWIDSTATE = 'done'; rwBadge();
+      return RWIDS;
+    }).catch(function () { RWIDSTATE = 'error'; return null; });
+  }
+  function loadRewardedN() {
+    if (RWSTATE === 'loading' || RWSTATE === 'done') return;
+    if (RWTRIES >= RWMAXTRY) return;
+    var now = Date.now();
+    if (now < RWNEXT) return;
+    RWNEXT = now + rwBackoff();
+    RWSTATE = 'loading'; paintRewardedN();
+    var bust = RWTRIES ? '&_=' + Date.now() : '';
+    RWTRIES++;
+    loadRwIds().then(function (ids) {
+      if (!ids) throw new Error('ids');
+      // Programme order: this list is a statement about what we reward.
+      return Promise.all(ids.map(function (x) {
+        return fetch('/lxapi/nearpools?id=' + encodeURIComponent(x.id) + bust).then(function (r) { return r.json(); })
+          .then(function (d) { return d && d.ok && d.rows && d.rows[0] ? d.rows[0] : null; }, function () { return null; });
+      })).then(function (rows) {
+        var out = rows.filter(Boolean);
+        if (ids.length && !out.length) throw new Error('rows');
+        RWROWS = out;
+        // A short read is shown -- those rows are real -- but kept open for the next tick to fill.
+        RWSTATE = (out.length === ids.length || RWTRIES >= RWMAXTRY) ? 'done' : 'error';
+        paintRewardedN();
+      });
+    }).catch(function () { RWSTATE = 'error'; paintRewardedN(); });
+  }
+  function rwNoteCssN() {
+    if ($('#lx-rwnote-css')) return;
+    var st = el('style'); st.id = 'lx-rwnote-css';
+    st.textContent = '.lx-rwnote{display:flex;gap:15px;align-items:center;margin:18px 20px 10px;'
+      + 'padding:16px 18px;border:1px solid var(--border);border-radius:14px;'
+      + 'background:linear-gradient(90deg,var(--accent-soft) 0%,transparent 46%),var(--surface-2)}'
+      + '.lx-rwnote-ic{flex:0 0 auto;width:40px;height:40px;border-radius:12px;display:flex;'
+      + 'align-items:center;justify-content:center;background:var(--accent-soft);color:var(--accent)}'
+      + '.lx-rwnote-ic svg{width:21px;height:21px}'
+      + '.lx-rwnote-tx{flex:1 1 auto;min-width:0}'
+      + '.lx-rwnote-t{font-size:15.5px;font-weight:700;color:var(--text);letter-spacing:-.15px;line-height:1.4}'
+      + '.lx-rwnote-d{margin-top:4px;font-size:13.5px;line-height:1.55;color:var(--text-muted)}'
+      + '.lx-rwnote-st{flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-end;gap:3px;'
+      + 'padding-left:18px;border-left:1px solid var(--border)}'
+      + '.lx-rwnote-sl{font-size:10.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;'
+      + 'color:var(--text-muted)}'
+      + '.lx-rwnote-sv{font-size:15px;font-weight:700;color:var(--accent);white-space:nowrap}'
+      + '@media(max-width:760px){.lx-rwnote{margin:14px 0 12px;padding:14px;gap:12px;flex-wrap:wrap}'
+      + '.lx-rwnote-ic{width:34px;height:34px;border-radius:10px}.lx-rwnote-ic svg{width:18px;height:18px}'
+      + '.lx-rwnote-t{font-size:14.5px}.lx-rwnote-d{font-size:13px}'
+      + '.lx-rwnote-st{width:100%;flex-direction:row;align-items:center;justify-content:space-between;'
+      + 'gap:10px;padding:10px 0 0;margin-top:2px;border-left:0;border-top:1px solid var(--border)}}'
+      // The row sizes All Pools gets from the inherited sheet's list of panel ids, restated for this panel (XRPL's note).
+      + '#lx-rwpanel td{font-family:"JetBrains Mono",monospace!important;font-size:15px!important}'
+      + '#lx-rwpanel .pair-name{font-family:"Hanken Grotesk",sans-serif!important;font-size:15.5px!important;font-weight:700!important}'
+      + '#lx-rwpanel .pair-sub{font-size:12.5px!important}'
+      + '#lx-rwpanel td div:not(.pair-name):not(.pair-sub){font-size:15px!important}';
+    (document.head || document.documentElement).appendChild(st);
+  }
+  var RWNOTE = '<div class="lx-rwnote">'
+    + '<div class="lx-rwnote-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+    + 'stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+    + '<circle cx="12" cy="9.1" r="6.1"></circle><path d="M8.4 14.3 7 21.4l5-2.7 5 2.7-1.4-7.1"></path>'
+    + '</svg></div>'
+    + '<div class="lx-rwnote-tx">'
+    + '<div class="lx-rwnote-t">These pools are part of the LumosCore Native LP and Ecosystem LP '
+    + 'reward programs.</div><div class="lx-rwnote-d">Liquidity providers share each round in proportion '
+    + 'to the liquidity they provide.</div></div>'
+    + '<div class="lx-rwnote-st"><span class="lx-rwnote-sl">First payout</span>'
+    + '<span class="lx-rwnote-sv">1 Dec 2026</span></div></div>';
+  function buildRwPanelN() {
+    rwNoteCssN();
+    var p = $('#lx-rwpanel'); if (p) return p;
+    var ap = $('#panelAllPools') || $('#panelAll'); if (!ap) return null;
+    p = ap.cloneNode(true);
+    $$('[id]', p).forEach(function (n) { n.removeAttribute('id'); });
+    p.id = 'lx-rwpanel';
+    $$('.lx-netpag-host, #paginationAll, .pagination, .page-controls', p).forEach(function (n) {
+      if (n.parentNode) n.parentNode.removeChild(n);
+    });
+    var tb = p.querySelector('tbody'); if (tb) tb.innerHTML = ''; else p.innerHTML = '';
+    if (tb) p.insertAdjacentHTML('afterbegin', RWNOTE);
+    else p.innerHTML = RWNOTE + '<div id="lx-rwcards"></div>';
+    p.style.display = 'none';
+    ap.parentNode.insertBefore(p, ap.nextSibling);
+    return p;
+  }
+  function revealRwN(pn) {
+    pn.setAttribute('data-lcm-done', '1');
+    pn.classList.add('lcm-on'); pn.classList.add('lcmu-in');
+    pn.style.setProperty('opacity', '1', 'important');
+    pn.style.setProperty('transform', 'none', 'important');
+    pn.style.setProperty('visibility', 'visible', 'important');
+  }
+  function paintRewardedN() {
+    var host = buildRwPanelN(); if (!host) return;
+    var tb = host.querySelector('tbody');
+    var h = { node: tb || host.querySelector('#lx-rwcards') || host, kind: tb ? 'table' : 'cards' };
+    var sig = RWSTATE + ':' + (RWROWS ? RWROWS.length : 0) + ':' + (USD || 0);
+    if (host.getAttribute('data-lxrwsig') === sig) return;
+    if (RWROWS && RWROWS.length) {
+      h.node.innerHTML = '';
+      var make = h.kind === 'table' ? row : card;
+      for (var i = 0; i < RWROWS.length; i++) h.node.appendChild(make(RWROWS[i], i + 1));
+    } else if (RWSTATE === 'error' && RWTRIES >= RWMAXTRY) {
+      noteHost(h, 'Could not load the rewarded pools just now.');
+    } else if (RWSTATE === 'done' && RWIDS && !RWIDS.length) {
+      noteHost(h, 'No LUMOS reward pool has been created on NEAR yet.');
+    } else {
+      noteHost(h, 'Loading the rewarded pools…');
+    }
+    rwBadge();
+    host.setAttribute('data-lxrwsig', sig);
+    revealRwN(host);
+    if (h.kind === 'table') rwMirrorColsN(host);
+  }
+  function rwMirrorColsN(host) {
+    var srcRow = $('#poolsBody tr'), srcHead = $('#panelAllPools thead tr');
+    function copy(a, b) {
+      if (!a || !b) return;
+      var sc = a.children, dc = b.children;
+      for (var i = 0; i < dc.length && i < sc.length; i++) {
+        var cs = getComputedStyle(sc[i]);
+        dc[i].style.textAlign = cs.textAlign;
+        dc[i].style.paddingRight = cs.paddingRight;
+      }
+    }
+    copy(srcHead, host.querySelector('thead tr'));
+    if (srcRow && srcRow.children.length > 1) {
+      $$('tbody tr', host).forEach(function (tr) { if (tr.children.length > 1) copy(srcRow, tr); });
+    }
+  }
+  // Built only if the markup lacks it (_nearpools.js bakes it); after All, before My Pools, with an EMPTY badge.
+  function addRwTabN() {
+    var bar = $('#poolTabs'); if (!bar) return;
+    if ($('#poolTabs button[data-tab="rewarded"]')) return;
+    var mine = $('#poolTabs button[data-tab="mine"]') || $('#poolTabs [data-tab="mine"]');
+    if (!mine) return;
+    var b = el('button');
+    b.setAttribute('data-tab', 'rewarded');
+    b.innerHTML = '<span class="lx-tabic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" '
+      + 'stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">'
+      + '<circle cx="12" cy="9.1" r="6.1"></circle><path d="M8.4 14.3 7 21.4l5-2.7 5 2.7-1.4-7.1"></path></svg></span>'
+      + 'Rewarded Pools <span class="count" data-logoed="1"></span>';
+    mine.parentNode.insertBefore(b, mine);
+  }
+  function applyRwN() {
+    var rwActive = !!window.__lxnRw;
+    if (rwActive && RWSTATE === 'error') loadRewardedN();
+    var rw = $('#lx-rwpanel');
+    if (rwActive && !rw) { paintRewardedN(); rw = $('#lx-rwpanel'); }
+    if (rw) {
+      rw.style.setProperty('display', rwActive ? 'block' : 'none', 'important');
+      if (rwActive) { revealRwN(rw); paintRewardedN(); }
+    }
+    var ap = $('#panelAllPools') || $('#panelAll');
+    if (rwActive) {
+      if (ap) ap.style.setProperty('display', 'none', 'important');
+      $$('.lx-netpag-host, #paginationAll, .search-box.inline-filter').forEach(function (n) {
+        n.style.setProperty('display', 'none', 'important');
+      });
+      window.__lxnRwHid = 1;
+    } else if (window.__lxnRwHid) {
+      if (ap) ap.style.removeProperty('display');
+      $$('.lx-netpag-host, #paginationAll, .search-box.inline-filter').forEach(function (n) {
+        n.style.removeProperty('display');
+      });
+      window.__lxnRwHid = 0;
+    }
+    $$('#poolTabs button[data-tab]').forEach(function (btn) {
+      var t = btn.getAttribute('data-tab');
+      var on = (t === 'rewarded') ? rwActive : (rwActive ? false : btn.classList.contains('active'));
+      if (t === 'rewarded' && btn.classList.contains('active') !== on) btn.classList.toggle('active', on);
+      if (t !== 'rewarded' && rwActive && btn.classList.contains('active')) btn.classList.remove('active');
+    });
+  }
+  window.addEventListener('click', function (e) {
+    var b = e.target && e.target.closest && e.target.closest('#poolTabs button[data-tab], #poolTabs [data-tab]');
+    if (!b) return;
+    window.__lxnRw = (b.getAttribute('data-tab') === 'rewarded');
+    if (window.__lxnRw) loadRewardedN();
+    setTimeout(applyRwN, 0); setTimeout(applyRwN, 90);
+  }, true);
+  function bootRwN() { try { addRwTabN(); rwBadge(); applyRwN(); } catch (e) {} }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bootRwN);
+  else bootRwN();
+  setInterval(bootRwN, 1200);
+  if ($('#poolTabs') || document.readyState === 'loading') loadRwIds();      // the badge's number, once
+  // DEEP LINK INTO THE REWARDED TAB (the LUMOS page's Ecosystem card links here). Both forms, as XRPL and Stellar.
+  try {
+    if (/(^|[?&])tab=rewarded|#rewarded/.test((location.search || '') + ' ' + (location.hash || ''))) {
+      window.__lxnRw = true;
+      loadRewardedN(); applyRwN();
+      setTimeout(applyRwN, 90); setTimeout(applyRwN, 600);
+      // Hand over from the head gate (lx-rwgate): applyRwN has hidden All Pools for real.
+      try { document.documentElement.classList.remove('lx-rwpending'); } catch (e2) {}
+    }
+  } catch (e) {}
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', load);
   else load();

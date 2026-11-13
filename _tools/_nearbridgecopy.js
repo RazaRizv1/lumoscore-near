@@ -132,7 +132,10 @@ for (const dev of ['desktop', 'mobile']) {
     if (h.indexOf(esc(SUB)) < 0) missing.add('hero sub');
 
     // ---- FAQ: each item located by its question, rewritten whole ----
-    const itemRe = /(<h3 class="lx-faq-q"[^>]*>)([^<]*)(<\/h3>\s*<p class="lx-faq-a"[^>]*>)([\s\S]*?)(<\/p>)/g;
+    // Two shapes (2026-11-13): the old card (<h3 class="lx-faq-q">Q</h3><p class="lx-faq-a">) and the accordion
+    // _nearfaqview.js renders (<button class="lx-faq-q"><span>Q</span>...<p class="lx-faq-a">), which is what every
+    // run after the first finds. Same five groups in both, so one replace serves either.
+    const itemRe = /(<h3 class="lx-faq-q"[^>]*>|<button[^>]*class="lx-faq-q"[^>]*>\s*<span>)([^<]*)(<\/h3>\s*<p class="lx-faq-a"[^>]*>|<\/span>[\s\S]{0,800}?<p class="lx-faq-a"[^>]*>)([\s\S]*?)(<\/p>)/g;
     const byQ = {};
     FAQ.forEach((f) => { byQ[f[0]] = f; byQ[f[1]] = f; });
     const seenQ = new Set();
@@ -148,9 +151,9 @@ for (const dev of ['desktop', 'mobile']) {
 
     // ---- FAQPage ld+json, rebuilt from the visible pairs ----
     const pairs = [];
-    let pm; const pre = /<h3 class="lx-faq-q"[^>]*>([^<]*)<\/h3>\s*<p class="lx-faq-a"[^>]*>([\s\S]*?)<\/p>/g;
+    let pm; const pre = /(?:<h3 class="lx-faq-q"[^>]*>([^<]*)<\/h3>\s*|<button[^>]*class="lx-faq-q"[^>]*>\s*<span>([^<]*)<\/span>[\s\S]{0,800}?)<p class="lx-faq-a"[^>]*>([\s\S]*?)<\/p>/g;
     while ((pm = pre.exec(h))) {
-      pairs.push({ q: unesc(pm[1].replace(/\s+/g, ' ').trim()), a: unesc(pm[2].replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim()) });
+      pairs.push({ q: unesc((pm[1] != null ? pm[1] : pm[2]).replace(/\s+/g, ' ').trim()), a: unesc(pm[3].replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim()) });
     }
     if (pairs.length) {
       const ld = { '@context': 'https://schema.org', '@type': 'FAQPage',

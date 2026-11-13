@@ -120,6 +120,9 @@ const COPY = [
    'A dedicated 50M LUMOS pool is set aside for wallets holding 5M+ LUMOS. Rewards are not live on NEAR yet.'],
   ['<a class="u-link" href="/rewards/stellar">', '<a class="u-link" href="/rewards/near">'],
   ['<a class="u-link" href="/pools/stellar">', '<a class="u-link" href="/pools/near">'],
+  // The Ecosystem LP card's link lands on the Pools page's Rewarded tab, as Stellar's _lumosutility.js and XRPL's
+  // _xrpllumoslinks.js do (RAZA 2026-11-13). The whole anchor, label included, so no other /pools/near link can match.
+  ['<a class="u-link" href="/pools/near">View partner pools →</a>', '<a class="u-link" href="/pools/near?tab=rewarded">View Rewarded Pools →</a>'],
   ['Initialize a new liquidity pool on Stellar AMM', 'Initialize a new liquidity pool on NEAR AMM'],
   ['~0.00001 XLM', '—'],
   ['<span>1 APT ≈ <strong>312.5 LUMOS</strong></span>', '<span>1 NEAR ≈ <strong>—</strong></span>'],
@@ -137,7 +140,7 @@ const COPY = [
   ['Connected · Stellar', 'Connected · NEAR'],
 ];
 // A rule that must have landed on every page, or the build stops: its text moving is how a page goes back to Stellar.
-const MUST = ['issued on NEAR Protocol', 'trades on the NEAR network', 'fixed supply on NEAR.', 'LUMOS liquidity on NEAR — the LUMOS/NEAR pool', '/rewards/near', '/pools/near">'];
+const MUST = ['issued on NEAR Protocol', 'trades on the NEAR network', 'fixed supply on NEAR.', 'LUMOS liquidity on NEAR — the LUMOS/NEAR pool', '/rewards/near', 'href="/pools/near?tab=rewarded">View Rewarded Pools'];
 
 function nearMarkup(h, key) {
   const phone = key.indexOf('-mobile') >= 0;

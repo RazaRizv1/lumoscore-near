@@ -170,19 +170,20 @@ for (const dev of ['desktop', 'mobile']) {
 
     // The visible FAQ answer, then the structured data rebuilt FROM the visible answers.
     h = h.replace(
-      /(<h3 class="lx-faq-q"[^>]*>\s*What does it cost to mint a token\?\s*<\/h3>[\s\S]{0,300}?<p class="lx-faq-a"[^>]*>)([\s\S]*?)(<\/p>)/,
+      // The old card or the accordion _nearfaqview.js renders (2026-11-13): whichever the page holds.
+      /((?:<h3 class="lx-faq-q"[^>]*>\s*What does it cost to mint a token\?\s*<\/h3>|<button[^>]*class="lx-faq-q"[^>]*>\s*<span>\s*What does it cost to mint a token\?\s*<\/span>)[\s\S]{0,800}?<p class="lx-faq-a"[^>]*>)([\s\S]*?)(<\/p>)/,
       function (m0, open, body, close) {
         if (body.trim() === COST_A) return m0;
         faqs++;
         return open + COST_A + close;
       });
     const pairs = [];
-    const pre = /<h3 class="lx-faq-q"[^>]*>([\s\S]{0,300}?)<\/h3>[\s\S]{0,300}?<p class="lx-faq-a"[^>]*>([\s\S]*?)<\/p>/g;
+    const pre = /(?:<h3 class="lx-faq-q"[^>]*>([\s\S]{0,300}?)<\/h3>|<button[^>]*class="lx-faq-q"[^>]*>\s*<span>([\s\S]{0,300}?)<\/span>)[\s\S]{0,800}?<p class="lx-faq-a"[^>]*>([\s\S]*?)<\/p>/g;
     let pm;
     while ((pm = pre.exec(h))) {
       pairs.push({
-        q: pm[1].replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim(),
-        a: pm[2].replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim(),
+        q: (pm[1] != null ? pm[1] : pm[2]).replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim(),
+        a: pm[3].replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim(),
       });
     }
     if (pairs.length) {
