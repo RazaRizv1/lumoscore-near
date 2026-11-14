@@ -1457,7 +1457,9 @@
   }
   function formBanner() {
     if (overBalance()) return 'Amount exceeds your balance (' + balFigure(balRaw(SRC), SRC) + ').';
-    var gs = (MAX_TRIED || amounts()) ? routeShort() : '';
+    // AS SOON AS THE ROUTE IS PICKED (RAZA 2026-11-14: Wormhole showed 'Available to send 0 NEAR' with no reason until
+    // MAX or an amount): the shortfall is said the moment a route the account's NEAR cannot cover is selected.
+    var gs = routeShort();
     if (gs) return gs;
     var dc = destChain();
     if (dc) { var ae = destAddrError(dc, recipient()); if (ae) return ae; }
