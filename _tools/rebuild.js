@@ -103,6 +103,9 @@ const CHAIN = [
   // markup and re-renders them through the shared _faqview.js. After EVERY FAQ writer above (_nearfaq,
   // _nearlaunchpad, _nearlumospage, _nearrewards, _nearbridgecopy), so the answers it re-renders are NEAR's.
   '_nearfaqview',
+  // Phone bottom bar: Launch in place of Pools (RAZA 2026-11-14). Patches the tab in place; late so no pass that
+  // rebuilds a page key from the design can hand the Pools tab back.
+  '_nearnavlaunch',
   // Last until there is anything else: it only touches <a> tags pointing off-site, and any later pass
   // that rebuilds a page key from the design hands those tags back without rel="nofollow".
   '_nofollow',
