@@ -234,7 +234,13 @@
     var st = document.createElement('style');
     st.id = 'lx-nbrr-sel';
     st.textContent = '.lx-brr[aria-pressed="true"],.lx-brr[aria-pressed="true"]:hover,.lx-brr[aria-pressed="true"]:hover:not([disabled])'
-      + '{border-color:var(--accent,#ea6a2c)!important}';
+      + '{border-color:var(--accent,#ea6a2c)!important}'
+      // THE REVIEW ROWS WRAP, NEVER CROP THEIR START (RAZA 2026-11-14, ticket 410: "mni Bridge · +0.0029 NEAR relayer fee").
+      // The inherited value cell was nowrap + overflow hidden inside a flex box justified to the end, so a value wider
+      // than its 60% spilled off the LEFT edge, past the ellipsis. Long values now wrap, right-aligned.
+      + '.br-rv-list .r .v{white-space:normal!important;overflow:visible!important;text-overflow:clip!important;'
+      + 'overflow-wrap:anywhere;text-align:right;max-width:66%!important;min-width:0}'
+      + '.br-rv-list .r .v.mono{flex-wrap:wrap}';
     (document.head || document.documentElement).appendChild(st);
   })();
 
@@ -1517,7 +1523,7 @@
         + '<img src="' + esc2(o.meta.img) + '" alt=""></span>'
         + '<span class="lx-brr-hd"><span class="lx-brr-nm" data-logoed="1">' + esc2(o.meta.name) + '</span>'
         + '</span>';
-      if (sel && o.state === 'ok') h += '<span class="lx-brr-tag">In use</span>';
+      // No "In use" tag (RAZA 2026-11-14, ticket 409): the selected card's outline says it.
       h += '</div>';
       if (o.state === 'none' && o.error && o.error !== formBanner()) {
         h += '<div class="lx-brs-note" style="margin-top:0;padding-top:0">' + esc2(o.error) + '</div>';
@@ -2225,7 +2231,7 @@
         // receives it"). The deposit is on NEAR and the solvers deliver with no help from here, so the form is let go at
         // once and the Recent transactions row follows the delivery.
         var place = placeLabel(destChain());
-        handOver(r.q.depositAddress, 'Your deposit is on NEAR and the rest happens without you. You can close this — it will still arrive at your ' + (place ? place + ' ' : '') + 'address.');
+        handOver(r.q.depositAddress, 'sent', false, { route: 'ni', place: place, hash: r.out.hash || '' });
       })
       .catch(function (e) {
         busy = false;
@@ -2307,11 +2313,10 @@
       if (res.o.failed) throw new Error('The transfer failed on NEAR. Nothing was bridged.');
       if (res.o.refused) throw new Error(name + ' refused the transfer and the token returned it to your wallet (LumosCore’s 0.2% was not).');
       recordBr(r, res.o.hash, src, label, me, to, amt);
-      say(r === 'om' ? 'Sent — Omni is delivering it' : 'Sent — claim it below once Wormhole signs (~15 min)');
+      // "Sent", not a sentence wrapping over two lines (RAZA 2026-11-14, ticket 412): what comes next is in the dialog.
+      say('Sent');
       if (res.o.hash) follow(res.o.hash, 0);
-      var line = r === 'om' ? 'Sent. Omni is delivering it — its status is in Recent transactions.'
-        : 'Sent. Claim it in Recent transactions once Wormhole signs (~15 min).';
-      setTimeout(function () { resetAfterDelivery(res.o.hash ? line : ''); }, 5000);
+      setTimeout(function () { resetAfterDelivery(res.o.hash ? 'sent' : '', false, { route: r, place: label, hash: res.o.hash }); }, 1200);
     }).catch(function (e) {
       say(e && e.lxnWallet ? walletSaid(e, e.lxnMulti) : String((e && e.message) || 'Transfer failed'));
       setTimeout(function () { busy = false; setCta(); }, 6000);
@@ -2365,7 +2370,7 @@
       msg.appendChild(document.createTextNode(' ')); msg.appendChild(a);
     }
     if (done) [].slice.call(list.children).forEach(function (li) { li.className = 'done'; });
-    else list.style.display = 'none';
+    else { list.style.display = 'none'; var sb = el.querySelector('.lx-prog-sub'); if (sb) sb.textContent = ''; }
     DLG_HASH = '';
   }
   function follow(hash, tries) {
@@ -2433,7 +2438,14 @@
   // THE SAME DIALOG STELLAR AND XRPL SHOW (RAZA 2026-11-06: "That's not how we show on Stellar and XRPL when cross-chain
   // swap is confirmed"): their .lx-prog overlay on the bridge card, whose stylesheet this page already carries, in the
   // state Stellar's lxBrProgUpdate leaves it once delivery begins. Everything is written with textContent.
-  function sentDialog(msg, bad) {
+  // THE SENT DIALOG IS STELLAR'S (RAZA 2026-11-14, tickets 408 and 411: "doesn't look the same as we have on Stellar", and
+  // "once its sent from source, this should show done"). _cctp.js's .lx-prog, whose sheet this page carries: a title, a
+  // subtitle, the steps, a line and the Done button. It opens FINISHED: our part ends when the NEAR transaction lands, so
+  // nothing spins. The second step says the transfer was HANDED to the bridge, which is true now, never that it was
+  // delivered; if the reader stays, dialogStatus() still turns a NEAR Intents row into Stellar's "Delivered" once 1Click
+  // reports it. Wormhole is the one route with something left to do, so its claim step stays open, unticked, unspun.
+  // msg is the failure sentence when bad; info = { route, place, hash } on success. Written with textContent only.
+  function sentDialog(msg, bad, info) {
     var host = $('.br-card');
     if (!host) return;
     var el = document.getElementById('lx-prog');
@@ -2442,28 +2454,54 @@
       el.id = 'lx-prog';
       el.className = 'lx-prog';
       el.setAttribute('data-logoed', '1');
-      el.innerHTML = '<div class="lx-prog-card"><div class="lx-prog-h"></div><ul class="lx-prog-list"></ul>'
+      el.innerHTML = '<div class="lx-prog-card"><div class="lx-prog-h"></div><div class="lx-prog-sub"></div><ul class="lx-prog-list"></ul>'
         + '<div class="lx-prog-msg"></div><button class="lx-prog-x" type="button">Done</button></div>';
       host.appendChild(el);
       el.querySelector('.lx-prog-x').addEventListener('click', function () { el.style.display = 'none'; DLG_HASH = ''; });
     }
-    var place = placeLabel(destChain()), list = el.querySelector('.lx-prog-list');
-    el.querySelector('.lx-prog-h').textContent = bad ? 'This transfer needs a look' : 'Sent — delivery is automatic';
-    el.querySelector('.lx-prog-msg').textContent = msg;
+    var i = info || {}, r = i.route || 'ni', name = (ROUTE_META[r] || ROUTE_META.ni).name;
+    var place = i.place || placeLabel(destChain()) || 'the destination';
+    var h = el.querySelector('.lx-prog-h'), sub = el.querySelector('.lx-prog-sub'), list = el.querySelector('.lx-prog-list'),
+      m = el.querySelector('.lx-prog-msg');
+    m.textContent = '';
     list.innerHTML = '';
-    list.style.display = bad ? 'none' : '';
-    if (!bad) [['Deposit from NEAR', 'done'], ['Deliver on ' + (place || 'the destination'), 'active']].forEach(function (x) {
-      var li = document.createElement('li'), dot = document.createElement('span'), a = document.createElement('span'),
-        b = document.createElement('span'), lab = document.createElement('span');
-      dot.className = 'lx-pdot'; a.className = 'lx-spin'; b.className = 'lx-tick'; lab.className = 'lx-plab';
+    if (bad) {
+      h.textContent = 'This transfer needs a look';
+      sub.textContent = '';
+      list.style.display = 'none';
+      m.textContent = msg;
+      el.style.display = 'flex';
+      return;
+    }
+    list.style.display = '';
+    h.textContent = 'Sent via ' + name + ' ✓';
+    sub.textContent = r === 'wh' ? 'One more step after this: the claim on ' + place + '.' : 'Nothing to claim — delivery is automatic.';
+    var steps = r === 'wh'
+      ? [['Sent from NEAR', 'done'], ['Claim on ' + place + ' once Wormhole signs (~15 min)', '']]
+      : [['Deposit from NEAR', 'done'], ['Delivering to ' + place + ' — track it in Recent transactions', 'done']];
+    steps.forEach(function (x) {
+      var li = document.createElement('li'), dot = document.createElement('span'), a2 = document.createElement('span'),
+        b2 = document.createElement('span'), lab = document.createElement('span');
+      dot.className = 'lx-pdot'; a2.className = 'lx-spin'; b2.className = 'lx-tick'; lab.className = 'lx-plab';
       lab.textContent = x[0];
-      dot.appendChild(a); dot.appendChild(b); li.appendChild(dot); li.appendChild(lab);
+      dot.appendChild(a2); dot.appendChild(b2); li.appendChild(dot); li.appendChild(lab);
       li.className = x[1];
       list.appendChild(li);
     });
+    m.textContent = r === 'wh'
+      ? 'Your NEAR transaction is done. Once Wormhole’s guardians sign it, claim it from the Pending claims tab below with an EVM wallet, paying ' + place + '’s gas.'
+      : (name + ' delivers it to your ' + place + ' address on its own, ' + (r === 'om' ? 'usually in a few minutes' : 'usually in under a minute')
+        + '. You can close this.');
+    if (i.hash) {
+      var lk = document.createElement('a');
+      lk.href = txExplorer(i.hash); lk.target = '_blank'; lk.rel = 'noopener';
+      lk.style.cssText = 'color:var(--accent,#ea6a2c);font-weight:700';
+      lk.textContent = 'View on NearBlocks ↗';
+      m.appendChild(document.createElement('br')); m.appendChild(document.createElement('br')); m.appendChild(lk);
+    }
     el.style.display = 'flex';
   }
-  function resetAfterDelivery(msg, bad) {
+  function resetAfterDelivery(msg, bad, info) {
     busy = false;
     try {
       clearTimeout(qTimer); qSeq++; QUOTING = false;    // a quote still in flight must not repaint a clean form
@@ -2483,7 +2521,7 @@
           if (b1) b1.click();
         } catch (_) {}
       }, 140);
-      if (msg) sentDialog(msg, bad);
+      if (msg) sentDialog(msg, bad, info);
     } catch (e) {}
   }
   // send.js's toast, kept up longer: this one is a sentence the reader has to be able to finish.
@@ -2532,9 +2570,9 @@
   }
   // THE FORM IS LET GO, THE TRANSFER IS NOT. Once the deposit is on NEAR the solvers deliver with no help from
   // this page (_cctp.js, RAZA 2026-10-23: "users wont be waiting on here"), so past the wait the row takes over.
-  function handOver(dep, msg, bad) {
+  function handOver(dep, msg, bad, info) {
     var rec = txList().filter(function (x) { return x && x.dep === dep; })[0];
-    resetAfterDelivery(msg, bad);
+    resetAfterDelivery(msg, bad, info);
     if (rec) { DLG_HASH = bad ? '' : rec.hash; follow(rec.hash, 0); }
   }
   var NI_READ_MS = 15000, FOLLOW_MAX = 7 * 86400000;

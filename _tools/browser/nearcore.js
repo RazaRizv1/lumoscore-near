@@ -299,11 +299,47 @@
   // A POOL DEPOSIT OR WITHDRAWAL MADE HERE, reported for Platform Activity (RAZA 2026-11-13; /lxapi/nearact checks each
   // hash against the chain before keeping it). Fire and forget: whatever happens here, the page behaves the same. A
   // transaction the chain does not list yet is asked again twice.
+  // AND KEPT IN THIS TAB AT ONCE (RAZA 2026-11-13: a new pool's deposit and its provider took ~2 min to appear; "Max 2-3
+  // seconds"). The indexer reads the chain on its own clock; the wallet's result already holds the pool's own log
+  // ("Liquidity added ["<raw> <token>", ...], minted N shares"). That is kept in sessionStorage (the pool page opens
+  // in this tab), and the pool page draws it until the indexer's row for the same transaction replaces it.
+  function stashPoolTx(me, r, h) {
+    try {
+      var tx = r.transaction || {}, pool = null, kind = null;
+      (tx.actions || []).forEach(function (a) {
+        var fc = a && (a.FunctionCall || a.functionCall);
+        var m = fc && (fc.method_name || fc.methodName);
+        if (!/^(add_liquidity|add_stable_liquidity|remove_liquidity|remove_liquidity_by_tokens)$/.test(m || '')) return;
+        try { var args = JSON.parse(atob(fc.args)); if (args && args.pool_id != null) { pool = String(args.pool_id); kind = m.indexOf('add') === 0 ? 'deposit' : 'withdraw'; } } catch (e) {}
+      });
+      if (pool == null) return;
+      var toks = [], shares = '';
+      (r.receipts_outcome || []).forEach(function (ro) {
+        var o = (ro && ro.outcome) || {};
+        if (o.executor_id !== 'v2.ref-finance.near') return;
+        (o.logs || []).forEach(function (l) {
+          if (l.indexOf('Liquidity added [') !== 0 && l.indexOf('shares of liquidity removed') < 0) return;
+          var re = /"([0-9]+) ([^" ]+)"/g, mm;
+          while ((mm = re.exec(l))) toks.push([mm[1], mm[2]]);
+          var sh = /minted ([0-9]+) shares/.exec(l) || /^([0-9]+) shares of liquidity removed/.exec(l);
+          if (sh) shares = sh[1];
+        });
+      });
+      if (!toks.length) return;
+      var list = [];
+      try { list = JSON.parse(sessionStorage.getItem('lxn.mypooltx') || '[]') || []; } catch (e) { list = []; }
+      list = list.filter(function (x) { return x && x.h !== h; });
+      list.unshift({ pool: pool, kind: kind, who: me, h: h, t: Date.now(), toks: toks, shares: shares });
+      sessionStorage.setItem('lxn.mypooltx', JSON.stringify(list.slice(0, 20)));
+      try { window.dispatchEvent(new CustomEvent('lxn:pooltx', { detail: { pool: pool } })); } catch (e2) {}
+    } catch (e) {}
+  }
   function recordPool(me, results) {
     try {
       [].concat(results || []).forEach(function (r) {
         var h = r && ((r.transaction && r.transaction.hash) || (r.transaction_outcome && r.transaction_outcome.id));
         if (!h || !me) return;
+        stashPoolTx(me, r, h);
         var n = 0;
         (function send() {
           fetch('/lxapi/nearact', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ who: me, h: h }) })

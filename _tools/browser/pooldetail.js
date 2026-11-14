@@ -294,7 +294,28 @@
     var plist = $('#partList');
     if (plist) { plist.style.contain = 'size'; plist.style.minHeight = '320px'; }
     participants('Reading the liquidity providers…');
+    MYPART = null;
+    myShare(id);
     readLps(0);
+  }
+  // THE CONNECTED ACCOUNT AS A PROVIDER AT ONCE (RAZA 2026-11-13). The provider list waits on the indexer; whether the
+  // connected account holds shares is one read of the pool, so it is listed the moment that answers.
+  var MYPART = null;
+  function withMine(rows) {
+    if (!MYPART || rows.some(function (r) { return r.a === MYPART.a; })) return rows;
+    return rows.concat([MYPART]).sort(function (x, y) { return (+y.pct || 0) - (+x.pct || 0); });
+  }
+  function myShare(id) {
+    var me = addr();
+    if (!me || id == null) return;
+    Promise.all([nview('v2.ref-finance.near', 'get_pool_shares', { pool_id: +id, account_id: me }),
+                 nview('v2.ref-finance.near', 'get_pool', { pool_id: +id })]).then(function (r) {
+      var mine = Number(r[0] || '0'), tot = Number((r[1] && r[1].shares_total_supply) || '0');
+      if (!(mine > 0) || !(tot > 0) || (window.__lxnPool && String(window.__lxnPool.id) !== String(id))) return;
+      MYPART = { a: me, shares: String(r[0]), staked: '0', pct: mine / tot * 100 };
+      PART.rows = withMine(PART.rows || []);
+      renderParticipants();
+    }, function () {});
   }
   // A POOL MADE A MOMENT AGO (RAZA 2026-11-13, LUMOS/ZEC 9017 straight after creating it): its deposit reaches the indexer
   // seconds later, so an empty list over a pool that has shares is asked again, four times 15s apart, before the page
@@ -304,10 +325,15 @@
     if (id == null) return;
     fetch('/lxapi/nearlps?pool=' + encodeURIComponent(id) + (at ? '&r=' + at : '')).then(function (r) { return r.json(); }).then(function (d) {
       if (!d || !d.ok) { emptyParticipants('Could not read the liquidity providers — try again shortly.'); return; }
-      PART.rows = d.providers || [];
+      PART.rows = withMine(d.providers || []);
       PART.at = d.at || 0;
       var counted0 = window.__lxnPoolRow && +window.__lxnPoolRow.lps;
-      if (!PART.rows.length && d.total && d.total !== '0' && at < 4) { setTimeout(function () { readLps(at + 1); }, 15000); return; }
+      // Asked again every 5s for a minute while the list is short of the pool's shares (a new pool); rows already
+      // known -- the connected account's own -- stay drawn meanwhile.
+      if (!(d.providers || []).length && d.total && d.total !== '0' && at < 12) {
+        if (PART.rows.length) renderParticipants();
+        setTimeout(function () { readLps(at + 1); }, 5000); return;
+      }
       if (!PART.rows.length) {
         emptyParticipants(counted0 > 0 ? (counted0.toLocaleString('en-US') + (counted0 === 1 ? ' provider is' : ' providers are')
           + ' counted, but none could be listed and read just now.') : 'No liquidity providers found.');
@@ -984,7 +1010,7 @@
         TXI.failed = false;
         mergeTx();
         // Same for its transactions: a deposit made a moment ago reaches the index seconds later.
-        if (!TXI.rows.length && (TXI.tries = (TXI.tries || 0) + 1) <= 4) setTimeout(loadIdx, 15000);
+        if (!TXI.rows.length && (TXI.tries = (TXI.tries || 0) + 1) <= (stashedHere() ? 12 : 4)) setTimeout(loadIdx, stashedHere() ? 5000 : 15000);
       });
     }).catch(function () { TXI.failed = true; mergeTx(); });
   }
@@ -1018,19 +1044,61 @@
         CHAIN.failed = true; renderTx();
       });
   }
+  // THIS TAB'S OWN DEPOSIT OR WITHDRAWAL, FROM THE WALLET'S RESULT (nearcore stashPoolTx), drawn at once and dropped as
+  // soon as the index lists the same transaction. Kept 30 minutes; only this pool's.
+  var LOCALTX = [];
+  // Whether this tab has just deposited to or withdrawn from THIS pool: only then is an empty index a lag worth
+  // waiting out (fast retries, a spinner); for any other pool an empty index is the answer.
+  function stashedHere() {
+    var p = window.__lxnPool; if (!p) return false;
+    try { return (JSON.parse(sessionStorage.getItem('lxn.mypooltx') || '[]') || []).some(function (x) { return x && String(x.pool) === String(p.id) && Date.now() - x.t < 1800000; }); } catch (e) { return false; }
+  }
+  function loadLocalTx() {
+    var p = window.__lxnPool;
+    if (!p) return;
+    var list = [];
+    try { list = JSON.parse(sessionStorage.getItem('lxn.mypooltx') || '[]') || []; } catch (e) { list = []; }
+    list = list.filter(function (x) { return x && String(x.pool) === String(p.id) && Date.now() - x.t < 1800000 && Array.isArray(x.toks); });
+    if (!list.length) return;
+    var ids = {};
+    list.forEach(function (x) { x.toks.forEach(function (t) { ids[t[1]] = 1; }); });
+    var keys = Object.keys(ids);
+    Promise.all(keys.map(function (i) { return decOf(i).catch(function () { return null; }); })).then(function (decs) {
+      var dec = {}; keys.forEach(function (i, k) { dec[i] = decs[k]; });
+      LOCALTX = list.map(function (x) {
+        var cells = x.toks.map(function (t) { var v = dec[t[1]] != null ? scaled(t[0], dec[t[1]]) : null; return (v != null ? txAmt(v) : '?') + ' ' + tokName(t[1]); }).join(' + ');
+        return { kind: x.kind, who: ACCT_RE.test(x.who || '') ? x.who : '', t: x.t, hash: x.h, src: 'local',
+          cells: [cells, x.shares ? txAmt(scaled(x.shares, 24)) + ' LP' : '—'] };
+      });
+      mergeTx();
+    });
+  }
+  // A deposit or withdrawal made on this page shows at once too, and the account's share is read again.
+  if (!window.__lxnPoolTxEv) {
+    window.__lxnPoolTxEv = 1;
+    window.addEventListener('lxn:pooltx', function (e) {
+      var p = window.__lxnPool;
+      if (!p || !e.detail || String(e.detail.pool) !== String(p.id)) return;
+      loadLocalTx(); myShare(p.id);
+    });
+  }
   function mergeTx() {
     var gt = GTROWS, idx = TXI.rows;
-    if (gt == null && idx == null && !TXI.failed && TX.err !== 'untracked' && !TX.err) return;   // nothing back yet
+    if (gt == null && idx == null && !TXI.failed && TX.err !== 'untracked' && !TX.err && !LOCALTX.length) return;   // nothing back yet
     var swaps = (gt && gt.length) ? gt : (idx || []).filter(function (r) { return r.kind === 'swap'; });
     if (!swaps.length && CHAIN.rows && CHAIN.rows.length) swaps = CHAIN.rows;
     var liq = (idx || []).filter(function (r) { return r.kind !== 'swap'; });
+    var known = {};
+    liq.forEach(function (r) { if (r.hash) known[r.hash] = 1; });
+    liq = liq.concat(LOCALTX.filter(function (r) { return !known[r.hash]; }));
     var all = swaps.concat(liq).sort(function (x, y) { return (y.t || 0) - (x.t || 0); });
-    if (all.length || idx != null) { TX.rows = all; if (all.length) TX.err = false; }
+    if (all.length || idx != null || LOCALTX.length) { TX.rows = all; if (all.length) TX.err = false; }
     renderTx();
   }
   function loadTx() {
     var p = window.__lxnPool;
     if (!p) return;
+    loadLocalTx();
     loadIdx();
     var at = 0;
     var go = function () {
@@ -1102,7 +1170,11 @@
       if (!slice.length) {
         var tr0 = document.createElement('tr');
         tr0.className = 'lx-txrow';
-        var td0 = el('td', null, txNote());
+        // Still reading -- any source, or the index asked again for a pool it has not listed yet -- spins rather than
+        // saying "no transactions" (RAZA 2026-11-13).
+        var reading = (TXI.rows == null && !TXI.failed && !TXI.off) || (TXI.rows && !TXI.rows.length && TXI.tries && TXI.tries <= 12 && stashedHere() && !LOCALTX.length);
+        var td0 = el('td', null, reading ? 'Reading this pool’s transactions…' : txNote());
+        if (reading || /^Reading/.test(td0.textContent)) spinInto(td0);
         td0.colSpan = 6;
         td0.style.cssText = 'padding:22px 12px;text-align:center;opacity:.7';
         tr0.appendChild(td0);
@@ -2169,8 +2241,24 @@
       host.innerHTML = '';
       var d = el('div', 'acc-empty lx-partrow', text);
       d.style.cssText = 'padding:20px 8px;text-align:center;opacity:.7;font-size:13.5px';
+      if (/^Reading/.test(text)) spinInto(d);
       host.appendChild(d);
     });
+  }
+  // A READ IN PROGRESS SPINS (RAZA 2026-11-13: "instead of showing no transaction or participants, you can just show a
+  // rotating round loading"). Any note that is a read under way gets the ring before its words.
+  function spinCss() {
+    if (document.getElementById('lx-spin-css')) return;
+    var st = document.createElement('style'); st.id = 'lx-spin-css';
+    st.textContent = '.lx-spin{display:inline-block;width:15px;height:15px;margin-right:9px;vertical-align:-3px;border-radius:50%;'
+      + 'border:2px solid var(--border,rgba(127,127,140,.35));border-top-color:var(--accent,#ea6a2c);animation:lxspin .8s linear infinite}'
+      + '@keyframes lxspin{to{transform:rotate(360deg)}}';
+    (document.head || document.documentElement).appendChild(st);
+  }
+  function spinInto(node) {
+    spinCss();
+    var sp = document.createElement('span'); sp.className = 'lx-spin'; sp.setAttribute('aria-hidden', 'true');
+    node.insertBefore(sp, node.firstChild);
   }
 
   // THE LOADING STATE SHOWS DASHES, NOT ANOTHER CHAIN'S NUMBERS.
