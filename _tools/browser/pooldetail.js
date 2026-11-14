@@ -1408,17 +1408,19 @@
       copyBtn.setAttribute('data-copy', id);
       copyBtn.setAttribute('data-copy-label', 'Pool ID');
     }
-    // THE EXPLORER BUTTON GOES TO NEARBLOCKS, as the account page's does (RAZA 2026-11-07: "redirects to an incorrect
-    // destination"). A pool is an entry inside one contract, not an account, so NearBlocks has no page per pool; the
-    // page it does have is the pool contract's, the one every classic pool lives in.
+    // THE EXPLORER BUTTON OPENS THIS POOL'S OWN PAGE on RHEA Finance, the exchange it lives on (RAZA 2026-11-14: "the
+    // explorer link for the pools is not correct. all of them link to" the pool contract on NearBlocks -- then "Yes,
+    // link Rhea's page"). A pool is an entry inside one contract, not an account, so NearBlocks has no page per pool;
+    // GeckoTerminal and DexScreener miss new pools (9017 is on neither). app.rhea.finance/pool/<id> answers for every
+    // classic pool, 9017 included (checked: LUMOS-ZEC, TVL $0.65).
     var exp = $('.ph-id button[data-tooltip="View on Explorer"]') || $('.ph-id button:not([data-copy])');
     if (exp && exp.parentNode) {
       var ea = document.createElement('a');
-      ea.href = 'https://nearblocks.io/address/v2.ref-finance.near';
+      ea.href = 'https://app.rhea.finance/pool/' + encodeURIComponent(id);
       ea.target = '_blank';
       ea.rel = 'noopener noreferrer';
-      ea.title = 'View on NearBlocks';
-      ea.setAttribute('aria-label', 'View the pool contract on NearBlocks');
+      ea.title = 'View on RHEA Finance';
+      ea.setAttribute('aria-label', 'View this pool on RHEA Finance');
       ea.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;color:inherit;text-decoration:none';
       while (exp.firstChild) ea.appendChild(exp.firstChild);
       exp.parentNode.replaceChild(ea, exp);
