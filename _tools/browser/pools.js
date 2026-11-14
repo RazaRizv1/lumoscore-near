@@ -154,6 +154,9 @@
     if (v >= 1e9) return (v / 1e9).toFixed(2) + 'B';
     if (v >= 1e6) return (v / 1e6).toFixed(2) + 'M';
     if (v >= 1000) return Math.round(v).toLocaleString('en-US');
+    // A reserve under a cent read '0' (RAZA 2026-11-13: LUMOS/ZEC 9017 showed '+ 0 ZEC' over 0.00037358 ZEC). Three
+    // significant digits below 0.01, so a small amount is never shown as none.
+    if (v > 0 && v < 0.01) { var d = Math.min(12, 2 - Math.floor(Math.log(v) / Math.LN10)); return v.toFixed(d).replace(/0+$/, ''); }
     return v.toLocaleString('en-US', { maximumFractionDigits: 2 });
   }
 
@@ -1303,6 +1306,9 @@
     if (!bdg) return;
     var n = RWROWS && RWROWS.length ? RWROWS.length : (RWIDS ? RWIDS.length : null);
     if (n != null && bdg.textContent !== String(n)) bdg.textContent = String(n);
+    // The inherited lx-amm-css hides every tab count until it is marked done (.lx-snapd), so a stale figure never
+    // shows; the badge is marked once it holds the real number, and stays hidden while unread.
+    if (n != null && !bdg.classList.contains('lx-snapd')) bdg.classList.add('lx-snapd');
   }
   // Which pools: one edge call, cached there five minutes. A failed read is not "no rewarded pools".
   function loadRwIds() {
