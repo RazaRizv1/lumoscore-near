@@ -12,21 +12,35 @@ const WNEAR = 'wrap.near';
 const RPCS = ['https://free.rpc.fastnear.com', 'https://near.drpc.org'];
 const TTL = 60;
 
-async function getPool(id) {
+async function view(account, method, args, ms) {
   for (const u of RPCS) {
     try {
-      const ctl = new AbortController(); const tm = setTimeout(() => ctl.abort(), 5000);
+      const ctl = new AbortController(); const tm = setTimeout(() => ctl.abort(), ms || 5000);
       const r = await fetch(u, { method: 'POST', signal: ctl.signal, headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'query', params: { request_type: 'call_function', finality: 'final',
-          account_id: 'v2.ref-finance.near', method_name: 'get_pool', args_base64: btoa(JSON.stringify({ pool_id: Number(id) })) } }) });
+          account_id: account, method_name: method, args_base64: btoa(JSON.stringify(args)) } }) });
       clearTimeout(tm);
       const j = await r.json();
       if (!j || !j.result || !j.result.result) continue;
-      const p = JSON.parse(new TextDecoder().decode(new Uint8Array(j.result.result)));
-      if (p && Array.isArray(p.token_account_ids)) return Object.assign({ id: String(id) }, p);
+      return JSON.parse(new TextDecoder().decode(new Uint8Array(j.result.result)));
     } catch (e) {}
   }
   return null;
+}
+
+// A classic pool on v2.ref-finance.near.
+export async function getPool(id, ms) {
+  const p = await view('v2.ref-finance.near', 'get_pool', { pool_id: Number(id) }, ms);
+  return (p && Array.isArray(p.token_account_ids)) ? Object.assign({ id: String(id) }, p) : null;
+}
+
+// A concentrated-liquidity pool on dclv2.ref-labs.near ("x|y|fee"), in the classic shape: its two tokens and the
+// amounts it holds (total_x / total_y, the contract's own totals of each token in the pool).
+export async function getDclPool(id, ms) {
+  const p = await view('dclv2.ref-labs.near', 'get_pool', { pool_id: String(id) }, ms);
+  if (!p || !p.token_x || !p.token_y || p.total_x == null || p.total_y == null) return null;
+  return { id: String(id), pool_kind: 'DCL', token_account_ids: [p.token_x, p.token_y], amounts: [String(p.total_x), String(p.total_y)],
+    point: p.current_point != null && isFinite(+p.current_point) ? +p.current_point : null };   // raw price of x in y = 1.0001^point
 }
 
 // The pools, in list-top-pools' shape (id, pool_kind, token_account_ids, amounts, total_fee, shares_total_supply).

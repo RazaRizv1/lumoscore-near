@@ -24,7 +24,11 @@
 // asset against its main market), not a sum over every pool. 24h change is reported only when the token
 // is the BASE of that pair, since that is the side the change describes; otherwise null, not a guess.
 import { CURATED } from './_nearcurated.js';
-import { ownPools, ownPrices, ownLiquidity } from './_nearownpools.js';
+import { ownPools, ownPrices, ownLiquidity, getPool, getDclPool } from './_nearownpools.js';
+import { MAINPOOL } from './_nearmainpools.js';
+// Our own hourly snapshots of Rhea's price list (workers/near-pool-indexer), the same series the Trade page draws its
+// day high/low and 7D curve from: { ok, h, near: [[hour, usd]], tok: { id: [[hour, usd]] } }.
+const HOURLY = 'https://near-pool-indexer.usa282.workers.dev/prices?ids=';
 
 const TTL = 120;                        // seconds a fresh answer is served from cache
 const KEEP = 86400;                     // seconds the last good answer survives as a fallback
@@ -95,18 +99,90 @@ async function build(context) {
     if (a.d == null && a.dNear != null && near24 != null) a.d = ((1 + a.dNear / 100) * (1 + near24 / 100) - 1) * 100;
   }
 
+  // A TOKEN DEXSCREENER HAS NEVER HEARD OF IS NOT A TOKEN NOBODY TRADES (RAZA 2026-11-14, /trade/near page 2: "the
+  // values are incorrect because its just showing 0"). DexScreener indexes none of 16 curated tokens -- NearX, RIBBIT,
+  // NEARAI, SPUD... -- and this used to print their volume, trades and liquidity as 0 and their change as a dash.
+  //   * Liquidity: read off the token's MAIN pool on the chain (_nearmainpools.js; classic or concentrated), every
+  //     side valued at Rhea's price. A side Rhea cannot price leaves the figure null, never a half-pool.
+  //   * Volume and trades: no free source covers these pools, so they are null (the table's em dash), not 0.
+  //   * The 24h change of ANY row still without one (these, and a token that is only ever the quote side of its main
+  //     pair) comes from our hourly snapshots: its dollar price now against the same hour yesterday.
+  const unseen = CURATED.filter((c) => c.i !== WNEAR && !agg[c.i] && ownLiq[c.i] == null && MAINPOOL[c.i] != null
+    && +((prices[c.i] || {}).price || 0) > 0);
+  const [poolsRead, hourly] = await Promise.all([
+    Promise.all(unseen.map((c) => { const id = MAINPOOL[c.i]; return (typeof id === 'string' ? getDclPool(id, 3000) : getPool(id, 3000)).catch(() => null); })),
+    (async () => {
+      const ids = CURATED.filter((c) => c.i !== WNEAR && !(agg[c.i] && agg[c.i].d != null)).map((c) => c.i);
+      if (!ids.length) return null;
+      try { return await getJson(HOURLY + ids.map(encodeURIComponent).join(','), 4000); } catch (e) { return null; }
+    })(),
+  ]);
+  // THE PRICE TOO, FROM THE POOL. Rhea's price list is FROZEN for these tokens -- RIBBIT held 2 distinct dollar prices
+  // in 169 hours, DRAGON and CLAW 9 -- while NEAR moved 9% in a day; a token whose only market is a wNEAR pool cannot
+  // hold its dollar price while NEAR moves, so the list is simply not refreshing them. Divided by a LIVE NEAR price,
+  // that stale figure became a NEAR price that drifted with NEAR alone. The pool's own spot price is the market.
+  unseen.forEach((c, k) => {
+    const p = poolsRead[k];
+    if (!p || c.d == null) return;
+    const ids = p.token_account_ids || [], wi = ids.indexOf(WNEAR), ti = 1 - wi;
+    if (ids.length !== 2 || wi < 0) return;
+    let px = null;                                                   // the token's price in NEAR
+    if (p.pool_kind === 'DCL' && p.point != null && Number(p.amounts[0]) > 0 && Number(p.amounts[1]) > 0) {
+      const decX = ti === 0 ? c.d : 24, decY = ti === 0 ? 24 : c.d;
+      const xInY = Math.pow(1.0001, p.point) * Math.pow(10, decX - decY);
+      px = ti === 0 ? xInY : 1 / xInY;
+    } else if (p.pool_kind === 'SIMPLE_POOL') {
+      const w = Number(p.amounts[wi]) / 1e24, a = Number(p.amounts[ti]) / Math.pow(10, c.d);
+      if (w > 0 && a > 0) px = w / a;
+    }
+    if (px > 0 && isFinite(px)) prices[c.i] = Object.assign({}, prices[c.i], { price: String(px * nearUsd), chain: 1 });
+  });
+  const poolLiq = {};
+  unseen.forEach((c, k) => {
+    const p = poolsRead[k];
+    if (!p) return;
+    let sum = 0;
+    for (let q = 0; q < p.token_account_ids.length; q++) {
+      const t = p.token_account_ids[q], pr = prices[t] || {};
+      const dec = t === WNEAR ? 24 : (pr.decimal != null ? +pr.decimal : (CURATED.find((x) => x.i === t) || {}).d);
+      const amt = Number((p.amounts || [])[q]) / Math.pow(10, dec);
+      if (!(+pr.price > 0) || dec == null || !isFinite(amt)) return;   // an unpriced side: no figure at all
+      sum += amt * +pr.price;
+    }
+    poolLiq[c.i] = sum;
+  });
+  const dayMove = {};
+  if (hourly && hourly.ok && hourly.tok) {
+    for (const id in hourly.tok) {
+      const s = (hourly.tok[id] || []).filter((x) => x && x[1] > 0);
+      if (s.length < 2) continue;
+      const last = s[s.length - 1];
+      if (last[0] < hourly.h - 3) continue;                         // stale series: say nothing
+      let then = null;
+      for (const x of s) if (x[0] <= last[0] - 24) then = x;        // the latest point at least a day back...
+      if (!then || then[0] < last[0] - 27) continue;                // ...and not much more than a day back
+      // A FROZEN SERIES SAYS NOTHING. A live price changes nearly every hour (NEAR alone moves it); one that held a
+      // single value, or stepped a few times (DRAGON: 9 distinct in 169 hours), is Rhea not refreshing the token, and
+      // a "change" read off it is a step in a stale list. Under 12 distinct hours in the day: no figure, the dash.
+      if (new Set(s.filter((x) => x[0] >= then[0]).map((x) => x[1])).size < 12) continue;
+      dayMove[id] = (last[1] / then[1] - 1) * 100;
+    }
+  }
+
   const rows = [];
   for (const c of CURATED) {
     if (c.i === WNEAR) continue;                       // NEAR is the unit, not a row
     const usd = +((prices[c.i] || {}).price || 0);
     if (!(usd > 0)) continue;                          // no live price: not listed rather than $0
-    const s = agg[c.i] || { v: 0, t: ownLiq[c.i] != null ? ownLiq[c.i] * nearUsd : 0, x: 0, d: null };
+    const s = Object.assign({}, agg[c.i] || { v: null, x: null, d: null,
+      t: ownLiq[c.i] != null ? ownLiq[c.i] * nearUsd : (poolLiq[c.i] != null ? poolLiq[c.i] : null) });
+    if (s.d == null && dayMove[c.i] != null && isFinite(dayMove[c.i])) s.d = +dayMove[c.i].toFixed(2);
     const p = usd / nearUsd;
     rows.push({ i: c.i, n: c.s, nm: c.n, logo: c.logo || '', st: c.st ? 1 : 0, vf: 1, dc: c.d,
-      p, d: s.d, v: s.v / nearUsd, t: s.t / nearUsd, x: s.x, cg: c.cg || '', w: c.w || '', hi: null, lo: null,
+      p, d: s.d, v: s.v == null ? null : s.v / nearUsd, t: s.t == null ? null : s.t / nearUsd, x: s.x, cg: c.cg || '', w: c.w || '', hi: null, lo: null,
       hc: c.hc > 0 ? c.hc : null });   // holder count as last baked (_nearholdercounts.js), for the search rows
   }
-  rows.sort((a, b) => b.v - a.v);
+  rows.sort((a, b) => (b.v == null ? -1 : b.v) - (a.v == null ? -1 : a.v));   // unknown volume ranks after a real 0
   return { ok: true, src: 'Rhea Finance indexer, DexScreener', usd: nearUsd,
     near24, at: Date.now(), rows };
 }
@@ -120,8 +196,9 @@ export async function marketBody(context) {
   // The cache outlives a deployment, so the key carries the answer's SHAPE version: a new deploy that
   // changes what a row holds must not serve the previous version's answer for two minutes. Bump it
   // whenever the row shape changes (v3: rows carry cg; history is fetched by the page; v6: own-pool prices; v7: rows carry w).
-  const fresh = new Request('https://lumoscore.internal/lxapi/nearmarket/v8/fresh');
-  const kept = new Request('https://lumoscore.internal/lxapi/nearmarket/v8/kept');
+  // v9: volume/trades/liquidity may be null (unknown), and a change may come from the hourly snapshots.
+  const fresh = new Request('https://lumoscore.internal/lxapi/nearmarket/v9/fresh');
+  const kept = new Request('https://lumoscore.internal/lxapi/nearmarket/v9/kept');
 
   const hit = await cache.match(fresh);
   if (hit) return await hit.json();

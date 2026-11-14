@@ -398,7 +398,7 @@
 
     // 3: 24h volume
     var c3 = el('td');
-    var vol = el('div', 'dex-mk-vol', vol0(t.v) + ' NEAR');
+    var vol = el('div', 'dex-mk-vol', t.v == null ? '—' : vol0(t.v) + ' NEAR');   // unknown is a dash, not '— NEAR'
     if (usd != null && t.v != null) {
       var vs = el('span', 'sub');
       vs.appendChild(el('span', 'lc-money', money(t.v * usd)));
@@ -515,7 +515,7 @@
     // `usd` was already a parameter here and was simply never used.
     var usdOn = (DEN === 'usd' && usd != null);
 
-    var vol = el('div', 'mdx-mk-vol', 'Vol ' + (usdOn ? money(t.v * usd) : (vol0(t.v) + ' NEAR')));
+    var vol = el('div', 'mdx-mk-vol', 'Vol ' + (t.v == null ? '—' : usdOn ? money(t.v * usd) : (vol0(t.v) + ' NEAR')));   // null * usd would read $0
     if (t.x != null) vol.appendChild(el('span', 'mdx-mk-trades', count(t.x) + ' trades'));
     meta.appendChild(vol);
     top.appendChild(meta);
@@ -1590,7 +1590,7 @@
   // derivation as nearHistory: each hour re-priced in NEAR against NEAR's own hour. The day's high/low needs a
   // day of hours; the curve and the week's change need most of the week, else those cells keep their dash.
   var OWN_PX = 'https://near-pool-indexer.usa282.workers.dev/prices?ids=';
-  var OWN_KEY = 'lumos.nearPx.v1';
+  var OWN_KEY = 'lumos.nearPx.v2';   // v2: frozen series dropped (2026-11-14)
   function ownHistory(j) {
     var out = {};
     if (!j || !j.ok || !j.tok) return out;
@@ -1602,6 +1602,12 @@
       if (r.length < 24) continue;
       var last = hs[hs.length - 1];
       if (last < j.h - 3 || hs[0] > last - 23) continue;          // stale, or not yet a day of hours
+      // A FROZEN DOLLAR PRICE DRAWS NEAR'S OWN WEEK (RAZA 2026-11-14, /trade/near page 2). Rhea's list stops refreshing
+      // some tokens (RIBBIT: 2 distinct prices in 169 hours); divided hour by hour by NEAR, a constant becomes a curve
+      // and a day range that are NEAR's move upside down. Under 12 distinct dollar prices in the last day: no entry.
+      var dayUsd = {};
+      (j.tok[id] || []).forEach(function (x) { if (x[0] > last - 24 && x[1] > 0) dayUsd[x[1]] = 1; });
+      if (Object.keys(dayUsd).length < 12) continue;
       var day = [];
       for (var k = 0; k < r.length; k++) if (hs[k] > last - 24) day.push(r[k]);
       var e = { hi: Math.max.apply(null, day), lo: Math.min.apply(null, day) };
