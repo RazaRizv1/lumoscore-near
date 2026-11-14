@@ -2219,6 +2219,114 @@
 
   // ---- holders ----
   var HL = { list: null, count: null, page: 1, err: false, busy: false };
+  // ---- "More info" on a phone (RAZA 2026-11-14: "More info is not there for Near like we have for stellar") ----------
+  // Stellar's lx-dexassetdata builds it -- a link under the stat row, and an "About <token>" sheet -- and NEAR replaces
+  // that layer, so the link never came. Its stylesheet did (.lxda-moreline, .lxda-morebtn, .lxda-sheet, .lxda-srow,
+  // .lx-soc are on every NEAR asset page), so this uses the same classes and looks the same: the link shows on a phone
+  // only, as Stellar's. The rows are NEAR's: supply, holders, pools, pool liquidity, the contract (copyable), the
+  // website, the symbol and X. A figure the page could not read is left out, never written as 0.
+  var MI_COPY = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"></rect><path d="M5 15V5a2 2 0 0 1 2-2h10"></path></svg>';
+  var MI_OK = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+  var MI_X = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"></path></svg>';
+  function miAbbr(v) {
+    v = +v;
+    if (!(v >= 0) || !isFinite(v)) return null;
+    if (v >= 1e9) return (v / 1e9).toFixed(2) + 'B';
+    if (v >= 1e6) return (v / 1e6).toFixed(2) + 'M';
+    if (v >= 1e3) return (v / 1e3).toFixed(1) + 'K';
+    return v >= 1 ? String(Math.round(v * 100) / 100) : String(+v.toPrecision(3));
+  }
+  function miRows(d) {
+    var out = [];
+    if (d.supply != null && isFinite(+d.supply) && +d.supply > 0) out.push(['Circulating supply', miAbbr(d.supply) + ' ' + (d.symbol || '')]);
+    if (HL && HL.count != null && isFinite(HL.count)) out.push(['Holders', Math.round(HL.count).toLocaleString('en-US')]);
+    var np = d.poolTotal != null ? +d.poolTotal : (d.poolCount != null ? +d.poolCount : null);
+    if (np != null && isFinite(np)) out.push(['Pools', np.toLocaleString('en-US')]);
+    var liq = 0, seen = false;
+    (d.pools || []).forEach(function (p) { if (p && +p.liqUsd > 0) { liq += +p.liqUsd; seen = true; } });
+    // A partial sum is labelled as one: the payload lists the largest 30 pools, and USDt has 470.
+    var listed = (d.pools || []).length;
+    if (seen) out.push([np != null && listed < np ? 'Liquidity, top ' + listed + ' pools' : 'Pool liquidity', '$' + miAbbr(liq)]);
+    out.push(['Contract', d.i]);
+    if (d.web) out.push(['Website', String(d.web).replace(/^https?:[/][/]/, '').replace(/[/]$/, '')]);
+    if (d.symbol) out.push(['Symbol', d.symbol]);
+    return out;
+  }
+  function miOpen() {
+    var d = window.__lxnAssetData;
+    if (!d || !d.i) return;
+    var sh = document.querySelector('.lxda-sheet');
+    if (!sh) {
+      sh = document.createElement('div'); sh.className = 'lxda-sheet';
+      sh.innerHTML = '<div class="lxda-sheet-card"><div class="lxda-sheet-head"><h3></h3>'
+        + '<button type="button" class="lxda-sheet-x" aria-label="Close">&times;</button></div><div class="lxda-sbody"></div></div>';
+      document.body.appendChild(sh);
+      sh.addEventListener('click', function (e) {
+        var cp = e.target && e.target.closest ? e.target.closest('[data-micopy]') : null;
+        if (cp) {
+          e.preventDefault(); e.stopPropagation();
+          var v = cp.getAttribute('data-micopy') || '', ok = false;
+          try { if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(v); ok = true; } } catch (x) {}
+          if (!ok) { try { var ta = document.createElement('textarea'); ta.value = v; ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); } catch (x) {} }
+          cp.innerHTML = MI_OK; setTimeout(function () { cp.innerHTML = MI_COPY; }, 1200);
+          return;
+        }
+        if (e.target === sh || (e.target.closest && e.target.closest('.lxda-sheet-x'))) {
+          e.preventDefault(); sh.classList.remove('open');
+          try { document.body.style.overflow = sh.__ovf || ''; } catch (x) {}
+        }
+      });
+    }
+    var h3 = sh.querySelector('h3');
+    if (h3) h3.textContent = 'About ' + (d.name || d.symbol || 'this token');
+    var body = sh.querySelector('.lxda-sbody');
+    if (body) {
+      body.innerHTML = '';
+      miRows(d).forEach(function (r) {
+        var row = document.createElement('div'); row.className = 'lxda-srow';
+        var k = document.createElement('span'); k.className = 'k'; k.textContent = r[0];
+        var v = document.createElement('span'); v.className = 'v';
+        if (r[0] === 'Contract') {
+          var sp = document.createElement('span'); sp.className = 'mono lxda-issh';
+          sp.textContent = r[1].length > 22 ? r[1].slice(0, 10) + '…' + r[1].slice(-8) : r[1]; sp.title = r[1];
+          var b = document.createElement('button'); b.type = 'button'; b.className = 'lxda-isscp';
+          b.setAttribute('aria-label', 'Copy contract'); b.title = 'Copy contract'; b.setAttribute('data-micopy', r[1]);
+          b.innerHTML = MI_COPY;
+          v.appendChild(sp); v.appendChild(b);
+        } else if (r[0] === 'Website') {
+          var a = document.createElement('a'); a.href = d.web; a.target = '_blank'; a.rel = 'noopener nofollow';
+          a.textContent = r[1]; a.style.color = 'var(--accent,#ea6a2c)'; a.style.textDecoration = 'none';
+          v.appendChild(a);
+        } else v.textContent = r[1];
+        row.appendChild(k); row.appendChild(v); body.appendChild(row);
+      });
+      if (d.x) {
+        var sr = document.createElement('div'); sr.className = 'lxda-srow';
+        var sk = document.createElement('span'); sk.className = 'k'; sk.textContent = 'Socials';
+        var sv = document.createElement('span'); sv.className = 'v lxda-slinks';
+        var xa = document.createElement('a'); xa.className = 'lx-soc'; xa.href = d.x; xa.target = '_blank'; xa.rel = 'noopener nofollow';
+        xa.title = 'X'; xa.setAttribute('aria-label', 'X'); xa.setAttribute('data-lx-noswap', ''); xa.innerHTML = MI_X;
+        sv.appendChild(xa); sr.appendChild(sk); sr.appendChild(sv); body.appendChild(sr);
+      }
+    }
+    try { sh.__ovf = document.body.style.overflow; document.body.style.overflow = 'hidden'; } catch (x) {}
+    sh.classList.add('open');
+  }
+  function miButton() {
+    var row = document.querySelector('.stat-row');
+    if (!row || row.querySelector('.lxda-moreline')) return;
+    var line = document.createElement('div'); line.className = 'lxda-moreline';
+    var b = document.createElement('button'); b.type = 'button'; b.className = 'lxda-morebtn';
+    b.setAttribute('data-logo', ''); b.textContent = 'More info';
+    line.appendChild(b); row.appendChild(line);
+    b.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); miOpen(); }, true);
+  }
+  if (!window.__lxnMoreInfo) {
+    window.__lxnMoreInfo = 1;
+    window.addEventListener('lxn:assetdata', miButton);
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', miButton); else miButton();
+  }
+
   function loadHolders(attempt) {
     var a = window.__lxnAssetRef;
     if (!a || HL.busy || HL.list) return;
