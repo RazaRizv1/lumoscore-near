@@ -1,3 +1,4 @@
+import { POOLPX } from './poolpx.js';
 // NEAR pool indexer -- every Rhea Finance pool's swaps, deposits and withdrawals, read off the chain.
 //
 // WHY THIS EXISTS (RAZA 2026-10-30: "come on, do something. it must show the pool trxs"). The pool page's
@@ -339,6 +340,73 @@ async function snapPrices(env) {
   await db.batch(st);
   return { px: st.length - 3 };
 }
+// ---- the curated tokens' hourly price, from their OWN pool -------------------------------------------------
+// RAZA 2026-11-14, /trade/near page 2 ("I still dont see some columns"). Rhea's price list stops refreshing tokens
+// nobody trades on Rhea's terms -- RIBBIT held 2 distinct dollar prices in 169 hours, DRAGON and CLAW 9 -- while NEAR
+// moved 9% in a day. Divided by NEAR hour by hour, a frozen dollar price drew NEAR's own week upside down as the
+// token's curve, and the Trade page dropped those columns rather than show it. A token whose market is a wNEAR pool
+// has a price that is a fact on the chain: the pool's spot price. So, once an hour, after snapPrices has stored the
+// hour's NEAR price, each curated token's main pool (src/poolpx.js, baked by _tools/_nearmainpools.js) is read --
+// classic pools in one get_pool_by_ids call, concentrated pools one get_pool each -- and the token's price for the
+// hour is that spot price in NEAR times NEAR's dollar price, written over Rhea's. A pool that is neither a classic
+// two-token pool nor a concentrated one against wNEAR keeps Rhea's figure. Runs in the five-minute invocation (its own
+// subrequest budget); the hour is marked done only once every pool answered, so a failed read is retried, not left as
+// a frozen step in the series.
+async function viewArgs(account, method, args) {
+  const r = await rpc('query', { request_type: 'call_function', finality: 'final', account_id: account, method_name: method,
+    args_base64: btoa(JSON.stringify(args)) });
+  return JSON.parse(new TextDecoder().decode(new Uint8Array(r.result)));
+}
+function poolSpot(p, id, dec) {
+  // the token's price in NEAR, or null when this pool cannot say
+  if (!p) return null;
+  if (p.token_x) {                                                   // concentrated: raw price of x in y = 1.0001^point
+    if (p.current_point == null || !(Number(p.total_x) > 0) || !(Number(p.total_y) > 0)) return null;
+    const tx = p.token_x === id, ty = p.token_y === id;
+    if (!(tx && p.token_y === WNEAR) && !(ty && p.token_x === WNEAR)) return null;
+    const xInY = Math.pow(1.0001, +p.current_point) * Math.pow(10, tx ? dec - 24 : 24 - dec);
+    return tx ? xInY : 1 / xInY;
+  }
+  const ids = p.token_account_ids || [], wi = ids.indexOf(WNEAR), ti = ids.indexOf(id);
+  if (p.pool_kind !== 'SIMPLE_POOL' || ids.length !== 2 || wi < 0 || ti < 0) return null;
+  const w = Number(p.amounts[wi]) / 1e24, a = Number(p.amounts[ti]) / Math.pow(10, dec);
+  return w > 0 && a > 0 ? w / a : null;
+}
+async function snapPoolPrices(env) {
+  const db = env.DB, h = hourOf(Date.now());
+  const [done, listed] = await Promise.all([
+    db.prepare("SELECT v FROM meta WHERE k = 'ppxh'").first(), db.prepare("SELECT v FROM meta WHERE k = 'pxh'").first()]);
+  if (done && +done.v === h) return { ppx: 'already' };
+  if (!listed || +listed.v !== h) return { ppx: 'waiting for the hour\'s price list' };
+  const nr = await db.prepare('SELECT usd FROM px WHERE t = ?1 AND h = ?2').bind(WNEAR, h).first();
+  const nearUsd = nr ? +nr.usd : 0;
+  if (!(nearUsd > 0)) return { ppx: 'no NEAR price this hour' };
+  const classic = [], dcl = [];
+  for (const id in POOLPX) (typeof POOLPX[id][0] === 'number' ? classic : dcl).push(id);
+  const got = {};
+  let failed = 0;
+  try {
+    const list = await viewArgs(REF, 'get_pool_by_ids', { pool_ids: classic.map((id) => POOLPX[id][0]) });
+    if (Array.isArray(list) && list.length === classic.length) classic.forEach((id, k) => { got[id] = list[k]; });
+    else failed++;
+  } catch (e) { failed++; }
+  // a few at a time: rpc() retries, so a bad minute must not spend the invocation's whole budget
+  for (let k = 0; k < dcl.length && failed < 4; k += 5) {
+    await Promise.all(dcl.slice(k, k + 5).map((id) => viewArgs('dclv2.ref-labs.near', 'get_pool', { pool_id: POOLPX[id][0] })
+      .then((p) => { got[id] = p; }, () => { failed++; })));
+  }
+  const st = [];
+  let n = 0;
+  for (const id in got) {
+    const px = poolSpot(got[id], id, POOLPX[id][1]);
+    if (px > 0 && isFinite(px)) { st.push(db.prepare('INSERT OR REPLACE INTO px (t, h, usd) VALUES (?1, ?2, ?3)').bind(id, h, px * nearUsd)); n++; }
+  }
+  const all = !failed && Object.keys(got).length === classic.length + dcl.length;
+  if (all) st.push(setMeta(db, 'ppxh', h));
+  st.push(setMeta(db, 'ppxlast', JSON.stringify({ at: Date.now(), h, priced: n, read: Object.keys(got).length, failed })));
+  await db.batch(st);
+  return { ppx: n, failed, done: all };
+}
 // GET /prices?ids=a,b,...  -> { ok, near: [[hour, usd]...], tok: { id: [[hour, usd]...] } }, the last 7 days.
 // Asking registers the ids for the hourly snapshot (up to WATCH_MAX tokens in all).
 async function prices(url, env) {
@@ -600,7 +668,7 @@ async function netJob(env) {
   const A = { headers: Object.assign({ accept: 'application/json' }, UA) };
   if (!(next.atP && now - next.atP < NET_EVERY_MS)) {
     try {
-      const [pc, dm] = await Promise.all([viewJson(REF, 'get_number_of_pools'), viewJson('dclv2.ref-labs.near', 'get_metadata')]);
+      const [pc, dm] = await Promise.all([viewJson(REF, 'get_number_of_pools'), viewArgs('dclv2.ref-labs.near', 'get_metadata')]);
       const a = Number(pc), b = Number((dm || {}).pool_count);
       if (a > 0 && b > 0) Object.assign(next, { poolsClassic: a, poolsDcl: b, pools: a + b, atP: now });
     } catch (e) {}
@@ -872,6 +940,7 @@ export default {
   async scheduled(event, env, ctx) {
     if (event.cron === '*/5 * * * *') {                   // trade counts only: its own invocation, its own budget
       ctx.waitUntil(trJob(env).then((r) => console.log('tr', JSON.stringify(r)), (e) => console.error('trade counts failed', e && e.message)));
+      ctx.waitUntil(snapPoolPrices(env).then((r) => console.log('pool prices', JSON.stringify(r)), (e) => console.error('pool prices failed', e && e.message)));
       return;
     }
     if (event.cron !== '* * * * *') {                     // participants only: its own invocation, its own budget

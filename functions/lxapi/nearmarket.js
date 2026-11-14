@@ -153,6 +153,8 @@ async function build(context) {
   });
   const dayMove = {};
   if (hourly && hourly.ok && hourly.tok) {
+    const nearAt = {};
+    for (const x of (hourly.near || [])) if (x && x[1] > 0) nearAt[x[0]] = x[1];
     for (const id in hourly.tok) {
       const s = (hourly.tok[id] || []).filter((x) => x && x[1] > 0);
       if (s.length < 2) continue;
@@ -165,7 +167,13 @@ async function build(context) {
       // single value, or stepped a few times (DRAGON: 9 distinct in 169 hours), is Rhea not refreshing the token, and
       // a "change" read off it is a step in a stale list. Under 12 distinct hours in the day: no figure, the dash.
       if (new Set(s.filter((x) => x[0] >= then[0]).map((x) => x[1])).size < 12) continue;
-      dayMove[id] = (last[1] / then[1] - 1) * 100;
+      // In NEAR first, against the series' own NEAR price at the same two hours, then into dollars with near24 -- the
+      // SAME NEAR move the page converts back with. Composing the dollar series directly mixed Rhea's hourly NEAR price
+      // with DexScreener's day, and a pool nobody touched read -0.30% in NEAR instead of 0.00%.
+      const nb = nearAt[last[0]], na = nearAt[then[0]];
+      if (!(nb > 0) || !(na > 0) || near24 == null) continue;
+      const dN = (last[1] / nb) / (then[1] / na) - 1;
+      dayMove[id] = ((1 + dN) * (1 + near24 / 100) - 1) * 100;
     }
   }
 
@@ -176,11 +184,20 @@ async function build(context) {
     if (!(usd > 0)) continue;                          // no live price: not listed rather than $0
     const s = Object.assign({}, agg[c.i] || { v: null, x: null, d: null,
       t: ownLiq[c.i] != null ? ownLiq[c.i] * nearUsd : (poolLiq[c.i] != null ? poolLiq[c.i] : null) });
+    // A row missing its volume gets the main pool's GeckoTerminal address (gp); the PAGE asks GeckoTerminal for the
+    // day's volume and trades (loadGt in browser/trade.js). Its change comes from the hourly series above, which the pool
+    // indexer now prices off the token's own pool (snapPoolPrices), not off Rhea's list.
+    const mp = MAINPOOL[c.i];
+    const gp = s.v == null && mp != null ? (typeof mp === 'string' ? 'refv2-' + mp.split('|').join(':') : 'refv1-' + mp) : '';
     if (s.d == null && dayMove[c.i] != null && isFinite(dayMove[c.i])) s.d = +dayMove[c.i].toFixed(2);
     const p = usd / nearUsd;
     rows.push({ i: c.i, n: c.s, nm: c.n, logo: c.logo || '', st: c.st ? 1 : 0, vf: 1, dc: c.d,
       p, d: s.d, v: s.v == null ? null : s.v / nearUsd, t: s.t == null ? null : s.t / nearUsd, x: s.x, cg: c.cg || '', w: c.w || '', hi: null, lo: null,
-      hc: c.hc > 0 ? c.hc : null });   // holder count as last baked (_nearholdercounts.js), for the search rows
+      hc: c.hc > 0 ? c.hc : null,      // holder count as last baked (_nearholdercounts.js), for the search rows
+      // gp: the main pool's GeckoTerminal address, only on a row DexScreener has no figures for. The PAGE asks
+      // GeckoTerminal with it from the visitor's own connection (it answers 429 to Cloudflare): trades, volume,
+      // the day's range, the 24h change and the week's curve. See loadGt in browser/trade.js.
+      gp });
   }
   rows.sort((a, b) => (b.v == null ? -1 : b.v) - (a.v == null ? -1 : a.v));   // unknown volume ranks after a real 0
   return { ok: true, src: 'Rhea Finance indexer, DexScreener', usd: nearUsd,
@@ -197,8 +214,8 @@ export async function marketBody(context) {
   // changes what a row holds must not serve the previous version's answer for two minutes. Bump it
   // whenever the row shape changes (v3: rows carry cg; history is fetched by the page; v6: own-pool prices; v7: rows carry w).
   // v9: volume/trades/liquidity may be null (unknown), and a change may come from the hourly snapshots.
-  const fresh = new Request('https://lumoscore.internal/lxapi/nearmarket/v9/fresh');
-  const kept = new Request('https://lumoscore.internal/lxapi/nearmarket/v9/kept');
+  const fresh = new Request('https://lumoscore.internal/lxapi/nearmarket/v13/fresh');
+  const kept = new Request('https://lumoscore.internal/lxapi/nearmarket/v13/kept');
 
   const hit = await cache.match(fresh);
   if (hit) return await hit.json();

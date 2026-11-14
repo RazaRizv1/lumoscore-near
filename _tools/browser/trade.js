@@ -391,14 +391,14 @@
     //    exactly that: USDC reads +6.59% against XLM and +0.00% against the dollar on the same row.
     var c2 = el('td');
     var dv = changeIn(t.d);
-    var ch = el('div', 'dex-mk-change', pct(dv) || '—');
+    var ch = el('div', 'dex-mk-change', histPending(t) && t.d == null ? '' : (pct(dv) || '—'));
     if (dv != null) ch.style.color = dv >= 0 ? 'var(--green,#22c55e)' : '#e5484d';
     c2.appendChild(ch);
     tr.appendChild(c2);
 
     // 3: 24h volume
     var c3 = el('td');
-    var vol = el('div', 'dex-mk-vol', t.v == null ? '—' : vol0(t.v) + ' NEAR');   // unknown is a dash, not '— NEAR'
+    var vol = el('div', 'dex-mk-vol', t.v == null ? (histPending(t) ? '' : '—') : vol0(t.v) + ' NEAR');   // unknown is a dash, not '— NEAR'
     if (usd != null && t.v != null) {
       var vs = el('span', 'sub');
       vs.appendChild(el('span', 'lc-money', money(t.v * usd)));
@@ -409,7 +409,7 @@
 
     // 4: trades
     var c4 = el('td', 'dex-mk-trades-td');
-    c4.appendChild(el('div', 'dex-mk-trades', count(t.x)));
+    c4.appendChild(el('div', 'dex-mk-trades', t.x == null && histPending(t) ? '' : count(t.x)));
     tr.appendChild(c4);
 
     // 5: liquidity
@@ -523,7 +523,7 @@
     var right = el('div', 'mdx-mk-right');
     right.appendChild(el('div', 'mdx-mk-price', usdOn ? money(t.p * usd) : (xrp(t.p) + ' NEAR')));
     var dv = changeIn(t.d);
-    var p = el('div', 'mdx-mk-pct ' + (dv != null && dv < 0 ? 'down' : 'up'), pct(dv) || '—');
+    var p = el('div', 'mdx-mk-pct ' + (dv != null && dv < 0 ? 'down' : 'up'), histPending(t) && t.d == null ? '' : (pct(dv) || '—'));
     right.appendChild(p);
     top.appendChild(right);
 
@@ -1652,8 +1652,59 @@
       if (ok) try { localStorage.setItem(OWN_KEY, JSON.stringify({ ts: Date.now(), h: h })); } catch (e) {}
     }).catch(function () {}).then(done);
   }
+  // ---- ...and from GeckoTerminal, for the rows DexScreener has never heard of --------------------------------------
+  //
+  // RAZA 2026-11-14, /trade/near page 2: "I still dont see some columns". DexScreener indexes none of 16 curated tokens
+  // (DRAGON, RIBBIT, NearX...) and Rhea's price list stopped refreshing them, so their change, volume, trades, day
+  // range and 7D curve had no source at all. GeckoTerminal has every one of these pools, both kinds, and answers 429
+  // to Cloudflare -- so, like CoinGecko above, the PAGE asks it from the visitor's own connection, using the pool
+  // address the edge puts on such a row (gp). One call for the day's trades and volume (pools/multi), one per pool
+  // for its hourly candles, priced in NEAR (currency=token). Cached 30 minutes.
+  //
+  // A candle exists only for an hour with trades, so the hourly series is the last close carried forward. That is
+  // not a guess: a pool's price moves only when someone swaps. For the same reason a day with no candle is a day
+  // the price held, in NEAR: 0.00%, and the day's high and low are the live price itself (the pool's spot price,
+  // which sits one fee away from the last fill, so the fill is not used for it).
+  var GT = 'https://api.geckoterminal.com/api/v2/networks/near/pools/';
+  var GT_KEY = 'lumos.nearGt.v3', GT_TTL = 600000;
+  // ONE call, for the day's volume and trade count only. The change, the day's range and the 7D curve of these rows
+  // come from our own hourly series like every other row's (loadOwn): the pool indexer prices them off their own pool
+  // every hour (workers/near-pool-indexer snapPoolPrices), so nothing here fetches candles per pool -- GeckoTerminal
+  // throttles a visitor long before 24 of those (measured 2026-11-14), and its 429 arrives as "Failed to fetch".
+  function applyGt(d, h) {
+    for (var i = 0; i < d.rows.length; i++) {
+      var t = d.rows[i], x = t.gp && h[t.gp];
+      if (!x) continue;
+      if (t.v == null && x.v != null && d.usd > 0) t.v = x.v / d.usd;   // DexScreener's figures stay where it has them
+      if (t.x == null && x.x != null) t.x = x.x;
+    }
+  }
+  function loadGt(d, done) {
+    var want = [];
+    for (var i = 0; i < d.rows.length; i++) if (d.rows[i].gp && d.rows[i].v == null && want.indexOf(d.rows[i].gp) < 0) want.push(d.rows[i].gp);
+    if (!want.length) { done(); return; }
+    try {
+      var c = JSON.parse(localStorage.getItem(GT_KEY) || 'null');
+      if (c && c.h && Date.now() - c.ts < GT_TTL && want.every(function (g) { return c.h[g]; })) { applyGt(d, c.h); done(); return; }
+    } catch (e) {}
+    var parts = [], h = {};
+    for (var k = 0; k < want.length; k += 30) parts.push(want.slice(k, k + 30));
+    Promise.all(parts.map(function (m) {
+      return fetch(GT + 'multi/' + m.map(encodeURIComponent).join(','), { headers: { accept: 'application/json' } })
+        .then(function (r) { if (!r.ok) throw new Error('geckoterminal ' + r.status); return r.json(); })
+        .then(function (j) {
+          (j.data || []).forEach(function (p) {
+            var a = p.attributes || {}, g = String(a.address || ''), tx = (a.transactions || {}).h24 || {};
+            if (want.indexOf(g) >= 0) h[g] = { v: +((a.volume_usd || {}).h24) || 0, x: (+tx.buys || 0) + (+tx.sells || 0) };
+          });
+        });
+    })).then(function () {
+      applyGt(d, h);
+      try { localStorage.setItem(GT_KEY, JSON.stringify({ ts: Date.now(), h: h })); } catch (e) {}
+    }, function () {}).then(done);        // a failed call is not cached: the dash stays and the next load asks again
+  }
   function loadHist(d, after) {
-    function settle() { loadOwn(d, function () { HIST.state = 'done'; after(); }); }
+    function settle() { loadOwn(d, function () { loadGt(d, function () { HIST.state = 'done'; after(); }); }); }
     try {
       var c = JSON.parse(localStorage.getItem(HIST_KEY) || 'null');
       if (c && c.h && Date.now() - c.ts < HIST_TTL) { applyHist(d, c.h); HIST.state = 'pending'; settle(); return; }
