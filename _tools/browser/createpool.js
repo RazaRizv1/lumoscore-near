@@ -147,6 +147,18 @@
     return out === '' ? '0' : out;
   }
   function show(raw, dec, dp) { return trunc(fromUnits(raw, dec), dp == null ? 6 : dp); }
+  // THE PICKER'S FIGURE, IN STELLAR'S STEPS (its famt): 1,000 and up whole with commas, 1 and up two places, from
+  // 0.0001 six, below that seven with the trailing zeros cut, nothing at all "0". FLOORED, never rounded: it is the
+  // spendable amount, and a figure rounded up past what can be spent is the trap the helpers above exist for.
+  function listAmt(raw, dec) {
+    var s = fromUnits(raw, dec), x = +s;
+    if (!(x > 0)) return '0';
+    var t = x >= 1000 ? trunc(s, 0) : trunc(s, x >= 1 ? 2 : (x >= 0.0001 ? 6 : 7));
+    if (x >= 1 && x < 1000) { var d = t.indexOf('.'); t = d < 0 ? t + '.00' : (t + '00').slice(0, d + 3); }
+    else if (x < 0.0001) t = t.replace(/\.?0+$/, '');
+    else if (x < 1) { var e = t.indexOf('.'); t = (t + '000000').slice(0, e + 7); }
+    return x >= 1000 ? t.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : t;
+  }
   function num(v) {
     var s = String(v == null ? '' : v).replace(/,/g, '').trim();
     var m = /^\d*\.?\d*/.exec(s);
@@ -353,11 +365,19 @@
     var why = holdWhy();
     if (why) { note(why); return; }
 
+    // AS STELLAR'S LIST (RAZA 2026-11-15: "this is not the same as on Stellar"): the asset already picked on the other
+    // side is not offered -- a pool cannot pair a token with itself, and NEAR and wNEAR are one token in a pool.
+    var other = H.pick[1 - i];
     var rows = (H.hold || []).filter(function (a) {
+      if (other && poolId(other) === poolId(a)) return false;
       if (!q) return true;
       return a.code.toLowerCase().indexOf(q) >= 0 || a.id.toLowerCase().indexOf(q) >= 0;
     });
-    if (!rows.length) { note(H.hold.length ? 'No matching assets' : 'No assets in this wallet yet'); return; }
+    if (!rows.length) {
+      note(q ? 'No matching assets' : (H.hold.length ? 'No other asset in your wallet to pair with. A pool needs two different assets.'
+        : 'No assets in this wallet yet'));
+      return;
+    }
 
     rows.forEach(function (a) {
       var b = document.createElement('button');
@@ -374,7 +394,7 @@
       if (verified(a)) tk.appendChild(vtick());
       var nm = document.createElement('span'); nm.className = 'ad-nm'; nm.textContent = a.sub;
       meta.appendChild(tk); meta.appendChild(nm);
-      var bal = document.createElement('span'); bal.className = 'ad-bal'; bal.textContent = show(a.bal, a.dec, 4);
+      var bal = document.createElement('span'); bal.className = 'ad-bal'; bal.textContent = listAmt(roomRaw(a).toString(), a.dec);
       b.appendChild(ic); b.appendChild(meta); b.appendChild(bal);
       list.appendChild(b);
     });

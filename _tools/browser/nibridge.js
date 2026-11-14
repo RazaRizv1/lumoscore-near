@@ -1822,11 +1822,19 @@
         WH[r.hash] = st;
         if (txFind(r.hash) && st.status && st.status !== 'PENDING') patchRec(r.hash, function (x) { x.status = st.status; if (st.claimTx) x.claimTx = st.claimTx; });
         try { paintTxs(); } catch (_) {}
+        // ASKED ONCE A VISIT WAS A RELOAD TO SEE A CLAIM (RAZA 2026-11-15: "i have to refresh my page to see the claim
+        // tab"). A transfer the guardians have not signed yet is asked again a minute later, until they have.
+        if (st.status === 'PENDING') setTimeout(function () { delete WH_ASK[r.hash]; pendCheck(); }, 60000);
       }, function () { delete WH_ASK[r.hash]; });
     });
   }
+  // LISTED THE MOMENT WORMHOLE HAS ANSWERED FOR IT (RAZA 2026-11-15: the claim should show "immediately after the swap
+  // is done (just like CCTP on Stellar)"). Stellar's CCTP waits ~a minute for Circle inside the send dialog, so its claim
+  // is ready when the row appears; Wormhole's guardians take ~15 minutes. So a transfer Wormholescan has answered for
+  // but not yet signed is listed now, its Claim button waiting, and turns claimable by itself when they sign -- still
+  // never from a stored status alone: WH holds what Wormholescan said on THIS visit.
   function pendList() {
-    return pendCandidates().filter(function (r) { return WH[r.hash] && WH[r.hash].status === 'READY'; });
+    return pendCandidates().filter(function (r) { return WH[r.hash] && (WH[r.hash].status === 'READY' || WH[r.hash].status === 'PENDING'); });
   }
   // Desktop: a second tab beside Recent transactions. Phone: that section does not exist, so a panel after the card.
   function pendHost() {
@@ -1893,6 +1901,8 @@
     if (!list.length) { if (!host.tabbed) p.style.display = 'none'; if (p.innerHTML) p.innerHTML = ''; return; }
     var rows = list.map(function (r) {
       var busy = CLAIMING[r.hash];
+      var wait = WH[r.hash] && WH[r.hash].status === 'PENDING';
+      if (wait) busy = 'Waiting for Wormhole’s guardians (~15 min)';
       return '<div class="lx-brp-row" data-h="' + esc2(r.hash) + '">'
         + '<div class="lx-brp-main"><div class="lx-brp-amt">' + pendIco(r.sentSym, 'NEAR') + '<span>' + esc2(pendNum(r.sent) + ' ' + (r.sentSym || '')) + '</span>'
         + '<span class="lx-brp-ar">→</span>' + pendIco(r.recvSym, r.place)
@@ -1903,7 +1913,7 @@
         + '<div class="lx-brp-btns">'
         + '<button type="button" class="lx-brp-b primary" data-whact="claim" data-h="' + esc2(r.hash) + '"' + (busy ? ' disabled' : '') + '>'
         + esc2(busy || ('Claim on ' + r.place)) + '</button>'
-        + '<button type="button" class="lx-brp-b" data-whact="copy" data-h="' + esc2(r.hash) + '">Copy redeem data</button>'
+        + '<button type="button" class="lx-brp-b" data-whact="copy" data-h="' + esc2(r.hash) + '"' + (wait ? ' disabled' : '') + '>Copy redeem data</button>'
         + '</div></div>';
     }).join('');
     var h = (host.tabbed ? '' : '<div class="lx-brp-head"><h2>Awaiting redemption</h2><span class="lx-brp-n">' + list.length + '</span></div>')
@@ -2383,6 +2393,9 @@
     var p = !rec.route ? niStatus(rec.dep).then(function (st) { return { status: st }; })
       : rec.route === 'om' ? BRX().omStatus(hash).then(function (st) { return { status: st }; }) : BRX().whStatus(hash);
     p.then(function (s) {
+      // The Pending claims tab reads WH: a Wormhole send followed from here feeds it on every answer, so its row appears
+      // as soon as Wormholescan knows the transfer and turns claimable when the guardians sign -- no reload.
+      if (rec.route === 'wh' && s && s.status) { WH[hash] = s; WH_ASK[hash] = 1; if (s.status === rec.status) { try { paintPending(); } catch (_) {} } }
       if (s.status && (s.status !== rec.status || (s.claimTx && s.claimTx !== rec.claimTx))) {
         patchRec(hash, function (x) { x.status = s.status; if (s.claimTx) x.claimTx = s.claimTx; });
       }
