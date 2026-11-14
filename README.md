@@ -79,9 +79,9 @@ flowchart LR
     U([User]) --> W[NEAR wallet<br/>HOT · Meteor · NEAR Mobile · Intear]
     U --> S[Static site<br/>Cloudflare Pages]
     S --> F[Edge Functions<br/>/lxapi/near*]
-    S --> C[(NEAR chain<br/>RPC · contracts)]
+    S --> C[(NEAR chain<br/>RPC · Rhea pool contracts)]
     F --> C
-    F --> P[Public data<br/>DexScreener · GeckoTerminal<br/>Intear · NearBlocks]
+    F --> P[Public data<br/>Rhea Finance · DexScreener<br/>GeckoTerminal · Intear · NearBlocks]
     F --> B[Bridge APIs<br/>NEAR Intents · Omni · Wormhole]
     I[Pool indexer<br/>Cloudflare Worker + D1] --> C
     F --> I
@@ -92,7 +92,8 @@ flowchart LR
 - **Edge Functions.** A thin layer that caches public data, shields upstreams from rate limits and never holds user
   funds or keys.
 - **Pool indexer.** A Worker that records every pool's swaps, deposits and withdrawals into D1 each minute, for pool
-  histories and provider counts no public API offers.
+  histories and provider counts no public API offers. Once an hour it also prices each listed token from its own Rhea
+  pool on-chain, for the Trade page's day range and 7-day trend.
 - **Honest data.** Every figure is read live from the chain or a public source. A value that cannot be read is shown
   as unknown, never as zero.
 
@@ -101,7 +102,8 @@ flowchart LR
 | Source | Used for |
 |---|---|
 | NEAR RPC and FastNEAR | Balances, contract state, transaction history |
-| `v2.ref-finance.near`, `dclv2.ref-labs.near` | Pools, swaps, the order book, limit orders |
+| Rhea Finance contracts (`v2.ref-finance.near`, `dclv2.ref-labs.near`) | Pools (including the LUMOS rewarded pools), swaps, liquidity, the order book, limit orders |
+| Rhea Finance indexer | Token prices, the list of pools |
 | DexScreener, GeckoTerminal | 24h volume, candles, recent trades |
 | Intear | Token search, prices and holder counts |
 | NearBlocks | Explorer links, token metadata fallbacks |
