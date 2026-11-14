@@ -141,7 +141,8 @@ async function build(context) {
 // ---- every Rhea pool, for search and off-list pool pages ------------------------------------------------
 // list-top-pools is ~2,500 pools; it is read at most every ten minutes and kept reduced.
 const ALL_TTL = 600;
-async function allPools(context) {
+// Exported for neartoken.js: a token off every price feed still has a market if one of these pools holds it.
+export async function allPools(context) {
   const key = new Request('https://lumoscore.internal/lxapi/nearpools/' + VER + '/all');
   const hit = await caches.default.match(key);
   if (hit) return hit.json();

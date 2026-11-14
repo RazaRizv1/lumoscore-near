@@ -1631,6 +1631,15 @@
     var quiet = (isFinite(pts[0][5]) || pts[0][8] != null) ? 0 : NaN;
     var flat = function (t, p) { return [t, p[1], p[1], p[1], p[1], quiet, p[6], quiet, p[8] != null ? 0 : undefined]; };
     var seq = prev ? [flat(start, prev)].concat(inside) : inside;
+    // NOTHING TRADED IN THIS RANGE (RAZA 2026-11-14, WOW: the 1D chart showed October). Every candle is older than the
+    // window, so the range is one flat line at the last price, start to now, as Stellar draws a quiet asset. Returning
+    // the whole series here, as below, plotted weeks of old history under a "1D" label.
+    if (seq.length < 2 && prev) {
+      var still = [flat(start, prev), flat(end, prev)];
+      FIT = { t0: start, t1: end, bucket: bucket };
+      still.born = pts.born;
+      return still;
+    }
     if (seq.length < 2) { FIT = { t0: pts[0][0], t1: pts[pts.length - 1][0], bucket: bucket }; return pts; }
     var out = [seq[0]];
     for (var j = 1; j < seq.length; j++) {
@@ -1672,6 +1681,34 @@
   // row leave the chart waiting on "busy". The pool indexer keeps every curated token's hourly price in its own database,
   // so 1D and 1W draw from that at once, and the retries carry on: a real answer still replaces it. Asking also registers
   // the token for those snapshots.
+  // A QUIET TOKEN STILL HAS A CHART (RAZA 2026-11-14, WOW: "even on stellar there are many assets that havent been
+  // trade for a long time, but they are showing details and chart ... the chart is always present"). When no candle
+  // feed has this pool -- GeckoTerminal never saw it, our indexer started after its last trade -- the chart is drawn
+  // from the token's own trades (/lxapi/neartokentrades, the list under the chart): the price it held when the range
+  // opened, each trade inside the range with its volume bar, and the current price at the right edge. Flat where
+  // nothing traded, which is what happened. Stellar's chart for such an asset looks the same.
+  function tradeSeries(d, label, vs) {
+    if (!d || !d.i) return Promise.reject(new Error('no token'));
+    var days = (CH_SRC[label] || CH_SRC['1D']).days;
+    return fetch('/lxapi/neartokentrades?i=' + encodeURIComponent(d.i)).then(function (r) { return r.json(); }).then(function (j) {
+      var rows = ((j && j.ok && j.rows) || []).filter(function (r) { return r && r.px > 0 && r.t > 0; })
+        .sort(function (a, b) { return a.t - b.t; });
+      var now = Date.now(), from = now - days * 86400000, u = +d.nearUsd || 0, m = vs === 'USD' ? u : 1;
+      if (!(m > 0)) throw new Error('no NEAR price');
+      var before = null, inside = [];
+      rows.forEach(function (r) { if (r.t < from) before = r; else if (r.t <= now) inside.push(r); });
+      var startPx = before ? before.px : (inside.length ? inside[0].px : +d.price);
+      var endPx = +d.price > 0 ? +d.price : (inside.length ? inside[inside.length - 1].px : startPx);
+      if (!(startPx > 0) || !(endPx > 0)) throw new Error('short');
+      var pt = function (t, px, vol) {
+        return [t, px * m, px * m, px * m, px * m, vol * m, u ? px * u : null, u ? vol * u : 0];
+      };
+      var out = [pt(from, startPx, 0)];
+      inside.forEach(function (r) { out.push(pt(r.t, r.px, +r.near > 0 ? +r.near : 0)); });
+      out.push(pt(now, endPx, 0));
+      return out;
+    });
+  }
   function pxSeries(d, days, vs) {
     return fetch(IDX + '/prices?ids=' + encodeURIComponent(d.i)).then(function (r) { return r.json(); }).then(function (j) {
       var tok = (j && j.ok && j.tok && j.tok[d.i]) || [], near = {}, from = Date.now() - days * 86400000, out = [];
@@ -1723,8 +1760,18 @@
         var at = attempt || 0;
         if (hopeless || at >= CH_RETRY.length) {
           if (want === '1D' && PERF.h1 === 'pending') { PERF.h1 = 'done'; paintPerf(LASTD); }
-          if (unknown && !lastRawPts) chartNote("No price history yet. This token's pool is too new for the chart's price feed.");
-          if (!hopeless && !lastRawPts) chartNote('The price feed did not answer. Reload the page to try again.');
+          // The token's own trades before any note: a quiet market is still a market (see tradeSeries).
+          tradeSeries(window.__lxnAssetData || {}, want, vs).then(function (pts) {
+            if (gen !== chGen) return;
+            if (pts.length < 2) throw new Error('short');
+            pts = fitWindow(pts, want);
+            chartNote('');
+            drawChart(pts); paintOhlcStrip(pts); paintChartHead(pts); fitChartHeight();
+          }).catch(function () {
+            if (gen !== chGen) return;
+            if (unknown && !lastRawPts) chartNote("No price history yet. This token's pool is too new for the chart's price feed.");
+            if (!hopeless && !lastRawPts) chartNote('The price feed did not answer. Reload the page to try again.');
+          });
           return;
         }
         if (!lastRawPts && at === 0 && (want === '1D' || want === '1W')) {

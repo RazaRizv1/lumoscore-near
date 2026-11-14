@@ -29,13 +29,14 @@
 import { CURATED } from './_nearcurated.js';
 import { marketBody } from './nearmarket.js';
 import { ownPools, ownLiquidity } from './_nearownpools.js';
+import { allPools } from './nearpools.js';
 
 const TTL = 120;
 const KEEP = 86400;
 const WNEAR = 'wrap.near';
 const RPC = 'https://free.rpc.fastnear.com';
 const PAIRS = 'https://api.dexscreener.com/token-pairs/v1/near/';
-const VER = 'v10';  // v10: its order-book pool first, the baked classic one only without it (2026-11-13); v9: baked classic pool
+const VER = 'v11';  // v11: a classic pool's reserves price a token no feed lists (2026-11-14); v10: its order-book pool first, the baked classic one only without it (2026-11-13); v9: baked classic pool
 // earlier: v2: web, x, desc; v3: curated logo first (2026-10-29); v5: own pools; v6: their count (2026-11-04); v7: 30 pools (2026-11-05); v8: DCL pool (2026-11-12)
 const DCL = 'dclv2.ref-labs.near', DCL_FEES = [100, 400, 2000, 10000];
 const INTEAR = 'https://prices.intear.tech/token?token_id=';
@@ -170,6 +171,22 @@ async function dclMarket(id, decimals) {
   const near = Number(tokIsX ? best.total_y : best.total_x) / 1e24;
   return { price, liq: near + tok * price, id: 'refv2-' + String(best.pool_id).split('|').join(':'), fee: +best.fee };
 }
+// The deepest two-token pool of `id` against wNEAR in Rhea's pool list: price = its wNEAR reserve / its token reserve,
+// liquidity = both sides in NEAR (twice the wNEAR side). null when no such pool holds both reserves.
+async function classicMarket(context, id, decimals) {
+  const all = await allPools(context);
+  let best = null, bw = 0;
+  for (const p of (all && all.pools) || []) {
+    if (!p || p.ids.length !== 2 || p.ids.indexOf(id) < 0 || p.ids.indexOf(WNEAR) < 0) continue;
+    const w = Number(p.am[p.ids.indexOf(WNEAR)]) / 1e24;
+    if (w > bw) { bw = w; best = p; }
+  }
+  if (!best) return null;
+  const tok = Number(best.am[best.ids.indexOf(id)]) / Math.pow(10, decimals);
+  const price = tok > 0 ? bw / tok : null;
+  if (!(price > 0) || !isFinite(price)) return null;
+  return { price, liq: bw * 2, id: 'refv1-' + best.id };
+}
 // What the chain cannot give for such a pool -- the 24h change and volume -- from Intear's price index, which the page
 // names as their source. Its price is never used: the pool's own is.
 async function intear(id) {
@@ -242,6 +259,20 @@ async function build(id, context) {
       if (extra) { d24 = extra.d24; v24 = extra.volUsd != null && nearUsd ? extra.volUsd / nearUsd : null; }
     }
   }
+  // STILL NOTHING: ITS CLASSIC POOL'S RESERVES (RAZA 2026-11-14, WOW: "No market data for this token" over a page whose
+  // own Pools tab listed WOW/wNEAR 5778 holding 945 NEAR and whose trades showed 0.00000103 NEAR). DexScreener drops a
+  // pair that has not traded for weeks and the token has no order-book pool, so every figure was a dash while the
+  // market plainly existed. Stellar prices a quiet asset from its pool all the same. The pool list is Rhea's own,
+  // cached ten minutes by nearpools.js; the deepest two-token pool against wNEAR prices the token at its reserves.
+  let classic = null;
+  if (price == null && id !== WNEAR && !own.length && !dcl && decimals != null) {
+    try { classic = await classicMarket(context, id, decimals); } catch (e) { partial = true; }
+    if (classic) {
+      price = classic.price; usd = nearUsd ? classic.price * nearUsd : null; liq = classic.liq; src = 'pool';
+      if (!extra) { try { extra = await intear(id); } catch (e) {} }
+      if (extra) { d24 = extra.d24; v24 = extra.volUsd != null && nearUsd ? extra.volUsd / nearUsd : null; }
+    }
+  }
   if (price == null && !partial) partial = true;
 
   // Identity: the contract first, then the curated list, then whatever the pair listing says.
@@ -294,6 +325,12 @@ async function build(id, context) {
       base: { i: id, s: symbol }, quote: { i: other, s: other === WNEAR ? 'wNEAR' : clean(oc && oc.s, 24) },
       dex: 'ref', liqUsd: ln != null && nearUsd ? ln * nearUsd : 0, volUsd: 0, liq: ln != null ? ln : null, vol: 0,
       id: 'refv1-' + o.id, url: '' });
+    if (logos[id] === undefined) logos[id] = logo;
+  }
+  if (classic) {
+    pools.unshift({ pair: symbol + ' / wNEAR', base: { i: id, s: symbol }, quote: { i: WNEAR, s: 'wNEAR' }, dex: 'ref',
+      liqUsd: nearUsd ? classic.liq * nearUsd : 0, volUsd: extra && extra.volUsd != null ? extra.volUsd : 0,
+      liq: classic.liq, vol: v24, id: classic.id, url: '' });
     if (logos[id] === undefined) logos[id] = logo;
   }
   if (dcl) {
