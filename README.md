@@ -11,7 +11,7 @@
 [![Hosting](https://img.shields.io/badge/hosted%20on-Cloudflare%20Pages-f38020?style=flat-square)](https://pages.cloudflare.com)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
 
-[**Open the app**](https://lumoscore.com/trade/near) · [Pools](https://lumoscore.com/pools/near) · [Bridge](https://lumoscore.com/bridge/near) · [LUMOS token](https://lumoscore.com/lumos/near)
+[**Open the app**](https://lumoscore.com) · [Trade](https://lumoscore.com/trade/near) · [Pools](https://lumoscore.com/pools/near) · [Bridge](https://lumoscore.com/bridge/near) · [Launchpad](https://lumoscore.com/launchpad/near) · [LUMOS token](https://lumoscore.com/lumos/near) · [MCP](https://lumoscore.com/mcp/near)
 
 </div>
 
