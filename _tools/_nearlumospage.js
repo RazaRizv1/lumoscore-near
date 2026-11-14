@@ -56,11 +56,17 @@ const STYLE = '<style id="' + CSS_ID + '">'
   + '.lxn-eco-ic img{' + LOGO_CSS + '}'
   + '.lxn-eco-tx{display:flex;flex-direction:column;gap:3px;min-width:0}'
   + '.lxn-eco-tk{display:flex;align-items:center;gap:6px;font-size:15.5px;font-weight:800;color:var(--text)}'
-  + '.lxn-eco-tk .lx-vtick{width:15px;height:15px;flex:0 0 15px;margin:0}.lxn-eco-tk .lx-vtick svg{width:10px;height:10px}'
+  // ORANGE, as Stellar's and XRPL's Ecosystem lists draw it (RAZA 2026-11-15: "why do these have green tick on near.
+  // Make it orange like on XRPL and stellar"): Stellar's .lxu-eco-vt is a 15px accent disc, white 10px check.
+  + '.lxn-eco-tk .lx-vtick{width:15px;height:15px;flex:0 0 15px;margin:0;border-radius:50%;background:var(--accent,#ea6a2c)!important;color:#fff!important}'
+  + '.lxn-eco-tk .lx-vtick svg{width:10px;height:10px;stroke:#fff}'
   + '.lxn-eco-id{font:500 12.5px/1.2 "JetBrains Mono",monospace;color:var(--text-soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
   // The contract is short enough to read whole: the lock and the two buttons wrap under it on a phone.
   + '@media(max-width:1180px){.lxn-eco-list{display:block}.lxn-eco-row:nth-child(5n+1){border-top:1px solid var(--border)}.lxn-eco-row:first-child{border-top:0}}'
-  + '@media(max-width:760px){.addr-row .addr-value{max-width:none!important;overflow:visible!important}.lxn-eco-list{display:block}.lxn-eco-row:nth-child(5n+1){border-top:1px solid var(--border)}.lxn-eco-row:first-child{border-top:0}}'
+  // OVERLAPPING TEXT (RAZA 2026-11-15, phone): the value stayed flex:1 1 0%, squeezed to 81px, and overflow:visible drew
+  // "lumos.lumoscore.near" over the lock and both buttons. It keeps its natural width now; the row already wraps, so
+  // whatever no longer fits beside it moves to the next line instead of under the text.
+  + '@media(max-width:760px){.addr-row .addr-value{max-width:none!important;overflow:visible!important;flex:0 0 auto!important;min-width:0}.lxn-eco-list{display:block}.lxn-eco-row:nth-child(5n+1){border-top:1px solid var(--border)}.lxn-eco-row:first-child{border-top:0}}'
   + '</style>';
 // The earlier style block of this id, or the one from before the mint.
 function stripStyle(h) {
