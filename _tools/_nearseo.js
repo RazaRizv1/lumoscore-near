@@ -73,6 +73,13 @@ const SEO = {
     'Token Launched — NEAR Launchpad | LumosCore',
     'Your token is live on NEAR. Share it, add liquidity, or trade it straight away.',
   ],
+  // Rewards on NEAR exist now (RAZA 2026-11-14, "do the same for NEAR"): the served description still said
+  // "across Stellar liquidity positions". Rounds start 1 December 2026; no amounts here (they are the page's).
+  'lumoscore-rewards': [
+    'LUMOS Rewards on NEAR | LumosCore',
+    'Three LUMOS reward programmes on NEAR, starting 1 December 2026: provide liquidity to a rewarded pool or '
+      + 'hold LUMOS to take a share of each round. Check your eligibility and estimated rewards.',
+  ],
   'lumoscore-signin': [
     'Connect a Wallet | LumosCore',
     'Connect a NEAR wallet to trade, pool and launch tokens. LumosCore never holds your keys.',

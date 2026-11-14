@@ -54,6 +54,62 @@ const PAIRS = [
   ['shown on every quote. On NEAR it applies to limit orders too, taken when the order is placed.</span>',
    'shown on every quote. Limit orders are free.</span>'],
   [', and on NEAR a limit order pays it when the order is placed.', ', and limit orders are free.'],
+
+  // ---- WHAT A CRAWLER READS (RAZA 2026-11-14: "check SEO, GEO, AEO for NEAR ... do the same for NEAR") ----------
+  // Measured on production as an AI search crawler (no JavaScript): /trade/near served "How the Stellar DEX works",
+  // the token pages the Freighter connect dialog, /rewards/near "Your Stellar address". XRPL's _xrplcopy2.js
+  // rewrote the same dialogs for its chain; these are NEAR's. Most of them are also what a reader sees on opening
+  // the dialog, which is the second reason. Mock NUMBERS are left alone, as XRPL leaves them: the layers paint real
+  // ones. Left on purpose: the chooser grid's Stellar card lines (.lx-lp-meta: they describe Stellar), the
+  // advertising answer "paid in XLM or LUMOS" (placement is bought on Stellar) and the Stellar-only trustline panel.
+  //
+  // The wallet menu and the connect dialog.
+  ['<span class="mu-sub">Connected · Stellar</span>', '<span class="mu-sub">Connected · NEAR</span>'],
+  ['<span class="lc-mfoot-attr">Powered by Freighter, Albedo, xBull and Rabet</span>',
+   '<span class="lc-mfoot-attr">Powered by HOT, Meteor, NEAR Mobile and Intear</span>'],
+  ['<h4 id="lcConnectingTitle">Confirming with Freighter</h4>', '<h4 id="lcConnectingTitle">Confirming with your wallet</h4>'],
+  // The receive dialog.
+  ['<div class="qr-label">Your Stellar address</div>', '<div class="qr-label">Your NEAR address</div>'],
+  ['</strong> Only send XLM and Stellar-based assets to this address.',
+   '</strong> Only send NEAR and NEAR tokens to this address.'],
+  // Create pool.
+  ['<div class="modal-sub">Initialize a new liquidity pool on Stellar AMM</div>',
+   '<div class="modal-sub">Initialize a new liquidity pool on NEAR</div>'],
+  ['<div class="modal-sub">Initialize a new pool on Stellar AMM</div>', '<div class="modal-sub">Initialize a new pool on NEAR</div>'],
+  ['<div class="pair-sub">Stellar AMM utility</div>', '<div class="pair-sub">NEAR pool</div>'],
+  ['<div class="pc-sub">Stellar AMM utility</div>', '<div class="pc-sub">NEAR pool</div>'],
+  ['<p class="lumos-promo-sub">Pools run on Stellar\'s native AMM. Five-second finality. Penny-fraction fees.</p>',
+   '<p class="lumos-promo-sub">Pools run on-chain on NEAR. Fast finality. Penny-fraction fees.</p>'],
+  // The headings a crawler takes the page's subject from (XRPL: "XRP Ledger Liquidity Pools").
+  ['<h1>Automated Market Maker</h1>', '<h1>NEAR Liquidity Pools</h1>'],
+  ['<h1 class="page-title lx-sronly">Automated Market Maker</h1>', '<h1 class="page-title lx-sronly">NEAR Liquidity Pools</h1>'],
+  ['<h1>LUMOS Rewards</h1><div class="sub">', '<h1>LUMOS Rewards on NEAR</h1><div class="sub">'],
+  ['<h1 class="mob-page-title">LUMOS Rewards</h1>', '<h1 class="mob-page-title">LUMOS Rewards on NEAR</h1>'],
+  // The Trade page: the mints card and the phone's promo.
+  ['New Mints on Stellar', 'New Mints on NEAR'],
+  ['<h2 class="lumos-promo-title">Discover early gems on Stellar.</h2>', '<h2 class="lumos-promo-title">Discover early gems on NEAR.</h2>'],
+  ['<p class="lumos-promo-sub">Every trade settles peer-to-peer on Stellar. We never touch your funds',
+   '<p class="lumos-promo-sub">Every trade settles on-chain on NEAR. We never touch your funds'],
+  // The Trade page's "How it works?" dialog (#hiwModal). NEAR has no path payments and no anchors: step 02
+  // becomes the routing a NEAR swap does get. Settlement is faster than Stellar's 3-5 seconds.
+  ['<h3>How the Stellar DEX works</h3>', '<h3>How the NEAR DEX works</h3>'],
+  ['<div class="hiw-h">Trade any Stellar-issued asset</div>', '<div class="hiw-h">Trade any curated NEAR token</div>'],
+  ['<div class="hiw-d">Browse listings, swap with APT, or place limit orders against the on-chain Stellar DEX orderbook.',
+   '<div class="hiw-d">Browse curated tokens, swap at the best on-chain price, or place limit orders on NEAR\'s on-chain order book.'],
+  ['<div class="hiw-h">Smart path payments</div>', '<div class="hiw-h">Best-price routing</div>'],
+  ['<div class="hiw-d">Send one asset, the recipient gets another. Stellar automatically finds the cheapest route across multiple pairs and Anchors — even for pairs without direct liquidity.</div>',
+   '<div class="hiw-d">Every swap is routed across NEAR\'s pools for the best price, through an intermediate token when that pays more — even for pairs without a direct pool.</div>'],
+  ['<div class="hiw-d">Issue an asset on Stellar and list it on Stellar DEX in minutes. Seed initial liquidity, add a trustline, and the market is live — no separate venue, no listing fee.</div>',
+   '<div class="hiw-d">Launch a fixed-supply token on NEAR in minutes, with its first liquidity pool included, and the market is live — no separate venue, no listing fee.</div>'],
+  ['assets remain yours throughout. Settlement is on-chain in 3–5 seconds.</div>',
+   'assets remain yours throughout. Settlement is on-chain in a couple of seconds.</div>'],
+  ['<span>Stellar DEX charges roughly 0.00001 XLM per operation as a network fee. The exchange itself takes no protocol fee and offers no maker/taker rebates — everyone trades at the same rate. LumosCore',
+   '<span>NEAR charges a small network fee for each transaction, paid in NEAR and usually well under a cent. Each pool also keeps its own swap fee for its liquidity providers. LumosCore'],
+  // The bridge dialogs: NEAR's routes, not Stellar's.
+  ['<div class="modal-sub">Cross-chain transfers via Circle CCTP, LayerZero and NEAR Intents.</div>',
+   '<div class="modal-sub">Cross-chain transfers via NEAR Intents, Omni Bridge and Wormhole.</div>'],
+  ['<div class="hiw-d">Transfers route through Circle CCTP, LayerZero or NEAR Intents, so you receive the destination asset directly.</div>',
+   '<div class="hiw-d">Transfers route through NEAR Intents, Omni Bridge or Wormhole, so you receive the destination asset directly.</div>'],
 ];
 
 const hits = PAIRS.map(() => 0), done = PAIRS.map(() => 0);
