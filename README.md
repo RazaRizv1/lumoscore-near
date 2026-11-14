@@ -1,78 +1,128 @@
+<div align="center">
+
+<img src="docs/logo.png" alt="LumosCore" width="96" height="96">
+
 # LumosCore on NEAR
 
-The NEAR Protocol build of **LumosCore**, a non-custodial, multi-network DeFi platform: trading, liquidity pools,
-cross-chain transfers, a wallet view, a token launchpad and rewards, served as a static site from Cloudflare Pages.
+**Non-custodial trading, liquidity and cross-chain transfers on NEAR Protocol.**
 
-Live at **<https://lumoscore.com>**. Pick NEAR in the network chooser, or open <https://lumoscore.com/trade/near>.
+[![Live](https://img.shields.io/badge/live-lumoscore.com-ea6a2c?style=flat-square)](https://lumoscore.com/trade/near)
+[![Network](https://img.shields.io/badge/network-NEAR%20mainnet-00ec97?style=flat-square)](https://near.org)
+[![Hosting](https://img.shields.io/badge/hosted%20on-Cloudflare%20Pages-f38020?style=flat-square)](https://pages.cloudflare.com)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
 
-## Networks
+[**Open the app**](https://lumoscore.com/trade/near) · [Pools](https://lumoscore.com/pools/near) · [Bridge](https://lumoscore.com/bridge/near) · [LUMOS token](https://lumoscore.com/lumos/near)
 
-| Network | Status | Where it is built |
-|---|---|---|
-| **Stellar** | Live on mainnet | [RazaRizv1/lumoscore](https://github.com/RazaRizv1/lumoscore), which also holds the shared edge Functions |
-| **XRPL** | Live on mainnet | Its own repository |
-| **NEAR** | Live on mainnet | **This repository** |
+</div>
 
-One site serves every network. Each network's front-end is built in its own repository and the builds are combined
-into one deployable tree, with NEAR's pages served under `/near/` and routes such as `/trade/near`, `/pools/near` and
-`/bridge/near`.
+---
 
-**Non-custodial throughout.** Every transaction is signed in the user's own NEAR wallet (HOT, Meteor, NEAR Mobile or
-Intear, connected through NEAR Connect). LumosCore never holds keys, never takes custody, and runs no account system.
+## Overview
 
-## What's in it
+LumosCore is a multi-network DeFi platform: one site, one design, a separate build per network. This repository is
+its **NEAR Protocol** build. It covers swaps, limit orders, liquidity pools, cross-chain bridging, a wallet view, a
+token launchpad and LUMOS rewards, served as a static site with a thin edge layer on Cloudflare.
 
-| Section | What it does on NEAR |
+> **Your keys never leave your wallet.** Every action is a transaction you approve in your own NEAR wallet.
+> LumosCore holds no keys, takes no custody and runs no account system.
+
+## Features
+
+| | |
 |---|---|
-| **Dashboard** | Network stats, markets, Platform Activity (transactions made through LumosCore) |
-| **Trade** | Token pages with price, chart, holders, pools and recent trades; swaps and limit orders |
-| **Pools** | Every curated pool with liquidity, volume and fees; the Rewarded Pools tab; create a pool, add or withdraw liquidity |
-| **Bridge** | Cross-chain transfers over NEAR Intents, Omni Bridge and Wormhole, with claims for routes that need one |
-| **Wallet** | Balances, send and receive, open orders (cancel, collect and claim), LP positions, activity |
-| **Launchpad** | Create a NEAR token end to end |
-| **Rewards** | The LUMOS reward programmes on NEAR |
-| **LUMOS** | The platform token's page: `lumos.lumoscore.near` |
+| **Trade** | Token pages with live price, charts, holders, pools and recent trades. Swaps routed through NEAR's exchange contracts, plus limit orders on the on-chain order book. |
+| **Pools** | Every curated pool with liquidity, 24h volume and fees. Create a pool, add or withdraw liquidity, and browse the **Rewarded Pools** that earn LUMOS. |
+| **Bridge** | Move assets to 35 networks over **NEAR Intents**, **Omni Bridge** and **Wormhole**, with each route's fees and timing shown up front, and claims handled in the app where a route needs one. |
+| **Wallet** | Balances, send and receive, LP positions, open orders (cancel, collect, claim) and a decoded activity history. |
+| **Launchpad** | Create and launch a NEAR token end to end. |
+| **Rewards** | The LUMOS Native LP, Ecosystem LP and Whale Holder programmes. |
+| **Dashboard** | Network stats, markets and live Platform Activity. |
 
-Every figure is read at runtime from the chain or a public source: NEAR RPC and FastNEAR's indexes, the
-`v2.ref-finance.near` and `dclv2.ref-labs.near` exchange contracts, DexScreener, GeckoTerminal, Intear's price index,
-NearBlocks and the bridges' own APIs. A figure that could not be read is shown as unknown, never as zero.
+**Supported wallets:** HOT, Meteor, NEAR Mobile and Intear, connected through NEAR Connect.
 
-## Repository layout
+## Architecture
 
-| Path | What it holds |
-|---|---|
-| `_tools/` | The build: `rebuild.js` runs the transform chain (`_near*.js`) over the design containers; `extract_site.js` writes the site |
-| `_tools/browser/` | The page layers injected into each page (swap, bridge, pools, wallet, search, charts...) |
-| `functions/lxapi/near*.js` | NEAR's Cloudflare Pages Functions: markets, tokens, pools, holders, trades, activity, bridge status, rewarded pools |
-| `workers/near-pool-indexer/` | A Cloudflare Worker that records every pool's swaps, deposits and withdrawals into D1, minute by minute |
-| `contracts/` | The NEAR contracts used by the launchpad (token, factory, router), with their build and deploy notes |
-| `assets/` | Self-hosted logos, the NEAR Connect bundle and the pinned wallet list |
-| `RELEASE.md` | The production release checklist |
-
-## How the build works
-
-The site starts from a set of **design containers** (large HTML files holding every page) shared with the Stellar
-build. Transforms rewrite them for NEAR, then the extractor writes `dist/near/`. The containers are not in this
-repository (`.gitignore`): they are around 120 MB and are the product's design source. So a full build needs them
-and a checkout of the Stellar repository, whose shared Functions are kept in step by `shared-functions.json`.
-
-```bash
-npm run rebuild          # every NEAR transform, in order, over the containers
-npm run build            # shared Functions, baked data, then dist/near
-npm run predeploy        # pre-deploy checks
-npm run idem             # two consecutive runs must be byte-identical
+```mermaid
+flowchart LR
+    U([User]) --> W[NEAR wallet<br/>HOT · Meteor · NEAR Mobile · Intear]
+    U --> S[Static site<br/>Cloudflare Pages]
+    S --> F[Edge Functions<br/>/lxapi/near*]
+    S --> C[(NEAR chain<br/>RPC · contracts)]
+    F --> C
+    F --> P[Public data<br/>DexScreener · GeckoTerminal<br/>Intear · NearBlocks]
+    F --> B[Bridge APIs<br/>NEAR Intents · Omni · Wormhole]
+    I[Pool indexer<br/>Cloudflare Worker + D1] --> C
+    F --> I
+    W -- signs every transaction --> C
 ```
 
-The combined tree that is deployed is assembled outside this repository, together with the Stellar and XRPL builds.
+- **Static site.** Every page is pre-built HTML with its NEAR logic injected as layers, served from Cloudflare Pages.
+- **Edge Functions.** A thin layer that caches public data, shields upstreams from rate limits and never holds user
+  funds or keys.
+- **Pool indexer.** A Worker that records every pool's swaps, deposits and withdrawals into D1 each minute, for pool
+  histories and provider counts no public API offers.
+- **Honest data.** Every figure is read live from the chain or a public source. A value that cannot be read is shown
+  as unknown, never as zero.
+
+## Data sources
+
+| Source | Used for |
+|---|---|
+| NEAR RPC and FastNEAR | Balances, contract state, transaction history |
+| `v2.ref-finance.near`, `dclv2.ref-labs.near` | Pools, swaps, the order book, limit orders |
+| DexScreener, GeckoTerminal | 24h volume, candles, recent trades |
+| Intear | Token search, prices and holder counts |
+| NearBlocks | Explorer links, token metadata fallbacks |
+| NEAR Intents, Omni Bridge, Wormhole | Bridge quotes, transfer status, claims |
+
+## Getting started
+
+The pages are generated from LumosCore's **design containers**, large HTML sources shared with the Stellar build.
+They are not in this repository (about 120 MB, and the product's design source), so a full build needs them and a
+checkout of the [Stellar repository](https://github.com/RazaRizv1/lumoscore), whose shared edge Functions are kept in
+step through `shared-functions.json`.
+
+```bash
+npm run rebuild      # run every NEAR transform, in order, over the containers
+npm run build        # shared Functions, baked data, then dist/near
+npm run predeploy    # pre-deploy checks
+npm run idem         # two consecutive runs must produce byte-identical output
+```
+
+The deployed site is a single tree that combines the Stellar, XRPL and NEAR builds; it is assembled outside this
+repository.
+
+## Project structure
+
+```text
+_tools/                    build: rebuild.js runs the transform chain, extract_site.js writes the site
+  _near*.js                one transform per concern (pools, bridge, rewards, FAQ, copy...)
+  browser/                 the page layers: swap, bridge, pools, wallet, search, charts...
+functions/lxapi/near*.js   Cloudflare Pages Functions for NEAR data
+workers/near-pool-indexer/ Cloudflare Worker + D1: pool swaps, deposits, withdrawals
+contracts/                 launchpad contracts (token, factory, router)
+assets/                    self-hosted NEAR Connect bundle and pinned wallet list
+docs/                      images for this README
+RELEASE.md                 production release checklist
+```
 
 ## Security
 
-- No secrets live in this repository. Keys and API tokens are Cloudflare secrets set with `wrangler secret put`,
-  and `.env*` files are ignored.
-- Nothing here can move funds: every write is a transaction the user approves in their own wallet.
-- Token names and symbols come from contracts anyone can deploy, so they are treated as hostile input and rendered as
-  text, never as HTML.
+- **Non-custodial by design.** No code path can move funds; every write is a transaction the user signs.
+- **No secrets in the repository.** API keys live as Cloudflare secrets (`wrangler secret put`) and `.env*` is ignored.
+- **Hostile input handled as such.** Token names and symbols come from contracts anyone can deploy, so they are
+  rendered as text, never as HTML.
+
+Found a vulnerability? Please report it privately through [lumoscore.com/support](https://lumoscore.com/support)
+rather than opening a public issue.
+
+## Related repositories
+
+| Network | Repository |
+|---|---|
+| Stellar (and the shared edge Functions) | [RazaRizv1/lumoscore](https://github.com/RazaRizv1/lumoscore) |
+| NEAR | **This repository** |
 
 ## License
 
-[MIT](LICENSE)
+Released under the [MIT License](LICENSE).
