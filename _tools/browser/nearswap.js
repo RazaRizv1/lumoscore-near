@@ -99,7 +99,11 @@
   // 0.2N or more left in wallet for gas fee"). NEAR sets aside a transaction's whole prepaid gas up front, at a
   // pessimistic price, and refunds what goes unused -- a 200+ TGas swap needs far more on hand than the few
   // thousandths it finally costs. 0.2 is Rhea's figure; the 0.05 above stays for cheap calls (send, bridge).
-  var SWAP_KEEP = '200000000000000000000000';
+  // 0.25, NOT 0.2 (RAZA 2026-11-15, 0.15 NEAR -> LUMOS, HOT): with ~0.357 NEAR the 0.2 check passed, the wrap landed,
+  // and HOT refused the swap transaction with 0.2048 NEAR still spendable -- "User rejected the request" again. HOT's
+  // floor is 0.2 PLUS the gas the swap itself attaches, so 0.2 exactly is a coin-flip. 0.25 keeps a margin above it,
+  // and a refusal now happens here, before anything is signed, instead of after the wrap.
+  var SWAP_KEEP = '250000000000000000000000';
   // Mainnet swaps through Rhea burn ~18-28 TGas end to end (measured on four real txs 2026-10-21:
   // 0.0016-0.0026 NEAR). Shown as the figure alone, as Stellar prints its network fee -- RAZA 2026-10-29
   // asked for the "~" to go, on the swap pane and the review popup alike. 0.003 is the ceiling of what was
@@ -811,7 +815,7 @@
         return ask.then(function (short) {
           if (short != null) {
             return 'The swap was not sent: your wallet is down to ' + fromUnits(short, 24).replace(/(\.\d{4})\d+$/, '$1')
-              + ' NEAR, and a swap needs 0.2 NEAR on hand for gas. NEAR sets the gas aside before the swap runs '
+              + ' NEAR, and a swap needs 0.25 NEAR on hand for gas. NEAR sets the gas aside before the swap runs '
               + 'and refunds what it does not use. Top up and try again.';
           }
           return tells ? ('Nothing was swapped. The wallet said: "' + words + '".') : 'Cancelled by the user.';

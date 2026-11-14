@@ -185,7 +185,10 @@
     var f = fields(p), s = sides(p), pm = meta(s.pay);
     var pre = phone(p) ? 'Bal: ' : 'Balance: ';
     var raw = bal.raw[s.pay];
-    mark(frowMono(f[0]), me() ? (pre + (raw == null || pm.dec == null ? '—' : fmt(S().toNum(raw, pm.dec), 6) + ' ' + pm.code)) : (pre + '—'));
+    // THE BALANCE IS WHAT CAN BE SPENT (RAZA 2026-11-15: "the available amount should actually be shown as balance, not
+    // the actual wallet balance"): paying NEAR, what is left after the 0.25 NEAR a swap keeps for gas -- the same figure
+    // MAX fills and the swap dialog already shows. FLOORED to six places, so it never reads more than can be spent.
+    mark(frowMono(f[0]), me() ? (pre + (raw == null || pm.dec == null ? '—' : floorTxt(S().swapRoom(s.pay, raw), pm.dec) + ' ' + pm.code)) : (pre + '—'));
     sumRow(p, 'slippage tolerance', (S().SLIP_BPS / 100).toFixed(1) + '%');
     sumRow(p, 'network fee', S().NET_FEE_EST);
     var recv = input(f[1]);
@@ -280,7 +283,7 @@
     // the balance, Stellar's sentence, and names the keep after it -- the wording of the dashboard dialog.
     if (S().big(raw) > S().big(room)) {
       return 'Insufficient ' + m.code + ' balance — you have ' + floorTxt(have, m.dec) + ' ' + m.code
-        + ', and a NEAR swap keeps 0.2 NEAR back for network fees';
+        + ', and a NEAR swap keeps 0.25 NEAR back for network fees';
     }
     return '';
   }
@@ -391,7 +394,10 @@
         var room = S().big(S().swapRoom(s.pay, have));
         var pct = /max/i.test(qb.textContent) ? 100 : parseInt(qb.textContent, 10);
         if (!(pct > 0)) return;
-        var raw = (room * BigInt(pct) / BigInt(100)).toString();
+        // SIX DECIMALS, FLOORED (RAZA 2026-11-15: MAX filled "0.00480127879433216..."): the amount the box shows is the
+        // amount spent, so the dust past the sixth place is cut, never rounded up past what can be spent.
+        var cut = m.dec > 6 ? BigInt(10) ** BigInt(m.dec - 6) : BigInt(1);
+        var raw = (room * BigInt(pct) / BigInt(100) / cut * cut).toString();
         var i = input(fields(p)[0]);
         if (i) i.value = S().fromUnits(raw, m.dec);
         quick(p, qb);
