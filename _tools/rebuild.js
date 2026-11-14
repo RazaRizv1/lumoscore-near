@@ -106,6 +106,8 @@ const CHAIN = [
   // Phone bottom bar: Launch in place of Pools (RAZA 2026-11-14). Patches the tab in place; late so no pass that
   // rebuilds a page key from the design can hand the Pools tab back.
   '_nearnavlaunch',
+  // ...and the same bar on the launchpad page, Launch lit (copied from the bridge page's bar; after _nearnavlaunch).
+  '_nearlaunchbar',
   // Last until there is anything else: it only touches <a> tags pointing off-site, and any later pass
   // that rebuilds a page key from the design hands those tags back without rel="nofollow".
   '_nofollow',
