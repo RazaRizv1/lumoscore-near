@@ -26,7 +26,7 @@
 import { CURATED } from './_nearcurated.js';
 import { ownPools, ownPrices } from './_nearownpools.js';
 
-const TTL = 120, KEEP = 86400, VER = 'v4';   // v3: LumosCore's own pools joined (2026-11-04)
+const TTL = 120, KEEP = 86400, VER = 'v5';   // v3: LumosCore's own pools joined (2026-11-04); v5: every pool since 9001 (2026-11-14)
 const WNEAR = 'wrap.near';
 const POOLS = 'https://indexer.ref.finance/list-top-pools';
 const PRICES = 'https://indexer.ref.finance/list-token-price';
@@ -146,9 +146,11 @@ export async function allPools(context) {
   const key = new Request('https://lumoscore.internal/lxapi/nearpools/' + VER + '/all');
   const hit = await caches.default.match(key);
   if (hit) return hit.json();
-  const [pools, prices, own] = await Promise.all([getJson(POOLS, 12000), getJson(PRICES, 6000), ownPools(context).catch(() => [])]);
+  const [pools, prices, own, fresh] = await Promise.all([getJson(POOLS, 12000), getJson(PRICES, 6000), ownPools(context).catch(() => []),
+    newPools().catch(() => [])]);
   if (!Array.isArray(pools) || !pools.length) throw new Error('rhea: no pools');
   for (const o of own) if (!pools.some((p) => String(p.id) === o.id)) pools.push(o);
+  for (const o of fresh) if (!pools.some((p) => String(p.id) === o.id)) pools.push(o);
   ownPrices(own, prices);
   const px = {};
   for (const t in prices) { const p = num((prices[t] || {}).price), d = num((prices[t] || {}).decimal); if (p != null) px[t] = [p, d]; }
@@ -158,6 +160,42 @@ export async function allPools(context) {
   context.waitUntil(caches.default.put(key, new Response(JSON.stringify(all), {
     headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=' + ALL_TTL } })));
   return all;
+}
+// EVERY POOL SINCE LUMOS, READ FROM THE CHAIN (RAZA 2026-11-14: "why its only showing 1 pool for lumos. i myself
+// create multiple pools with LUMOS"). Rhea's top-pools feed leaves small and new pools out, so LUMOS's Trade page
+// listed only 9001 -- the one pool a curated token can name -- while LUMOS/ZEC 9017 and USDT.e/LUMOS sat on chain.
+// /lxapi/nearrwpools already reads from 9001 (LUMOS's first pool, 2026-11-04) to get_number_of_pools for the
+// Rewarded tab; this does the same for every search, so any token's pool made since then is found: 18 pools today,
+// one call. Capped at 300 (three calls); beyond that Rhea's feed has long since caught up. Empty pools are skipped.
+const NEW_FROM = 9001, NEW_MAX = 300;
+async function refView(method, args) {
+  for (const u of RPCS) {
+    try {
+      const ctl = new AbortController(); const tm = setTimeout(() => ctl.abort(), 5000);
+      const r = await fetch(u, { method: 'POST', signal: ctl.signal, headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'query', params: { request_type: 'call_function', finality: 'final',
+          account_id: 'v2.ref-finance.near', method_name: method, args_base64: btoa(JSON.stringify(args)) } }) });
+      clearTimeout(tm);
+      const j = await r.json();
+      if (!j || !j.result || !j.result.result) continue;
+      return JSON.parse(new TextDecoder().decode(new Uint8Array(j.result.result)));
+    } catch (e) {}
+  }
+  throw new Error(method + ': no RPC answered');
+}
+async function newPools() {
+  const n = Number(await refView('get_number_of_pools', {}));
+  if (!(n > NEW_FROM)) return [];
+  const from = Math.max(NEW_FROM, n - NEW_MAX), out = [];
+  for (let at = from; at < n; at += 100) {
+    const list = await refView('get_pools', { from_index: at, limit: 100 });
+    if (!Array.isArray(list)) break;
+    list.forEach((p, k) => {
+      if (!p || !Array.isArray(p.token_account_ids) || !(p.amounts || []).some((a) => Number(a) > 0)) return;
+      out.push(Object.assign({ id: String(at + k) }, p));
+    });
+  }
+  return out;
 }
 // Decimals, symbol and logo for a token outside the curated table: the token contract itself.
 const RPCS = ['https://near.drpc.org', 'https://rpc.mainnet.fastnear.com'];
