@@ -19,9 +19,41 @@
 
 ## Overview
 
-LumosCore is a multi-network DeFi platform: one site, one design, a separate build per network. This repository is
-its **NEAR Protocol** build. It covers swaps, limit orders, liquidity pools, cross-chain bridging, a wallet view, a
-token launchpad and LUMOS rewards, served as a static site with a thin edge layer on Cloudflare.
+### Finance should not be fenced in by networks
+
+Value today lives on dozens of blockchains, and each one is its own walled garden: its own wallets, its own
+exchanges, its own bridges, its own rules. Liquidity is scattered. Moving between networks means trusting a
+middleman, juggling tools and hoping nothing breaks on the way. The more networks the world adopts, the worse
+this gets.
+
+**LumosCore is built to end that fragmentation.** One platform where anyone can issue an asset, trade it, provide
+liquidity, earn rewards and move value across networks, with one experience everywhere and without ever giving up
+control of their funds.
+
+### Self-custody is not a feature. It is the foundation.
+
+LumosCore never touches a user's keys. Every swap, order, deposit, launch and transfer is a transaction the user
+signs in their own wallet. There are no accounts to create, no balances held on anyone's behalf and no withdrawal
+queue to wait in. If LumosCore disappeared tomorrow, every user's assets would still be exactly where they are: in
+their own wallets, or in the on-chain pools and order books they chose, withdrawable by them alone.
+
+That is the line we will not cross on any network: **financial freedom means owning your money outright.**
+
+### One platform, many networks
+
+LumosCore is already live on **Stellar**, the **XRP Ledger** and now **NEAR Protocol**, all served from a single
+site, with more networks on the way. Each network keeps what makes it strong: its native assets, its own exchange
+contracts, its own wallets. LumosCore brings them together under one interface and one standard of quality, with
+bridges between them built in.
+
+### Why NEAR
+
+NEAR brings fast, low-cost transactions, human-readable accounts and some of the most advanced cross-chain
+infrastructure in the industry. Through **NEAR Intents**, **Omni Bridge** and **Wormhole**, LumosCore on NEAR connects
+to 35 networks today, making NEAR one of LumosCore's main gateways between chains.
+
+This repository is that NEAR build: trading, limit orders, liquidity pools, cross-chain bridging, a wallet, a token
+launchpad and LUMOS rewards, served worldwide from Cloudflare's edge.
 
 > **Your keys never leave your wallet.** Every action is a transaction you approve in your own NEAR wallet.
 > LumosCore holds no keys, takes no custody and runs no account system.
