@@ -332,7 +332,7 @@
       href: '/trade/near/' + LUMOS, label: 'Trade' };
   }
   function pairIcons(row, p) {
-    var a = q('.pair-icons .a', row), b = q('.pair-icons .b', row);
+    var a = q('.pair-icons .a', row), b = q('.pair-icons .b', row); var box = q('.pair-icons', row); if (box) box.setAttribute('data-paired', '1');
     if (a) {
       logoed(a); a.setAttribute('data-lxc', 'LUMOS'); a.textContent = '';
       var brand = q('.nx-brand .logo-mark'), bg = brand ? getComputedStyle(brand).backgroundImage : '';
@@ -340,7 +340,7 @@
     }
     if (b) {
       logoed(b); b.setAttribute('data-lxc', 'NEAR'); b.textContent = '';
-      b.style.background = 'transparent'; b.style.overflow = 'hidden';
+      b.style.background = 'transparent'; b.style.overflow = 'hidden'; b.style.left = '';
       var o = p.other, src = o && o.i === WNEAR ? NEAR_LOGO : ((o && o.logo) || (o && o.i ? IDX + '/icon?v=2&t=' + encodeURIComponent(o.i) : ''));
       if (src) {
         var im = document.createElement('img'); im.alt = ''; im.src = src;
@@ -450,8 +450,10 @@
       if (av) { logoed(av); av.textContent = h.a.charAt(0).toUpperCase(); }
       if (ad) { ad.textContent = short(h.a); ad.title = h.a; }
       if (ch) { var pc = sup ? h.bal / sup * 100 : null; ch.textContent = pc == null ? '—' : (pc >= 0.01 ? pc.toFixed(2) : '<0.01') + '% of supply'; }
-      if (v) v.textContent = abbrNum(h.bal) + ' LUMOS';
-      if (m) { var u = p > 0 ? h.bal * p : null; m.classList.add('lc-money'); money(m, u); }
+      // DUST (RAZA 2026-11-18, "what about Near?"): lumos01.near holds ~0.0000003 LUMOS -- a real holder, but it read
+      // "0 LUMOS" beside "$0.00000000". Below 0.01 both say so instead.
+      if (v) v.textContent = (h.bal > 0 && h.bal < 0.01 ? '<0.01' : abbrNum(h.bal)) + ' LUMOS';
+      if (m) { var u = p > 0 ? h.bal * p : null; m.classList.add('lc-money'); money(m, u); if (u != null && u > 0 && u < 0.01) { m.textContent = '<$0.01'; m.setAttribute('data-orig', '<$0.01'); } }
       c.style.cursor = 'pointer'; c.title = 'View on NearBlocks'; c.setAttribute('data-lxbuilt', '1');
       c.addEventListener('click', function () { window.open('https://nearblocks.io/address/' + encodeURIComponent(h.a), '_blank', 'noopener'); });
       parent.insertBefore(c, before);

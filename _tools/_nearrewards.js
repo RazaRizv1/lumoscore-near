@@ -50,6 +50,9 @@ const COPY = [
    'Ten pools, each pairing LUMOS with one other asset. On NEAR the ten are ' + ECO_NEAR + '. Each pays 100,000 LUMOS per round, and the ten are reselected every 6 months.', 'optional'],
   ['Ten pools, each pairing LUMOS with one other asset: currently LMNR, yXLM, sages, AQUA, SSLX, SHX, TKG, LIBERATOR, KALE and USDC. Each pays 100,000 LUMOS per round, and the ten are reselected every 6 months.',
    'Ten pools, each pairing LUMOS with one other asset. On NEAR the ten are ' + ECO_NEAR + '. Each pays 100,000 LUMOS per round, and the ten are reselected every 6 months.'],
+  // Stellar's sentence after its 2026-11-18 rotation to the current cycle -- the same answer, a new anchor.
+  ['Ten pools, each pairing LUMOS with one other asset: currently USDC, USDT0, EURC, SHX, AQUA, BLND, xLMNR, yXLM, XRP and PYUSD. Each pays 100,000 LUMOS per round, and the ten are reselected every 6 months.',
+   'Ten pools, each pairing LUMOS with one other asset. On NEAR the ten are ' + ECO_NEAR + '. Each pays 100,000 LUMOS per round, and the ten are reselected every 6 months.'],
   ['69,000,000<small>LUMOS</small></div><div class="k">Distributed so far', '0<small>LUMOS</small></div><div class="k">Distributed so far'],
 ];
 // The three "Distributed 23M / cap" bars: nothing has been paid on NEAR.

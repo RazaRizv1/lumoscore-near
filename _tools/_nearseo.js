@@ -11,7 +11,6 @@
 // DELIBERATELY ABSENT, so their Stellar copy stays visible and fixable rather than confidently wrong:
 //   lumoscore-lumos-token, lumoscore-rewards   LUMOS is not on NEAR yet (deferred until it is minted)
 //   lumoscore-mcp                              there is no NEAR MCP server
-//   lumoscore-list-token                       the listing fee on NEAR is not decided
 //   lumoscore-landing                          dropped by the combine; the landing page is Stellar's
 //   the docs and blog                          their descriptions must match their bodies, which are
 //                                              rewritten as each feature lands
@@ -24,6 +23,11 @@ const B = String.fromCharCode(92);
 
 // base page name (without -dark/-light/-mobile) -> [title, description]
 const SEO = {
+  // Decided 2026-11-17 (RAZA: listings are paid "in their own coin"): $250 in NEAR, /lxapi/nearlisting.
+  'lumoscore-list-token': [
+    'List Your Token — Curated NEAR Listings | LumosCore',
+    'Apply for a curated listing on LumosCore. $250, paid in NEAR, refunded in full if the listing is declined. Reviewed by our team.',
+  ],
   'lumoscore-home': [
     'Dashboard — Your NEAR Portfolio | LumosCore',
     'Your NEAR balances, tokens, pool positions and recent activity in one place, priced live. '
