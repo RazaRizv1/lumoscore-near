@@ -94,6 +94,7 @@ const NI_LABEL = { eth: 'Ethereum', arb: 'Arbitrum', base: 'Base', op: 'Optimism
 const VIA = { ni: 'NEAR Intents', om: 'Omni Bridge', wh: 'Wormhole' };
 const NI_DONE = { SUCCESS: 1, REFUNDED: 1, FAILED: 1 };
 const BR_PER_RUN = 4;
+const ALL_PER_RUN = 10, ALL_BR_PER_RUN = 2;
 async function enrichBridge(r, env) {
   const b = r.br;
   if (!b) return false;
@@ -319,8 +320,67 @@ async function build(cache, env) {
   return { ok: true, at: Date.now(), rows, partial: partial || undefined };
 }
 
+// ?all=1 -- EVERY LumosCore transaction on NEAR, for the admin's volume (RAZA 2026-11-18: "the admin only shows $1.01 of
+// cross-chain volume, which is prolly from Stellar" -- NEAR receipts entered the admin with their fee only, so a 6.04 NEAR
+// transfer to Arbitrum counted nothing). Same index, same decode() and the SAME decoded map as the feed ('activity2'), so
+// neither decodes twice; it fills older rows PER_RUN at a time and says complete:false until it has every one. Each row is
+// the token amount the signer paid in (give), or for a bridge what was sent (fee + transfer), with its kind; pricing it
+// is the caller's job. Nothing is enriched here (no 1Click or Wormhole asks): the amount sent is on chain already.
+async function buildAll(cache, env) {
+  const list = await feeIndex(cache);
+  // 10 A CALL, NOT THE FEED'S 25: a cold start at 25 answered Cloudflare's error page or ok:false on its first calls
+  // (measured on staging 2026-11-18) -- decoding 25 full transactions is past the free plan's per-request CPU. The
+  // caller asks again until complete; the map is shared with the feed and kept a week, so this is a once-a-week cost.
+  const D = await decodeNew(cache, 'activity2', list, decode, ALL_PER_RUN), map = D.map;
+  // A Wormhole transfer of NATIVE NEAR sends the NEAR in its own transaction, before the fee one; until that leg is found
+  // the row knows only the fee (0.0002 of a 0.1 NEAR transfer, measured). The feed finds it for its newest rows only, so
+  // the older ones are looked up here, a few a request, the same way (enrichBridge -> whLeg).
+  // A NEAR Intents transfer can be REFUNDED when its destination leg fails; that moved nothing and is not volume. Its
+  // final status is 1Click's answer, asked the same way the feed asks it (enrichBridge -> niDelivery), a few a request.
+  let wh = 0, whLeft = 0;
+  for (const x of list) {
+    const r = map[x.h], b = r && r.br;
+    if (!b) continue;
+    const needWh = b.whNative && !b.leg && !(b.tries > 3);
+    const needNi = b.route === 'ni' && b.dep && !(b.ni && NI_DONE[b.ni.status]) && !((b.nt || 0) > 8);
+    if (!needWh && !needNi) continue;
+    if (wh < ALL_BR_PER_RUN) { wh++; try { if (await enrichBridge(r, env)) D.touch(); } catch (e) {} }
+    if ((b.whNative && !b.leg && !(b.tries > 3)) || (b.route === 'ni' && b.dep && !(b.ni && NI_DONE[b.ni.status]) && !((b.nt || 0) > 8))) whLeft++;
+  }
+  await D.save();
+  const done = list.filter((x) => x.h in map).length;
+  const recs = list.filter((x) => x.ok !== false && map[x.h]).map((x) => map[x.h]);
+  const ids = {};
+  recs.forEach((r) => { if (r.br && r.br.token) ids[r.br.native ? 'near' : r.br.token] = 1; (r.legs || []).forEach((g) => { ids[g.c] = 1; }); });
+  const meta = await metaFor(Object.keys(ids));
+  const rows = recs.map((r) => {
+    const b = r.br;
+    let c = null, raw = null, kind = 'swap', via;
+    if (b && (b.carried || b.fee)) {
+      c = b.native ? 'near' : b.token; raw = (BigInt(b.fee || '0') + BigInt(b.carried || '0')).toString();
+      kind = 'bridge'; via = VIA[b.route];
+      if (b.ni && (b.ni.status === 'REFUNDED' || b.ni.status === 'FAILED')) kind = 'bridge_' + b.ni.status.toLowerCase();
+    } else {
+      const g = (r.legs || []).filter((x) => x.neg)[0];
+      if (g) { c = g.c; raw = g.raw; }
+      if (/^lx:(ni|om|wh)$/.test(r.memo)) { kind = 'bridge'; via = VIA[r.memo.slice(3)]; }
+      // Placing a limit order is not traded volume (its fill is, later, and has no row of ours); kept, marked.
+      else if (/limit order/i.test(r.memo)) kind = 'limit';
+    }
+    const m = c ? meta[c] : null;
+    return { h: r.h, ts: r.ts, who: r.who, memo: r.memo, kind, via, c, s: m ? m.s : null,
+      v: m && m.d != null && raw != null ? units(String(raw).replace(/^-/, ''), m.d) : null };
+  }).sort((a, b) => b.ts - a.ts);
+  return { ok: true, at: Date.now(), complete: done === list.length && !whLeft, decoded: done, total: list.length,
+    bridge_legs_pending: whLeft || undefined, rows };
+}
+
 export async function onRequestGet(context) {
   const cache = caches.default;
+  if (new URL(context.request.url).searchParams.get('all') === '1') {
+    try { const b = await buildAll(cache, context.env); return json(b, b.complete ? 60 : 0); }
+    catch (e) { return json({ ok: false, error: 'NEAR activity unavailable' }, 0); }
+  }
   const fresh = new Request('https://lumoscore.internal/lxapi/nearactivity/' + VER + '/fresh');
   const kept = new Request('https://lumoscore.internal/lxapi/nearactivity/' + VER + '/kept');
   const hit = await cache.match(fresh);
