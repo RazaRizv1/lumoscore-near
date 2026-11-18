@@ -2197,7 +2197,13 @@
     // account's own trades (its activity, re-read when a swap is signed: lxn:signed) join it, matched by transaction.
     var who = myAcct();
     if (!TR.mine && who && (MINE.who !== who || (!MINE.rows && !MINE.err))) loadMine();
-    var src = TR.mine ? ((me && MINE.who === me && MINE.rows) || []) : mergeMine(mergeChain(TR.rows || []), who);
+    // MY TRADES = THE WALLET'S OWN ACTIVITY *PLUS* ITS ROWS IN THIS PAGE'S TRADE LIST (RAZA 2026-11-18, phone: "My Trades
+    // ... not opening"). The activity read is the latest ~25 transactions, and razarizv1.near had 25+ NEAR Social
+    // __fastdata_kv writes on 11-16 -- they filled the window, so four LUMOS buys from 4-5 days ago, visible on this very
+    // list under his name, read as "No trades from this wallet". The list's own rows for the account are added back,
+    // de-duplicated by transaction, so a busy account's older swaps are not lost behind unrelated calls.
+    var feedMine = (TR.mine && me) ? mergeChain(TR.rows || []).filter(function (r) { return r.addr === me; }) : [];
+    var src = TR.mine ? (me ? mergeMine(feedMine, me) : []) : mergeMine(mergeChain(TR.rows || []), who);
     var all = src.filter(function (r) { return (r.near == null || r.near >= TR.min) && (!TR.mine || (me && r.addr === me)); });
     var pages = Math.max(1, Math.ceil(all.length / TR_PER));
     if (TR.page > pages) TR.page = pages;

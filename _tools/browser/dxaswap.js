@@ -344,6 +344,11 @@
         : ('Sold ' + fmt(S().toNum(x.q.amount, pm.dec), 6) + ' ' + pm.code));
       var i = input(fields(p)[0]);
       if (i) i.value = '';
+      // BOTH BOXES, as Stellar resets them (RAZA 2026-11-18, phone: "neither the input fields refresh like on Stellar").
+      // clearQuote() spares a FOCUSED "You receive" so a decimal can be typed into it; on a phone the box typed into keeps
+      // focus through the wallet round trip, so the amount stayed after the swap. Blur it, then empty it.
+      var rv = input(fields(p)[1]);
+      if (rv) { if (document.activeElement === rv) { try { rv.blur(); } catch (e2) {} } rv.value = ''; }
       quick(p, null);
       clearQuote(p);
       loadBal(p);
