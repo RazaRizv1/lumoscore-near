@@ -340,19 +340,32 @@
   function viaHub(rows, a, m, b, amtRaw, asked) {
     function miss() { asked.failed = 1; return []; }           // a pool list we could not read is not "none"
     return Promise.all([dclPools(a, m).catch(miss), dclPools(m, b).catch(miss)]).then(function (d) {
-      var l1 = poolsBetween(rows, a, m, 2).concat(d[0]), l2 = poolsBetween(rows, m, b, 2).concat(d[1]);
-      if (!l1.length || !l2.length) return null;
-      return bestLeg(l1, a, m, amtRaw).then(function (x1) {
-        if (!x1) return null;
-        var kin = l2.filter(function (p) { return !p.dcl === !x1.pool.dcl; }), oth = l2.filter(function (p) { return !p.dcl !== !x1.pool.dcl; });
+      var c1 = poolsBetween(rows, a, m, 2), c2 = poolsBetween(rows, m, b, 2), d1 = d[0], d2 = d[1];
+      if (!(c1.length || d1.length) || !(c2.length || d2.length)) return null;
+      // BOTH KINDS OF FIRST LEG, NOT JUST THE BETTER ONE (RAZA 2026-11-18, "fix the LUMOS route through the tiny pool").
+      // USDC -> wNEAR is about equal on the classic pool and on DCL, so taking only the better first leg could pin the
+      // route to classic -- and then the only atomic second leg was classic pool 9001 ($0.57, 2,153 LUMOS for 10 USDC)
+      // while DCL -> DCL, one transaction, gives 22,532. So each kind of first leg is followed by its own kind (atomic)
+      // and by the other kind (split); the best atomic route wins unless a split gives more than 1% more.
+      var code = (META[m] && META[m].code) || (m === USDC ? 'USDC' : 'USDt');
+      function hop2(x1, x2) { return [{ pool: x1.pool, tin: a, tout: m, out: x1.out }, { pool: x2.pool, tin: m, tout: b, out: x2.out }]; }
+      function whole(x1, l2) {
+        if (!x1 || !l2.length) return Promise.resolve(null);
+        return bestLeg(l2, m, b, x1.out).then(function (x2) { return x2 ? { hops: hop2(x1, x2), out: x2.out } : null; });
+      }
+      function split(x1, l2) {
+        if (!x1 || !l2.length) return Promise.resolve(null);
         var floor = minOut(x1.out);
-        return Promise.all([bestLeg(kin, m, b, x1.out), bestLeg(oth, m, b, floor)]).then(function (x) {
-          var x2 = x[0], split = false;
-          if (x[1] && (!x2 || big(x[1].out) * BigInt(100) > big(x2.out) * BigInt(101))) { x2 = x[1]; split = true; }
-          if (!x2) return null;
-          var r = { hops: [{ pool: x1.pool, tin: a, tout: m, out: x1.out }, { pool: x2.pool, tin: m, tout: b, out: x2.out }], out: x2.out };
-          if (split) r.split = { hub: m, code: (META[m] && META[m].code) || (m === USDC ? 'USDC' : 'USDt'), amount: floor };
-          return r;
+        return bestLeg(l2, m, b, floor).then(function (x2) { return x2 ? { hops: hop2(x1, x2), out: x2.out, split: { hub: m, code: code, amount: floor } } : null; });
+      }
+      return Promise.all([bestLeg(c1, a, m, amtRaw), bestLeg(d1, a, m, amtRaw)]).then(function (l1) {
+        var xc = l1[0], xd = l1[1];
+        return Promise.all([whole(xc, c2), whole(xd, d2), split(xc, d2), split(xd, c2)]).then(function (rs) {
+          var w = null, s = null;
+          [rs[0], rs[1]].forEach(function (r) { if (r && (!w || big(r.out) > big(w.out))) w = r; });
+          [rs[2], rs[3]].forEach(function (r) { if (r && (!s || big(r.out) > big(s.out))) s = r; });
+          if (s && (!w || big(s.out) * BigInt(100) > big(w.out) * BigInt(101))) return s;
+          return w;
         });
       });
     });
@@ -415,13 +428,44 @@
         var best = null, d = rs[1];
         rs[0].forEach(function (r) { if (r && (!best || big(r.out) > big(best.out))) best = r; });
         if (d && (!best || big(d.out) * BigInt(100) > big(best.out) * BigInt(101))) best = d;
-        return best || hubRoute(rows, a, b, amtRaw);
+        if (!best) return hubRoute(rows, a, b, amtRaw);
+        // A ROUTE THAT MOVES THE PRICE A LOT IS NOT THE END OF THE SEARCH (RAZA 2026-11-18). The hub routes through DCL
+        // used to be tried only when nothing else was found, so any route at all -- even one through a $0.57 pool at
+        // 91% price impact -- stopped the search. Now a route that moves the price more than POOR_PCT also asks the
+        // hub routes, and the better answer wins (a split one only by more than 1%, as everywhere here). A route that
+        // is fine costs one extra read; a failed hub search keeps the route already found.
+        return poorRoute(best, amtRaw).then(function (isPoor) {
+          if (!isPoor) return best;
+          return hubRoute(rows, a, b, amtRaw).then(function (h) {
+            if (!h) return best;
+            return big(h.out) * BigInt(100) > big(best.out) * BigInt(h.split ? 101 : 100) ? h : best;
+          }, function () { return best; });
+        });
       });
     }).then(function (r) {
       if (!r && rpcFails !== fails0) throw busyErr();          // "no route" only when every read answered
       return r;
     });
   }
+  // Does this route move the price more than POOR_PCT? Spot is the same route at a thousandth of the size, bumped like
+  // quoteOnce's until the output is big enough to be a price. A spot read that fails says "not poor": the route stands.
+  var POOR_PCT = 2;
+  function poorRoute(r, amtRaw) {
+    var net = big(amtRaw), t0 = net / BigInt(1000);
+    if (t0 < BigInt(1)) t0 = BigInt(1);
+    function at(t, n) {
+      return along(r.hops, t.toString(), false).then(function (o) {
+        if (big(o) < BigInt(100000) && n < 2 && t * BigInt(10) <= net / BigInt(100)) return at(t * BigInt(10), n + 1);
+        return { t: t, o: o };
+      });
+    }
+    return at(t0, 0).then(function (s) {
+      if (!(big(s.o) > BigInt(0))) return true;
+      var ex = Number(r.out) / Number(net), sp = Number(s.o) / Number(s.t);
+      return sp > 0 && (1 - ex / sp) * 100 > POOR_PCT;
+    }, function () { return false; });
+  }
+
   // The same pools, re-asked hop by hop (spot price and the final refresh use this). A split route's second leg
   // sells the floor of the first, as it will on chain.
   function along(hops, amtRaw, split) {
