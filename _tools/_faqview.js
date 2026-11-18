@@ -64,6 +64,13 @@ function esc(s) {
 // ---------------------------------------------------------------------------------------------
 // HEAD BLOCK -- collapse-critical only. See constraint 3 above.
 const HEAD = '<style id="lx-faq-head">'
+  // THE ICONS' SIZE IS FIRST-PAINT CRITICAL TOO (RAZA 2026-11-18, "flash bug when page is refreshed"): until
+  // lx-faq-css lands ~500KB later, the 'Still have a question?' arrow and the row chevrons are unsized SVGs
+  // and fill the column -- a page-tall purple arrow (purple = the unstyled visited-link colour). Same values
+  // as the look sheet, so the settled page does not change.
+  + '.lx-faq .lx-faq-ask{color:var(--accent);text-decoration:none}'
+  + '.lx-faq .lx-faq-ask svg{width:15px;height:15px}'
+  + '.lx-faq .lx-faq-ic svg{width:13px;height:13px;display:block}'
   + '.lx-faq-ans{display:grid;grid-template-rows:0fr;'
   + 'transition:grid-template-rows .28s cubic-bezier(.4,0,.2,1)}'
   + '.lx-faq-item.is-open>.lx-faq-ans{grid-template-rows:1fr}'
@@ -142,6 +149,14 @@ const CSS = '<style id="lx-faq-css">'
   + '.lx-faq .lx-faq-a{padding:0 6px 20px 0;font-size:14.5px}'
   + '.lx-faq .lx-faq-ic{width:24px;height:24px}}'
   + '</st' + 'yle>';
+
+// THE WHOLE LOOK RIDES IN THE HEAD TOO (RAZA 2026-11-18: "fix this flash bug on pools main page ... when the page
+// is refreshed"). With only the collapse rules up there, every page showed the FAQ as raw browser defaults --
+// 18px serif-less headings, bordered grey buttons, a full-width paragraph -- until lx-faq-css landed ~500KB
+// later. Constraint 1 above is why this is safe: every look rule wins on SPECIFICITY, not order, so an early
+// copy styles the first paint and the late copy (still emitted, still pinned) settles it exactly as before.
+const LOOK = CSS.slice(CSS.indexOf('>') + 1, CSS.lastIndexOf('</st'));
+const HEAD_ALL = HEAD.slice(0, HEAD.lastIndexOf('</st')) + LOOK + '</st' + 'yle>';
 
 // ---------------------------------------------------------------------------------------------
 // The tab strip for the landing page. Unchanged from the old file except that the two pane
@@ -361,11 +376,11 @@ function apply(h, spec) {
   }
 
   if (h.indexOf(M_HEAD) >= 0) {
-    h = h.replace(M_HEAD, HEAD);
+    h = h.replace(M_HEAD, HEAD_ALL);
   } else {
     const hi = h.indexOf('</head>');
     if (hi < 0) return null;                     // no head is not something to guess at
-    h = h.slice(0, hi) + HEAD + h.slice(hi);
+    h = h.slice(0, hi) + HEAD_ALL + h.slice(hi);
   }
 
   if (h.indexOf(M_CSS) >= 0) {
