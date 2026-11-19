@@ -1807,7 +1807,9 @@
   function amountsIn() {
     if (DW.sweep && DW.sweep.length) return true;
     var i = dwInputs(), pos = function (x) { return parseFloat(inVal(x)) > 0; };
-    if (dwMode() === 'withdraw') return pos(i.lp);
+    // NO LP, NOTHING TO WITHDRAW (N14, 2026-11-19): the button lit up once an amount was typed into an empty position.
+    // Dimmed as on Stellar, whose Withdraw is off whenever the position holds no LP shares.
+    if (dwMode() === 'withdraw') return pos(i.lp) && (window.__lxnPool || {}).myShares !== '0';
     return i.dep.length > 0 && i.dep.every(pos);
   }
   function syncCta() {
@@ -1915,6 +1917,16 @@
     var after = Number((mine + minted) * BigInt(1000000) / (sup + minted)) / 1e4;
     setSummary('pool share', (after < 0.0001 ? '<0.0001' : after.toFixed(4)) + '%');
   }
+  // Stellar's quiet red line under the LP field (lx-wover). Created once, diff-guarded.
+  function lpOverLine(text) {
+    var f = $$('#dwWithdraw .dw-field')[0], n = $('#dwWithdraw .lx-wover');
+    if (!text) { if (n && n.style.display !== 'none') n.style.display = 'none'; return; }
+    if (!f || !f.parentNode) return;
+    if (!n) { n = document.createElement('div'); n.className = 'lx-wover'; n.style.cssText = 'font-size:12px;line-height:1.4;color:var(--red,#ef4444);margin:6px 2px 0'; }
+    if (n.previousSibling !== f) f.parentNode.insertBefore(n, f.nextSibling);
+    if (n.textContent !== text) n.textContent = text;
+    if (n.style.display !== '') n.style.display = '';
+  }
   function previewWithdraw() {
     var p = window.__lxnPool, i = dwInputs();
     if (!p || !i.lp) return;
@@ -1930,7 +1942,10 @@
       });
       var mine = bigI(p.myShares || '0'), s = bigI(sh || '0');
       var after = (sup - s) > BigInt(0) ? Number((mine > s ? mine - s : BigInt(0)) * BigInt(1000000) / (sup - s)) / 1e4 : 0;
-      setSummary('pool share', sh ? ((after < 0.0001 && after > 0 ? '<0.0001' : after.toFixed(4)) + '%') : '—');
+      // MORE THAN YOUR LP SAYS SO, AS STELLAR (N14, 2026-11-19): a red line under the field and no pool share after.
+      var overN = p.myShares != null && s > mine;
+      lpOverLine(overN ? ('More than your LP (' + (p.myShares !== '0' ? fromRaw(p.myShares, 24, 6) : '0') + ')') : '');
+      setSummary('pool share', (sh && !overN) ? ((after < 0.0001 && after > 0 ? '<0.0001' : after.toFixed(4)) + '%') : '—');
     }, function () {});
   }
 
