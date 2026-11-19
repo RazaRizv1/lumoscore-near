@@ -1106,7 +1106,7 @@
     var dst = $('[data-rv="dst"]');
     var host = dst && dst.parentElement && dst.parentElement.parentElement;
     if (!host || host.querySelector('[data-rv="fee"]')) return;
-    [['route', 'Route'], ['fee', 'LumosCore fee'], ['eta', 'Estimated time']].forEach(function (p) {
+    [['route', 'Route'], ['fee', 'Bridge fee'], ['eta', 'Estimated time']].forEach(function (p) {   // Stellar's label (2026-11-19)
       var r = document.createElement('div');
       r.className = 'r';
       var k = document.createElement('span');
@@ -1345,7 +1345,8 @@
     set('[data-rv="recvnet"]', (trg && !trg.classList.contains('is-empty') && tn) ? tn.textContent : '—');
     set('[data-rv="src"]', addr() ? short(addr()) : '—');
     set('[data-rv="dst"]', recipient() ? short(recipient()) : '—');
-    set('[data-rv="fee"]', n ? (fmt(fromUnits(n.fee, SRC.decimals), 8) + ' ' + sym + ' (' + (feeBps() / 100) + '%)') : '—');
+    // Stellar's format: the rate, then the amount (2026-11-19). No LUMOS pill: NEAR has no holder tier.
+    set('[data-rv="fee"]', n ? ((feeBps() / 100) + '% · ' + fmt(fromUnits(n.fee, SRC.decimals), 6) + ' ' + sym) : '—');
     keep('[data-rv="eta"]', carriedR ? ROUTE_ETA[cr] : ((q && q.timeEstimate) ? ('~' + q.timeEstimate + 's') : '—'));
     // The bridge's own cost rides on the route row: the fee row is LumosCore's.
     keep('[data-rv="route"]', !BEST ? '—' : BEST === 'om' && OMQ
