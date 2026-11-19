@@ -2088,9 +2088,18 @@
     if (!me || !C || !C.activityData || !C.entriesOf || !d || MINE.busy) return;
     if (MINE.who !== me) MINE = { who: me, rows: null, busy: false, err: false, at: 0 };
     MINE.busy = true;
+    // ONE FAILURE PATH (bug N20, 2026-11-19). The stale case used to throw inside the success handler, which the failure
+    // handler beside it never receives: an uncaught "stale" on every load, and MINE.busy stuck true for good.
+    function mineFail() {
+      if (MINE.who !== me) return;
+      MINE.busy = false; MINE.err = true; MINE.at = Date.now();
+      syncPanel();
+      // asked again a few times: FastNEAR refuses bursts at page load, and answers a moment later
+      if ((MINE.tries = (MINE.tries || 0) + 1) <= 3) setTimeout(function () { if (MINE.who === me) { MINE.err = false; loadMine(); } }, 8000 * MINE.tries);
+    }
     C.activityData(me).then(function (data) {
       // NearBlocks' stale stand-in (nearcore activityData nb): its missing swaps are not 'no trades' (RAZA 2026-11-13).
-      if (data && data.nb) { var en0 = new Error('stale'); throw en0; }
+      if (data && data.nb) { mineFail(); return; }
       var out = [];
       C.entriesOf(me, data).forEach(function (en) {
         if (en.kind !== 'swap' || !en.give || !en.get || en.ok === false) return;
@@ -2108,13 +2117,7 @@
       if (MINE.who !== me) return;
       MINE.rows = out; MINE.err = false; MINE.busy = false; MINE.at = Date.now();
       syncPanel();
-    }, function () {
-      if (MINE.who !== me) return;
-      MINE.busy = false; MINE.err = true; MINE.at = Date.now();
-      syncPanel();
-      // asked again a few times: FastNEAR refuses bursts at page load, and answers a moment later
-      if ((MINE.tries = (MINE.tries || 0) + 1) <= 3) setTimeout(function () { if (MINE.who === me) { MINE.err = false; loadMine(); } }, 8000 * MINE.tries);
-    });
+    }, mineFail).catch(mineFail);
   }
   function mergeChain(rows) {
     if (TR.chain || !TR.chainRows || !TR.chainRows.length || !rows.length) return rows;

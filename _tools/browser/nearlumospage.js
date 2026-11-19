@@ -230,6 +230,11 @@
   // ---- the four cards and the overview ------------------------------------------------------------------------
   function stats() {
     var p = price(), sup = supply(), hc = holderCount(), v = volume();
+    // THE CHART HEADER, FROM THE SAME FIGURES AS THE CARDS (bug N7, 2026-11-19): it stayed "— … MC —" for good.
+    if (p > 0) {
+      var _cp = q('#ctPriceAptos'), _pt = usd(p); if (_cp && _cp.textContent !== _pt) _cp.textContent = _pt;
+      var _cm = q('#ctMcAptos'), _mt = sup ? 'MC ' + abbrUsd(p * sup) : 'MC —'; if (_cm && _cm.textContent !== _mt) _cm.textContent = _mt;
+    }
     qa('.lh-stats .cstat').forEach(function (card) {
       var t = (card.textContent || '').toUpperCase(), val = q('.val', card), sub = q('.sub', card) || q('.small-sub', card);
       var money = q('.lc-money', card) || val, done = false;

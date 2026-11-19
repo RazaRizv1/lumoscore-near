@@ -565,7 +565,8 @@
     var raw = String(amtIn.value || '').trim().replace(/,/g, '');
     var msg = '', okAmt = false;
     if (raw !== '') {
-      if (/[^0-9.]/.test(raw)) msg = 'Enter a number — letters aren’t allowed in the amount.';
+      if (raw.charAt(0) === '-' && !/[^0-9.]/.test(raw.slice(1))) msg = 'Amounts can’t be negative.';   // bug N11
+      else if (/[^0-9.]/.test(raw)) msg = 'Enter a number — letters aren’t allowed in the amount.';
       else if (a) {
         var units = toUnits(raw, a.dec);
         if (units == null) msg = /\./.test(raw) ? ('That is more decimal places than ' + a.code + ' has (' + a.dec + ').') : 'Enter an amount greater than 0.';
@@ -941,6 +942,16 @@
     else { m.classList.remove('open'); m.style.display = 'none'; }
   }
 
+  // NO PLACEHOLDER MONEY (bug N10, 2026-11-19). The design ships this dialog reading "Balance: 25,420.18" and a fee in
+  // XLM, and only setSendAsset() overwrites them -- which never runs when the account could not be read (RPC busy, 429).
+  // So until a real balance exists the row says "—", and the fee is NEAR's from the start.
+  function blankSendMock(m) {
+    if (!m || sendPick || held().length) return;
+    var b = $('.field-meta strong', m);
+    if (b && b.textContent !== '—') b.textContent = '—';
+    var f = $('.modal-body strong[style*="JetBrains"]', m);
+    if (f && f.textContent !== '~0.0001 NEAR') f.textContent = '~0.0001 NEAR';
+  }
   // Blanks the form. Called when the dialog opens, so nothing survives from the last time it was used.
   function resetSend() {
     var m = sendModal();
@@ -954,6 +965,7 @@
     if (to) { to.value = pendingTo || ''; }
     pendingTo = null;
     if (tg) tg.value = '';
+    blankSendMock(m);
     say('');
     checkSend();
   }
@@ -968,6 +980,7 @@
     var go = $('.modal-foot .btn-primary', m);
     if (!amtIn || !go) return;                                   // markup not ready yet
     m.setAttribute('data-lxw', '1');
+    blankSendMock(m);
 
     // STELLAR'S SEND ROW (RAZA 2026-09-15: "Max button is different on XRPL. Paste button is missing. On
     // mobile … barcode scan icon is missing"). lumoscore.com hides the design's asset button behind its own

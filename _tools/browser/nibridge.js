@@ -110,6 +110,11 @@
   // so the figure to type is that grossed back up, in the token's own decimals.
   function upstreamNote(msg) {
     var s = String(msg || '');
+    // RAW BACKEND TEXT IS NOT A MESSAGE (bug X12, 2026-11-19): THORChain's refusal reached the card as "Failed to simulate
+    // swap: failed to validate message: swap destination address is not the same chain as the target asset: unknown
+    // request [LGox6RdvqniK/errors.go:151]". The refusal a reader can act on is said plainly; the plumbing is cut.
+    if (/not the same chain as the target asset/i.test(s)) return 'The receiving address isn’t on the destination network.';
+    s = s.replace(/^\s*failed to simulate swap:\s*/i, '').replace(/^\s*failed to validate message:\s*/i, '').replace(/\s*\[[^\]]*\.go:\d+\]\s*$/, '').replace(/:\s*unknown request\s*$/i, '');
     if (/internal server error|bad gateway|service unavailable|gateway time|^\s*5\d\d\s*$/i.test(s)) {
       return 'NEAR Intents is not answering right now — try again shortly.';
     }
@@ -1456,6 +1461,10 @@
       + ' NEAR for gas, and you have ' + fmt(fromUnits(NEAR_RAW, 24), 4) + ' NEAR.';
   }
   function formBanner() {
+    // AN AMOUNT OF 0 GETS A REASON (bugs X25 / N17, 2026-11-19): it only dimmed Review transfer, with no message.
+    var zs = $('.br-step[data-step="2"]'), zi = zs && [].filter.call(zs.querySelectorAll('input'), function (i) { return !i.classList.contains('br-addr-in') && i.offsetParent; })[0];
+    var zv = zi ? String(zi.value || '').replace(/,/g, '').trim() : '';
+    if (zv !== '' && /^[0-9.]+$/.test(zv) && !(parseFloat(zv) > 0)) return 'Enter an amount greater than 0.';
     if (overBalance()) return 'Amount exceeds your balance (' + balFigure(balRaw(SRC), SRC) + ').';
     // AS SOON AS THE ROUTE IS PICKED (RAZA 2026-11-14: Wormhole showed 'Available to send 0 NEAR' with no reason until
     // MAX or an amount): the shortfall is said the moment a route the account's NEAR cannot cover is selected.
@@ -1527,7 +1536,11 @@
         + '</span>';
       // No "In use" tag (RAZA 2026-11-14, ticket 409): the selected card's outline says it.
       h += '</div>';
-      if (o.state === 'none' && o.error && o.error !== formBanner()) {
+      // ONE MISTAKE, ONE MESSAGE (bugs X13 / X14 / N5, 2026-11-19): the exact-text check let "More than your XRP balance"
+      // sit under "Amount exceeds your balance (…)", and a route's note about a bad address sit under the banner's own.
+      // When the banner is about the balance or the address, the card stays quiet on that subject.
+      var _fb = formBanner(), _dc = destChain(), _same = !!_fb && (o.error === overBalance() || !!(_dc && destAddrError(_dc, recipient())));
+      if (o.state === 'none' && o.error && o.error !== _fb && !_same) {
         h += '<div class="lx-brs-note" style="margin-top:0;padding-top:0">' + esc2(o.error) + '</div>';
       }
       h += '<' + '/button>';

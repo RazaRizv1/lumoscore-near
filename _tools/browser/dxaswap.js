@@ -234,7 +234,18 @@
     if (!p || !asset() || !S()) return;
     paintStatic(p);
     var raw = payAmountRaw(p);
-    if (!raw) { clearQuote(p); say(p, ''); return; }
+    if (!raw) {
+      clearQuote(p);
+      // SAY WHY, NOT JUST CLEAR (bug N13, 2026-11-19): a typed 0, and an amount past the asset's decimals, both came back
+      // as no amount at all, so the box showed Rate "—" and nothing said why.
+      var pi = input(fields(p)[0]), pm = meta(sides(p).pay), tv = pi ? String(pi.value || '').replace(/,/g, '').trim() : '', why = '';
+      if (tv !== '' && pm.dec != null) {
+        if ((tv.split('.')[1] || '').length > pm.dec) why = pm.code + ' has at most ' + pm.dec + ' decimal places.';
+        else if (!(parseFloat(tv) > 0)) why = 'Enter an amount greater than 0.';
+      }
+      say(p, why);
+      return;
+    }
     var s = sides(p), my = ++seq;
     q = null;
     setCta(p);
@@ -277,8 +288,10 @@
   function short(p, raw, have) {
     var s = sides(p), m = meta(s.pay);
     if (m.dec == null || have == null) return '';
-    if (S().big(raw) > S().big(have)) return 'Insufficient ' + m.code + ' balance — you have ' + floorTxt(have, m.dec) + ' ' + m.code;
     var room = S().swapRoom(s.pay, have);
+    // PAYING NEAR, THE FEE-KEEP SENTENCE ALWAYS (bug N12, 2026-11-19): the plain one said "you have 657.647237 NEAR" under
+    // "Balance: 657.397237 NEAR" -- the two figures differ by the keep, and only the second sentence says so.
+    if (S().big(raw) > S().big(have) && String(room) === String(have)) return 'Insufficient ' + m.code + ' balance — you have ' + floorTxt(have, m.dec) + ' ' + m.code;
     // RAZA 2026-10-31: the gas case read "keep 0.2 NEAR for gas; up to 0 can be swapped". It now leads with
     // the balance, Stellar's sentence, and names the keep after it -- the wording of the dashboard dialog.
     if (S().big(raw) > S().big(room)) {
