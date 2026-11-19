@@ -578,17 +578,25 @@
     }
     var dest = toIn ? String(toIn.value || '').trim().toLowerCase() : '';
     var okDest = !!dest && validDest(dest);
-    if (dest && !okDest) msg = msg ? msg + ' ' + BAD_DEST : BAD_DEST;
+    var dMsg = (dest && !okDest) ? BAD_DEST : '';   // under the ADDRESS field, as Stellar (X26, 2026-11-19)
     // YOUR OWN ADDRESS (RAZA 2026-11-10, ticket 315). Stellar's validateSend has no such check at all; the request is a
     // note that does not block. NEAR sent to itself is a valid Transfer, so it goes. A TOKEN cannot: NEP-141's
     // ft_transfer panics when sender and receiver are the same account, so that one is still refused, in red, and says
     // why -- the honest nearest thing to letting it through would be a transaction that fails after its gas.
     var self = okDest && dest === addr(), note = '';
-    if (self && a && !a.native) { msg = msg ? msg + ' ' + SELF_TOKEN : SELF_TOKEN; okDest = false; }
+    if (self && a && !a.native) { dMsg = SELF_TOKEN; okDest = false; }
     else if (self && !msg) note = 'Note: This is your wallet address';
-    err.textContent = msg || note;
-    err.style.color = note ? 'var(--text-muted,#9aa)' : '';
-    err.style.display = (msg || note) ? '' : 'none';
+    err.textContent = msg;
+    err.style.color = '';
+    err.style.display = msg ? '' : 'none';
+    var errD = $('.lx-send-errd', m), dT = dMsg || note;
+    if (!errD && dT && toIn) {
+      errD = document.createElement('div');
+      errD.className = 'lx-send-err lx-send-errd';
+      var df = toIn.closest('.field') || toIn.parentNode;
+      if (df && df.parentNode) df.parentNode.insertBefore(errD, df.nextSibling);
+    }
+    if (errD) { errD.textContent = dT; errD.style.color = (note && !dMsg) ? 'var(--text-muted,#9aa)' : ''; errD.style.display = dT ? '' : 'none'; }
     if (go && go.getAttribute('data-busy') !== '1') {
       var ok = okAmt && okDest;
       go.disabled = !ok;
