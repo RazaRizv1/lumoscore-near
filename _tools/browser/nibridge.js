@@ -2652,6 +2652,20 @@
       if (j.partial && n < 4) setTimeout(function () { loadGlobal(n + 1); }, 6000);
     }).catch(function () { if (n < 2) setTimeout(function () { loadGlobal(n + 1); }, [1500, 4000][n]); });
   }
+  // HOT IDS NEAR INTENTS NO LONGER LISTS (2026-11-19): nep245:v2_1.omni.hot.tg:<chainId>_<base58 contract>. Named only from
+  // what the id proves: the chain, the native coin (all '1's = zero address), or a contract verified by decoding.
+  var HOT_CHAIN = { '1': ['eth', 'ETH'], '10': ['op', 'ETH'], '56': ['bsc', 'BNB'], '137': ['pol', 'POL'], '8453': ['base', 'ETH'],
+    '42161': ['arb', 'ETH'], '43114': ['avax', 'AVAX'] };
+  var HOT_TOKEN = { '43114_3atVJH3r5c4GqiSYmg9fECvjc47o': 'USDC', '43114_372BeH7ENZieCaabwkbWkBiTTgXp': 'USDT' };
+  function hotAsset(id) {
+    var s = String(id || ''), pre = 'nep245:v2_1.omni.hot.tg:';
+    if (s.indexOf(pre) !== 0) return null;
+    var rest = s.slice(pre.length), u = rest.indexOf('_');
+    if (u < 1) return null;
+    var cid = rest.slice(0, u), tail = rest.slice(u + 1), c = HOT_CHAIN[cid];
+    if (!c || !tail) return null;
+    return { chain: c[0], sym: tail.split('1').join('') === '' ? c[1] : (HOT_TOKEN[cid + '_' + tail] || '') };
+  }
   function resolveGlobalNi() {
     if (!TOKENS) return;
     GLOBAL.filter(function (g) { return !g.route && g.dep && !g.niDone && !NI_SEEN[g.dep]; }).slice(0, 20).reduce(function (p, g) {
@@ -2665,7 +2679,8 @@
             for (var i = 0; i < TOKENS.length; i++) if (TOKENS[i].assetId === req.destinationAsset) { t = TOKENS[i]; break; }
             var sd = j.swapDetails || {}, q = qr.quote || {};
             g.out = sd.amountOutFormatted || q.amountOutFormatted || null;
-            g.sym = t ? t.symbol : ''; g.chain = t ? t.blockchain : ''; g.to = req.recipient || ''; g.status = j.status || '';
+            var hk = t ? null : hotAsset(req.destinationAsset);   // a HOT id NEAR Intents stopped listing (2026-11-19)
+            g.sym = t ? t.symbol : (hk ? hk.sym : ''); g.chain = t ? t.blockchain : (hk ? hk.chain : ''); g.to = req.recipient || ''; g.status = j.status || '';
             g.niDone = 1;
             try { paintTxs(); } catch (_) {}
           }, function () { delete NI_SEEN[g.dep]; });
@@ -2730,8 +2745,9 @@
               for (var i = 0; i < TOKENS.length; i++) if (TOKENS[i].assetId === req.destinationAsset) { t = TOKENS[i]; break; }
               var sd = j.swapDetails || {}, q = qr.quote || {};
               c.out = sd.amountOutFormatted || q.amountOutFormatted || null;
-              c.sym = t ? t.symbol : '';
-              c.chain = t ? t.blockchain : '';
+              var hk2 = t ? null : hotAsset(req.destinationAsset);   // a HOT id NEAR Intents stopped listing (2026-11-19)
+              c.sym = t ? t.symbol : (hk2 ? hk2.sym : '');
+              c.chain = t ? t.blockchain : (hk2 ? hk2.chain : '');
               c.to = req.recipient || '';
               c.status = j.status || '';
               acc.push(c);
