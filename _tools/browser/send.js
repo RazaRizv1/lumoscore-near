@@ -553,6 +553,8 @@
     return 'Amount exceeds your available ' + a.code + ' balance (' + commas(roomStr(a)) + ' ' + a.code
       + (a.native ? ' after reserve' : '') + ').';
   }
+  /* SEND AMOUNT FILTERS AS YOU TYPE, like Swap and Bridge (RAZA 2026-11-20) */
+  (function(){if(window.__lxSendKeys)return;window.__lxSendKeys=1;window.addEventListener("input",function(e){var t=e.target;if(!t||t.tagName!=="INPUT"||!t.closest)return;if(!(t.getAttribute("placeholder")==="0.00"||t.closest(".field-amt")))return;var m=t.closest(".modal-overlay");if(!m)return;if(![].some.call(m.querySelectorAll("button"),function(b){return /Review.{0,3}Send/i.test(b.textContent||"");}))return;var v=t.value,pos=t.selectionStart==null?v.length:t.selectionStart,out="",kept=0,dot=false;for(var i=0;i<v.length;i++){var c=v.charAt(i),ok=false;if(c>="0"&&c<="9")ok=true;else if(c==="."&&!dot){ok=true;dot=true;}if(ok){out+=c;if(i<pos)kept++;}}if(out!==v){t.value=out;try{t.setSelectionRange(kept,kept);}catch(_){}}},true);})();
   function checkSend() {
     var m = sendModal();
     if (!m) return;
