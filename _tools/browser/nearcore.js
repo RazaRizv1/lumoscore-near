@@ -41,13 +41,18 @@
   // NEAR READS go to FastNEAR's free JSON-RPC. A 429, or a request that never arrived, is "ask later":
   // waited out and asked again (twice). An answer from the node -- an account that does not exist, a
   // contract with no such method -- is a real answer and is reported, never retried.
+  // A SECOND RPC WHEN FASTNEAR REFUSES (N21, 2026-11-20). One cold Wallet load made 222 reads here and 72 were refused;
+  // each retry went back to the RPC that had just said 429. A refusal now sends reads to near.drpc.org for 30s, and
+  // every retry goes there -- the same pair nearswap.js and pooldetail.js already use.
+  var RPC2 = 'https://near.drpc.org', COOL = 0;
   function view(params, attempt) {
-    return fetch(RPC, {
+    var url = (attempt || Date.now() < COOL) ? RPC2 : RPC;
+    return fetch(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 'lx', method: 'query', params: params })
     }).then(function (r) {
-      if (r.status === 429 || r.status >= 500) { var e1 = new Error('NEAR RPC busy (' + r.status + ')'); e1.transient = 1; throw e1; }
+      if (r.status === 429 || r.status >= 500) { if (url === RPC) COOL = Date.now() + 30000; var e1 = new Error('NEAR RPC busy (' + r.status + ')'); e1.transient = 1; throw e1; }
       return r.json();
     }, function () {
       var e0 = new Error('NEAR RPC unreachable'); e0.transient = 1; throw e0;
@@ -68,7 +73,19 @@
   }
 
   // A contract view method, its JSON answer decoded. Args go base64 as the RPC requires.
+  // THE SAME READ ASKED TWICE IS ASKED ONCE (N21, 2026-11-20): in flight, or answered in the last 4s. Rewards read the
+  // account twice per load (load + 1.5s) and asked get_pool for one pool from two places; the fee tier asked again.
+  // A failure is never kept: the next caller asks afresh.
+  var VMEMO = {};
   function callView(contract, method, args) {
+    var mk = contract + '|' + method + '|' + JSON.stringify(args || {}), hit = VMEMO[mk];
+    if (hit && (!hit.at || Date.now() - hit.at < 4000)) return hit.p;
+    var ent = { p: callViewRaw(contract, method, args), at: 0 };
+    VMEMO[mk] = ent;
+    ent.p.then(function () { ent.at = Date.now(); }, function () { if (VMEMO[mk] === ent) delete VMEMO[mk]; });
+    return ent.p;
+  }
+  function callViewRaw(contract, method, args) {
     return view({
       request_type: 'call_function', finality: 'final', account_id: contract,
       method_name: method, args_base64: btoa(JSON.stringify(args || {}))
@@ -120,7 +137,41 @@
   function cleanSym(v) { return String(v == null ? '' : v).replace(/[\u0000-\u001f]/g, '').slice(0, 24); }
   // Resolves { s, d, n } for one contract, or null when the contract answers that it is not a token.
   // A transient failure rejects, so the caller can tell "not a token" from "could not ask".
+  // TOKEN NAMES FROM ONE SHARED ANSWER (N21, 2026-11-20): /lxapi/nearftmeta, 20 tokens a request, kept server-side for
+  // every visitor -- not one ft_metadata RPC per token per browser (156 for root.near). A token the server could not
+  // ask this time rejects as "could not ask" (listed under its contract, asked again next view). Only when the endpoint
+  // itself fails does a token fall back to asking its contract from here (tokenMetaRpc, the old path).
+  var MB = null;
+  function metaBatch(id) {
+    return new Promise(function (res, rej) {
+      if (!MB) { MB = {}; setTimeout(function () { var b = MB; MB = null; metaFlush(b); }, 0); }
+      (MB[id] = MB[id] || []).push([res, rej]);
+    });
+  }
+  function metaFlush(b) {
+    var ids = Object.keys(b);
+    for (var i = 0; i < ids.length; i += 20) (function (chunk) {   // 20: what one server request can ask the chain in full
+      fetch('/lxapi/nearftmeta?ids=' + encodeURIComponent(chunk.join(',')))
+        .then(function (r) { if (!r.ok) throw new Error('nearftmeta ' + r.status); return r.json(); })
+        .then(function (d) {
+          if (!d || !d.ok || !d.meta) throw new Error('nearftmeta: no answer');
+          chunk.forEach(function (id) {
+            var v = d.meta[id];
+            b[id].forEach(function (w) { if (v) w[0](v); else { var e = new Error('token name not read yet'); e.transient = 1; w[1](e); } });
+          });
+        })
+        .catch(function () {
+          chunk.forEach(function (id) { b[id].forEach(function (w) { w[1]({ fallback: 1 }); }); });
+        });
+    })(ids.slice(i, i + 20));
+  }
   function tokenMeta(id) {
+    var st = metaStore();
+    if (st[id]) return Promise.resolve(st[id]);
+    return metaBatch(id).then(function (v) { st[id] = v; metaSave(); return v; },
+      function (e) { if (e && e.fallback) return tokenMetaRpc(id); throw e; });
+  }
+  function tokenMetaRpc(id) {
     var st = metaStore();
     if (st[id]) return Promise.resolve(st[id]);
     return ftMetadata(id).then(function (m) {

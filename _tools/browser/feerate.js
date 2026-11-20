@@ -33,6 +33,10 @@
   if (!LUMOS) { window.__lxFeeTierRefresh = function () { pub(null); }; return; }
 
   function view(contract, method, args) {
+    // SHARED WITH nearcore (N21, 2026-11-20): the same read on one page is asked once, and a refusal moves to the
+    // second RPC there. This file asks for itself only on a page without nearcore.
+    var C = window.lxnCore;
+    if (C && typeof C.callView === 'function') return C.callView(contract, method, args);
     return fetch(RPC, { method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'query', params: { request_type: 'call_function',
         finality: 'final', account_id: contract, method_name: method, args_base64: btoa(JSON.stringify(args || {})) } }) })
