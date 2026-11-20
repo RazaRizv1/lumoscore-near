@@ -74,7 +74,7 @@ async function build(context) {
   const got = await Promise.all(batches.map((b) => getJson(PAIRS + b.map(encodeURIComponent).join(','), 6000).catch(() => null)));
   if (got.every((g) => !Array.isArray(g))) throw new Error('dexscreener: no batch answered');
 
-  const agg = {};
+  const agg = {}, deep = {};
   for (const list of got) {
     for (const p of (Array.isArray(list) ? list : [])) {
       const base = String((p.baseToken || {}).address || ''), quote = String((p.quoteToken || {}).address || '');
@@ -82,6 +82,13 @@ async function build(context) {
       const tx = (p.txns || {}).h24 || {};
       const row = { v: vol, t: +((p.liquidity || {}).usd || 0), x: (+tx.buys || 0) + (+tx.sells || 0), d: null };
       const ch = (p.priceChange || {}).h24;
+      // THE DEEPEST wNEAR PAIR per token, its price in NEAR (see the override after the 24h loop below).
+      if (base === WNEAR || quote === WNEAR) {
+        const tok = base === WNEAR ? quote : base, pn = +p.priceNative, liqU = +((p.liquidity || {}).usd || 0);
+        const px = base === WNEAR ? (pn > 0 ? 1 / pn : 0) : pn;
+        if (tok && px > 0 && isFinite(px) && (!deep[tok] || liqU > deep[tok].liq))
+          deep[tok] = { px, liq: liqU, ch: tok === base && ch != null && isFinite(+ch) ? +ch : null };
+      }
       for (const id of [base, quote]) {
         if (!id || (agg[id] && agg[id].v >= vol)) continue;   // keep each token's busiest pair
         // The QUOTE of a pair whose base is wNEAR is the one quote side that is exact: the pair's
@@ -94,6 +101,22 @@ async function build(context) {
   }
 
   const near24 = (agg[WNEAR] || {}).d;
+  // A PRICE LIST THAT DISAGREES WITH THE TOKEN'S OWN DEEP POOL LOSES (RAZA 2026-11-20, NEAR LUMOS: "it says its down, but
+  // then why the chart shows straight line" -> "yes, use the big pool"). Rhea's list priced LUMOS at 0.0000134 NEAR, its
+  // 58-cent classic pool, while its ~$40K concentrated pool -- the one GeckoTerminal charts and the only one DexScreener
+  // lists -- held 0.0001323: header and 24h move from one, chart from the other. When the deepest wNEAR pair holds at least
+  // $1,000 and the list is off by more than 2x, that pool's price is the token's price, and its own 24h move (none if it has
+  // none) replaces the hourly snapshots, which were priced off the same thin pool. Measured: of 49 curated tokens with both
+  // prices, only LUMOS differs by more than 2x.
+  const deepOver = {};
+  const nearUsdNow = +((prices[WNEAR] || {}).price || 0);
+  for (const id in deep) {
+    const dp = deep[id], r = nearUsdNow > 0 ? +((prices[id] || {}).price || 0) / nearUsdNow : 0;
+    if (!(dp.liq >= 1000) || !(r > 0) || Math.max(r, dp.px) / Math.min(r, dp.px) <= 2) continue;
+    prices[id] = Object.assign({}, prices[id], { price: String(dp.px * nearUsdNow), deep: 1 });
+    deepOver[id] = 1;
+    if (agg[id]) { agg[id].d = dp.ch; agg[id].dNear = null; }
+  }
   for (const id in agg) {
     const a = agg[id];
     if (a.d == null && a.dNear != null && near24 != null) a.d = ((1 + a.dNear / 100) * (1 + near24 / 100) - 1) * 100;
@@ -189,7 +212,7 @@ async function build(context) {
     // indexer now prices off the token's own pool (snapPoolPrices), not off Rhea's list.
     const mp = MAINPOOL[c.i];
     const gp = s.v == null && mp != null ? (typeof mp === 'string' ? 'refv2-' + mp.split('|').join(':') : 'refv1-' + mp) : '';
-    if (s.d == null && dayMove[c.i] != null && isFinite(dayMove[c.i])) s.d = +dayMove[c.i].toFixed(2);
+    if (s.d == null && !deepOver[c.i] && dayMove[c.i] != null && isFinite(dayMove[c.i])) s.d = +dayMove[c.i].toFixed(2);
     const p = usd / nearUsd;
     rows.push({ i: c.i, n: c.s, nm: c.n, logo: c.logo || '', st: c.st ? 1 : 0, vf: 1, dc: c.d,
       p, d: s.d, v: s.v == null ? null : s.v / nearUsd, t: s.t == null ? null : s.t / nearUsd, x: s.x, cg: c.cg || '', w: c.w || '', hi: null, lo: null,
@@ -214,8 +237,8 @@ export async function marketBody(context) {
   // changes what a row holds must not serve the previous version's answer for two minutes. Bump it
   // whenever the row shape changes (v3: rows carry cg; history is fetched by the page; v6: own-pool prices; v7: rows carry w).
   // v9: volume/trades/liquidity may be null (unknown), and a change may come from the hourly snapshots.
-  const fresh = new Request('https://lumoscore.internal/lxapi/nearmarket/v13/fresh');
-  const kept = new Request('https://lumoscore.internal/lxapi/nearmarket/v13/kept');
+  const fresh = new Request('https://lumoscore.internal/lxapi/nearmarket/v14/fresh');
+  const kept = new Request('https://lumoscore.internal/lxapi/nearmarket/v14/kept');
 
   const hit = await cache.match(fresh);
   if (hit) return await hit.json();

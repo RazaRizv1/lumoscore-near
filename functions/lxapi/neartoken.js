@@ -36,7 +36,8 @@ const KEEP = 86400;
 const WNEAR = 'wrap.near';
 const RPC = 'https://free.rpc.fastnear.com';
 const PAIRS = 'https://api.dexscreener.com/token-pairs/v1/near/';
-const VER = 'v11';  // v11: a classic pool's reserves price a token no feed lists (2026-11-14); v10: its order-book pool first, the baked classic one only without it (2026-11-13); v9: baked classic pool
+const VER = 'v12';  // v12: a token's deep pool beats a list price off by >2x (nearmarket, 2026-11-20)
+const VER_PREV = 'v11';  // v11: a classic pool's reserves price a token no feed lists (2026-11-14); v10: its order-book pool first, the baked classic one only without it (2026-11-13); v9: baked classic pool
 // earlier: v2: web, x, desc; v3: curated logo first (2026-10-29); v5: own pools; v6: their count (2026-11-04); v7: 30 pools (2026-11-05); v8: DCL pool (2026-11-12)
 const DCL = 'dclv2.ref-labs.near', DCL_FEES = [100, 400, 2000, 10000];
 const INTEAR = 'https://prices.intear.tech/token?token_id=';
