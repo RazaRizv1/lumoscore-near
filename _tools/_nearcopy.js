@@ -60,8 +60,9 @@ const PAIRS = [
   // the token pages the Freighter connect dialog, /rewards/near "Your Stellar address". XRPL's _xrplcopy2.js
   // rewrote the same dialogs for its chain; these are NEAR's. Most of them are also what a reader sees on opening
   // the dialog, which is the second reason. Mock NUMBERS are left alone, as XRPL leaves them: the layers paint real
-  // ones. Left on purpose: the chooser grid's Stellar card lines (.lx-lp-meta: they describe Stellar), the
-  // advertising answer "paid in XLM or LUMOS" (placement is bought on Stellar) and the Stellar-only trustline panel.
+  // ones. Left on purpose: the chooser grid's Stellar card lines (.lx-lp-meta: they describe Stellar) and the
+  // Stellar-only trustline panel. (The advertising answer USED to be left as "paid in XLM or LUMOS"; RAZA 2026-11-20,
+  // N1: "NEAR or LUMOS" -- see the FAQ block below.)
   //
   // The wallet menu and the connect dialog.
   ['<span class="mu-sub">Connected · Stellar</span>', '<span class="mu-sub">Connected · NEAR</span>'],
@@ -78,6 +79,17 @@ const PAIRS = [
   ['<div class="modal-sub">Initialize a new pool on Stellar AMM</div>', '<div class="modal-sub">Initialize a new pool on NEAR</div>'],
   ['<div class="pair-sub">Stellar AMM utility</div>', '<div class="pair-sub">NEAR pool</div>'],
   ['<div class="pc-sub">Stellar AMM utility</div>', '<div class="pc-sub">NEAR pool</div>'],
+  // THE FAQ'S PAYMENT LINES, IN NEAR'S OWN COIN (RAZA 2026-11-20, N1: advertising "NEAR or LUMOS"; listing is paid in
+  // NEAR since 2026-11-17, "In their own coin" -- browser/nearlisting.js). XRPL rewrites the same sentences to XRP
+  // (_xrplcopy.js). Dollar figures are left exactly as they are.
+  ['paid in XLM or LUMOS.', 'paid in NEAR or LUMOS.'],
+  ['Pay in XLM or LUMOS.', 'Pay in NEAR or LUMOS.'],
+  ['shown to people already trading Stellar assets', 'shown to people already trading NEAR tokens'],
+  ['pay $250 in XLM from your own wallet', 'pay $250 in NEAR from your own wallet'],
+  ['pay $250 in XLM, refunded in full', 'pay $250 in NEAR, refunded in full'],
+  ['the same amount of XLM, sent back to the account that paid it',
+   'the same amount of NEAR, sent back to the account that paid it'],
+  ['You pay in XLM at the live rate', 'You pay in NEAR at the live rate'],
   ['<p class="lumos-promo-sub">Pools run on Stellar\'s native AMM. Five-second finality. Penny-fraction fees.</p>',
    '<p class="lumos-promo-sub">Pools run on-chain on NEAR. Fast finality. Penny-fraction fees.</p>'],
   // The headings a crawler takes the page's subject from (XRPL: "XRP Ledger Liquidity Pools").
