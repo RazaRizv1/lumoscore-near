@@ -1973,7 +1973,18 @@
     var l = b.querySelector('.lx-mtlabel') || b;
     l.style.setProperty('color', TR.mine ? '#ea6a2c' : '#8a8fa3', 'important');
     l.style.setProperty('text-decoration', TR.mine ? 'underline' : 'none', 'important');
+    lxMtView(TR.mine);                                    // heading + tab highlight (S35)
   }
+  // MY TRADES READS AS ITS OWN VIEW (S35, 2026-11-20). While it is on and the Exchanges panel is showing: the panel heading
+  // says "My Trades" and the Exchanges tab gives up its highlight (.lx-mtview); otherwise both are put back.
+  function lxMtView(on){ try{
+    var bar=document.querySelector(".tabs-bar"); if(!bar)return;
+    var ex=bar.querySelector('.tab[data-tab="exchanges"]');
+    var show=!!on&&!!ex&&ex.classList.contains("active");
+    if(!document.getElementById("lx-mtview-css")){ var st=document.createElement("style"); st.id="lx-mtview-css"; st.textContent=".tabs-bar.lx-mtview .tab.active{color:var(--text-muted,#8a8fa3)!important;border-bottom-color:transparent!important}.tabs-bar.lx-mtview .tab.active .count{background:transparent!important;color:inherit!important}"; (document.head||document.documentElement).appendChild(st); }
+    if(bar.classList.contains("lx-mtview")!==show)bar.classList.toggle("lx-mtview",show);
+    [].slice.call(document.querySelectorAll(".panel-head h3")).forEach(function(h){ var t=(h.textContent||"").trim(); if(t!=="Recent Exchanges"&&t!=="My Trades")return; var w=show?"My Trades":"Recent Exchanges"; if(t!==w)h.textContent=w; });
+  }catch(_){} }
   var TR_PER = 50;
   // The mean trade size in NEAR, for the readout on a candle older than the feed (tradesTxt).
   function trMean(rows) {
@@ -2255,7 +2266,8 @@
     if (thT && thT.style.textAlign !== 'right') thT.style.textAlign = 'right';
     var info = document.getElementById('dxaPanelInfo');
     if (info) {
-      var it = (TR.mine ? 'Your trades · ' : '') + (all.length ? ('Showing ' + (from + 1) + '–' + (from + rows.length) + ' of ' + all.length + ' recent trades') : 'Showing 0 recent trades');
+      var what = TR.mine ? ' trades from this wallet' : ' recent trades';   // Stellar's wording (S35)
+      var it = all.length ? ('Showing ' + (from + 1) + '–' + (from + rows.length) + ' of ' + all.length + what) : ('Showing 0' + what);
       // Stellar's line and nothing after it (RAZA 2026-11-03): the filter, pool and time span were dropped.
       if (info.textContent !== it) info.textContent = it;
     }
@@ -2495,6 +2507,7 @@
     window.__lxnExTab = 1;
     window.addEventListener('click', function (e) {
       var tab = e.target && e.target.closest ? e.target.closest('.tabs-bar .tab') : null;
+      if (tab) setTimeout(function () { lxMtView(TR.mine); }, 0);   // any tab click re-states the view (S35)
       if (!tab || EXAUTO || !TR.mine || !/exchanges/i.test(tab.textContent || '')) return;
       TR.mine = false; TR.page = 1;
       setTimeout(syncPanel, 0);
