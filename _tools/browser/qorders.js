@@ -394,7 +394,7 @@
   }
 
   // One picker body, used by both panes: a type-to-filter box over a list we already hold.
-  function filterInto(m, heading, placeholder, list, rightOf, onPick, rest) {
+  function filterInto(m, heading, placeholder, list, rightOf, onPick, rest, walletOnly) {   // walletOnly: no "More on NEAR" (S13)
     tickCss();
     if (heading) menuHead(m, heading);
     var inp = document.createElement('input');
@@ -413,7 +413,7 @@
       });
       if (!rows.length) menuHead(res, 'No matches');
       rows.forEach(function (a) { res.appendChild(menuRow(a, rightOf ? rightOf(a) : '', onPick)); });
-      wide(q);
+      if (!walletOnly) wide(q);
     }
     // ANY NEAR TOKEN ONCE YOU TYPE, AS STELLAR'S "SEARCH ANY ASSET" (RAZA 2026-11-13, ticket 406: the list at rest is the
     // shortlist, and typing must reach past the curated list). NEAR's token index (/lxapi/neartokensearch, the header
@@ -794,7 +794,7 @@
           if (side === 'from') {
             var mine = list.filter(function (a) { return a.id === 'near' || rawBal(a) == null || S().big(rawBal(a)) > BigInt(0); });
             if (!mine.length) { menuHead(m, emptyWhy()); return; }
-            filterInto(m, 'Your assets', 'Symbol or contract', mine, balRight, pick);
+            filterInto(m, 'Your assets', 'Symbol or contract', mine, balRight, pick, null, true);   // you pay with what you hold (S13)
           } else {
             if (!list.length) { menuHead(m, 'The token list could not be loaded'); return; }
             filterInto(m, ANY_HEAD, ANY_PH, list, balAny, pick);
@@ -980,7 +980,7 @@
           if (side === 'sell') {
             var mine = list.filter(function (a) { return a.id === 'near' || rawBal(a) == null || S().big(rawBal(a)) > BigInt(0); });
             if (!mine.length) { menuHead(m, emptyWhy()); return; }
-            listInto(m, mine, balRight, pick);
+            filterInto(m, 'Your assets', 'Symbol or contract', mine, balRight, pick, null, true);   // searchable, as the Swap list (S13, 2026-11-20)
           } else {
             if (!list.length) { menuHead(m, 'The token list could not be loaded'); return; }
             filterInto(m, ANY_HEAD, ANY_PH, list, null, pick, buyShort(list));
