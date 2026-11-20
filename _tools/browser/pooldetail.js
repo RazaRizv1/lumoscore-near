@@ -100,6 +100,17 @@
     return '$' + v.toFixed(2);
   }
   // "6.479M SHX" with the unit in the design's own smaller `.lx-unit` span, as Stellar writes it.
+  // THE HEADER'S MONEY CARDS, SHORTENED AS STELLAR'S (2026-11-20): one ladder for Liquidity, 24h Volume and Fees --
+  // Stellar's _ammdata.js big(), K with two decimals from 1,000, M and B with three. In full, "456,225.84 STNEAR"
+  // made the Liquidity card 202px and pushed the page 40px past a 1440px window. Under 1,000 the NEAR decimals stay.
+  function statQty(n) {
+    n = +n; if (!isFinite(n)) return num(n);
+    var a = Math.abs(n);
+    if (a >= 1e9) return (n / 1e9).toFixed(3) + 'B';
+    if (a >= 1e6) return (n / 1e6).toFixed(3) + 'M';
+    if (a >= 1e3) return (n / 1e3).toFixed(2) + 'K';
+    return num(n, 2);
+  }
   function unitVal(v, text, unit) {
     if (!v) return;
     v.textContent = text + (unit ? ' ' : '');
@@ -487,7 +498,7 @@
       [['vol', vol], ['fees', fees]].forEach(function (x) {
         var cell = statCell(x[0]);
         if (!cell) return;
-        unitVal(cell.querySelector('.v'), (x[1] > 0 ? '≥ ' : '') + num(x[1], 2), 'NEAR');
+        unitVal(cell.querySelector('.v'), (x[1] > 0 ? '≥ ' : '') + statQty(x[1]), 'NEAR');
         var s = cell.querySelector('.s');
         if (s) s.textContent = x[1] > 0 ? ('≈ ' + usdShort(x[1] * USD)) : 'no trades in 24h';
       });
@@ -1436,14 +1447,14 @@
     // (Stellar's two-sided cell). No line under them (RAZA 2026-11-07: "retaining only the direct constituent asset amounts").
     var liq = statCell('liquidity');
     if (liq && liq.querySelector('.v')) {
-      unitVal(liq.querySelector('.v'), num(a.amount, 2), a.name);
+      unitVal(liq.querySelector('.v'), statQty(a.amount), a.name);
       var ls = liq.querySelector('.s');
       if (ls) {
         ls.textContent = '';
         T.slice(1).forEach(function (t) {
           var big2 = el('span');
           big2.style.cssText = 'font-size:clamp(15px,1.35vw,18px);font-weight:800;letter-spacing:-.2px;color:var(--text);display:block';
-          big2.appendChild(document.createTextNode(num(t.amount, 2) + ' '));
+          big2.appendChild(document.createTextNode(statQty(t.amount) + ' '));
           var u2 = el('span', null, t.name);
           u2.setAttribute('data-logoed', '1');
           u2.style.cssText = 'font-size:.7em;font-weight:700;opacity:.6;margin-left:3px;letter-spacing:0';
@@ -1475,7 +1486,7 @@
         if (s) s.textContent = 'no 24h data';           // short: the four cells share one row and .s is nowrap
         return;
       }
-      unitVal(cell.querySelector('.v'), (x[1] > 0 ? '≥ ' : '') + num(x[1], 2), 'NEAR');
+      unitVal(cell.querySelector('.v'), (x[1] > 0 ? '≥ ' : '') + statQty(x[1]), 'NEAR');
       if (s) s.textContent = (USD && x[1] > 0) ? ('≈ ' + usdShort(x[1] * USD)) : '';
     });
 
