@@ -25,8 +25,9 @@
   var START = new Date(2026, 11, 1);                       // the first round on NEAR, as RAZA set it
   var WHALE_UNIT = 5e6, WHALE_POOL = 1000000, NATIVE_POOL = 1000000, ECO_PER_POOL = 100000;   // Stellar's terms
   // Never paid and never in a denominator: the treasury, the fee account, and the two exchange contracts, whose LUMOS
-  // is the pools' and the order book's (the LUMOS page's list).
-  var EXCLUDE = { 'treasury.lumoscore.near': 1, 'fees-lumoscore.near': 1, 'dclv2.ref-labs.near': 1, 'v2.ref-finance.near': 1 };
+  // is the pools' and the order book's (the LUMOS page's list). And our own wallets (RAZA 2026-11-21, admin review D02).
+  var EXCLUDE = { 'treasury.lumoscore.near': 1, 'fees-lumoscore.near': 1, 'dclv2.ref-labs.near': 1, 'v2.ref-finance.near': 1,
+    'lumoscore.near': 1, 'razarizv1.near': 1, 'lumos01.near': 1, 'lumoscore-near-testing.near': 1 };
   // The ten Ecosystem assets (RAZA, ticket 270; the LUMOS page's list): contract -> ticker.
   var ECO = { '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1': 'USDC', 'usdt.tether-token.near': 'USDt',
     'qtc.omft.near': 'QTC', 'zec.omft.near': 'ZEC', 'batman-4.nearlytrade.near': 'BATMAN', 'token.rhealab.near': 'RHEA',
