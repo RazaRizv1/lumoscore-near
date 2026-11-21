@@ -45,6 +45,9 @@ const COPY = [
    'All three programmes begin on NEAR with the first round on 1 December 2026.'],
   ['Every round, and rounds run from the 1st and 15th of each month, so twice a month and twelve rounds over a six-month cycle. Ecosystem LP began on 15 April 2026, making 1 October 2026 its twelfth and final round.',
    'Every round, and rounds run from the 1st and 15th of each month, so twice a month. The first round on NEAR is 1 December 2026.'],
+  // Stellar's answer after its 2026-11-21 rewording (first cycle / second cycle) -- the same answer, a new anchor.
+  ['Every round, and rounds run from the 1st and 15th of each month, so twice a month and twelve rounds over a six-month cycle. Ecosystem LP began on 15 April 2026, so 1 October 2026 was the twelfth and final round of its first cycle; the second cycle, with a new set of pools, began on 15 October 2026.',
+   'Every round, and rounds run from the 1st and 15th of each month, so twice a month. The first round on NEAR is 1 December 2026.'],
   // a container built before RAZA confirmed the amounts carries the shorter answer
   ['Ten pools, each pairing LUMOS with one other asset. On NEAR the ten are ' + ECO_NEAR + ', and they are reselected every 6 months.',
    'Ten pools, each pairing LUMOS with one other asset. On NEAR the ten are ' + ECO_NEAR + '. Each pays 100,000 LUMOS per round, and the ten are reselected every 6 months.', 'optional'],
