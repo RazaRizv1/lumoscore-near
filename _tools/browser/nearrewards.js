@@ -110,6 +110,21 @@
       return WTS;
     });
   }
+  // B09 (2026-11-21): the shares the EXCLUDE accounts hold in a pool -- left out of the denominator, as the admin round
+  // does, so a real provider's estimate matches the payout. Kept per pool; a failed read is never kept and counts as 0.
+  var EXSH = {};
+  function exclShares(id) {
+    if (EXSH[id]) return EXSH[id];
+    var C = window.lxnCore;
+    var p = Promise.all(Object.keys(EXCLUDE).map(function (a) {
+      return C.callView(REF, 'get_pool_shares', { pool_id: id, account_id: a }).then(function (v) { return Number(v || '0'); }, function () { return null; });
+    })).then(function (xs) {
+      if (xs.some(function (x) { return x === null; })) { delete EXSH[id]; return 0; }
+      return xs.reduce(function (s, x) { return s + x; }, 0);
+    });
+    EXSH[id] = p;
+    return p;
+  }
   // The account's Ecosystem positions: LUMOS pools paired with one of the ten, and its share of each.
   // Null when the pools could not be read (then the row and the total say "—", never "not in any pool").
   function ecoMine(a) {
@@ -122,9 +137,9 @@
       });
       return Promise.all(ps.map(function (r) {
         var o = r.tokens.filter(function (t) { return t.i !== LUMOS; })[0];
-        return Promise.all([C.callView(REF, 'get_pool_shares', { pool_id: +r.id, account_id: a }), C.callView(REF, 'get_pool', { pool_id: +r.id })])
+        return Promise.all([C.callView(REF, 'get_pool_shares', { pool_id: +r.id, account_id: a }), C.callView(REF, 'get_pool', { pool_id: +r.id }), exclShares(+r.id)])
           .then(function (x) {
-            var mine = Number(x[0] || '0'), tot = Number((x[1] && x[1].shares_total_supply) || '0');
+            var mine = Number(x[0] || '0'), tot = Math.max(0, Number((x[1] && x[1].shares_total_supply) || '0') - (x[2] || 0));
             return mine > 0 && tot > 0 ? { code: ECO[o.i], share: mine / tot } : null;
           });
       })).then(function (xs) { return xs.filter(Boolean); });
@@ -143,11 +158,12 @@
       C.callView(LUMOS, 'ft_balance_of', { account_id: a }),
       C.callView(REF, 'get_pool_shares', { pool_id: POOL, account_id: a }),
       C.callView(REF, 'get_pool', { pool_id: POOL }),
-      ecoMine(a)
+      ecoMine(a),
+      exclShares(POOL)
     ]).then(function (r) {
       if (me() !== a) return;
       var lumos = C.units(r[0] || '0', 18);
-      var mine = Number(r[1] || '0'), total = Number((r[2] && r[2].shares_total_supply) || '0');
+      var mine = Number(r[1] || '0'), total = Math.max(0, Number((r[2] && r[2].shares_total_supply) || '0') - (r[4] || 0));
       var nShare = total > 0 ? mine / total : 0, nReward = excl ? 0 : NATIVE_POOL * nShare;
       var eco = r[3], eReward = 0;
       (eco || []).forEach(function (x) { eReward += excl ? 0 : ECO_PER_POOL * x.share; });
