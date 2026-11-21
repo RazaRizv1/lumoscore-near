@@ -27,9 +27,27 @@ const RULES = [
   [['function netLabel(){var n=actNet();return n?n.charAt(0).toUpperCase()+n.slice(1):"Stellar";}'],
     'function netLabel(){return "NEAR";}', 'the network label'],
   [["var NETLOGO='url(" + '"/assets/tokens/xlm.png"' + ")';"], "var NETLOGO='url(" + '"/assets/networks/near.png"' + ")';", 'the network mark'],
-  [['var wallet=ls("lumos.wallet"),addr=ls("lumos.address");var on=!!(wallet||addr);'],
+  // REVERTED 2026-11-14. RAZA: "You need to show the exact same thing that you're showing on
+  // dashboard header even when we open any other network pages."
+  //
+  // The guard below wiped the wallet unless the stored network said "near", which dropped the header
+  // into its SIGNED-OUT state: a visitor connected on Stellar or XRPL opening a NEAR page saw an
+  // orange "Launch App" button, and mobileMenu's `los[i].style.display=on?"":"none"` hid the
+  // Disconnect control with it — told they were signed out, and given no way to sign out.
+  //
+  // The chain the page serves is the BODY NOTICE's job (lx-wrongchain), not the header's. Stellar and
+  // XRPL were reverted to the same stock form in the same pass.
+  //
+  // It also tested `lumos.network` against a chain name, which is unsafe on its own terms: that key
+  // still holds the pre-multichain value "mainnet" for anyone who connected before the rework and it
+  // never self-heals. If a connected test is ever wanted here, resolve the chain from the ADDRESS
+  // SHAPE the way the wrong-chain layer does — never from that key.
+  [[
     'var wallet=ls("lumos.wallet"),addr=ls("lumos.address");' + NEAR_OK
-    + 'if(ls("lumos.network")!=="near"||!lxnOk(addr)){wallet=null;addr=null;}var on=!!(wallet||addr);',
+      + 'if(ls("lumos.network")!=="near"||!lxnOk(addr)){wallet=null;addr=null;}var on=!!(wallet||addr);',
+    'var wallet=ls("lumos.wallet"),addr=ls("lumos.address");var on=!!(wallet||addr);',
+  ],
+    'var wallet=ls("lumos.wallet"),addr=ls("lumos.address");var on=!!(wallet||addr);',
     'the connected test'],
 ];
 
