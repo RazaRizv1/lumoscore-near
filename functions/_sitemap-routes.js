@@ -37,11 +37,6 @@ export const SITEMAP_ROUTES = [
     "weekly"
   ],
   [
-    "/mcp/near",
-    "0.6",
-    "weekly"
-  ],
-  [
     "/list-your-token/near",
     "0.6",
     "weekly"

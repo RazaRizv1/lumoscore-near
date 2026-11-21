@@ -336,6 +336,10 @@
       live: big(r.liquidity) > BigInt(0) || big(r.total_order_x) > BigInt(0) || big(r.total_order_y) > BigInt(0),
       href: '/trade/near/' + LUMOS, label: 'Trade' };
   }
+  // data-paired is the marker the shared pair-icons sheet (lx-pairicons-css) keys on to lay the two logos
+  // side by side. Without it the pool list's width:auto collapses the logo column to 0px on a phone and
+  // both logos sit on top of the name and the TVL label (RAZA 2026-11-18, LUMOS page Pools tab on NEAR).
+  // Stellar's rows always carried it; these did not. The leftover left:13px is cleared for the same layout.
   function pairIcons(row, p) {
     var a = q('.pair-icons .a', row), b = q('.pair-icons .b', row); var box = q('.pair-icons', row); if (box) box.setAttribute('data-paired', '1');
     if (a) {

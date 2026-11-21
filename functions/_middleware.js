@@ -79,11 +79,6 @@ const ROUTES = [
     null
   ],
   [
-    "/mcp/near",
-    "/near/lumoscore-mcp",
-    null
-  ],
-  [
     "/list-your-token/near",
     "/near/lumoscore-list-token",
     null
