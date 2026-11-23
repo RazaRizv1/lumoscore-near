@@ -1973,6 +1973,13 @@
     var l = b.querySelector('.lx-mtlabel') || b;
     l.style.setProperty('color', TR.mine ? '#ea6a2c' : '#8a8fa3', 'important');
     l.style.setProperty('text-decoration', TR.mine ? 'underline' : 'none', 'important');
+    // MY TRADES IS AS BIG AS THE TABS (RAZA's auditor 2026-11-23, "My trades option can be a bit bigger"): it was a fixed
+    // 13.5 px beside 18.2 px / 600 tabs. It takes the tab's size, weight and padding when the tab is the bigger one; on a
+    // phone (smaller tabs) it stays as it is. Same rule as Stellar's _dexassetdata.js and XRPL's dexasset.js (live 266361cc).
+    var tb = bar.querySelector('.tab');
+    if (tb) { var tcs = getComputedStyle(tb); if (parseFloat(tcs.fontSize) > parseFloat(getComputedStyle(l).fontSize) + 0.5) {
+      b.style.fontSize = tcs.fontSize; b.style.fontWeight = tcs.fontWeight; b.style.lineHeight = tcs.lineHeight;
+      b.style.padding = tcs.paddingTop + ' ' + tcs.paddingRight + ' ' + tcs.paddingBottom + ' ' + tcs.paddingLeft; l.style.fontSize = 'inherit'; } }
     lxMtView(TR.mine);                                    // heading + tab highlight (S35)
   }
   // MY TRADES READS AS ITS OWN VIEW (S35, 2026-11-20). While it is on and the Exchanges panel is showing: the panel heading
