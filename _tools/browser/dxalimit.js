@@ -546,6 +546,7 @@
       recalc(p);
       toast((o.side === 'sell' ? 'Sell' : 'Buy') + ' order placed — ' + fmt(D().toNum(o.tokenRaw, dec), 6) + ' ' + code() + ' at ' + fmt(o.rests, 8) + ' NEAR');
       load();
+      ooLoad();
       try { if (window.__lxnBookReload) window.__lxnBookReload(); } catch (e) {}
     }).catch(function (e) {
       var m = (e && e.message) || '';
@@ -596,6 +597,125 @@
     }, true);
   }
 
+  // ---- YOUR OPEN ORDERS ON THIS ASSET, under the Limit form (RAZA's auditor 2026-11-23: "Limit order not viewable
+  // or cancellable on the Trade page") ------------------------------------------------------------------------
+  // Same panel, same look and the same rules as Stellar's (_dexassetdata.js renderOpenOffers): every limit pane on
+  // the page (desktop .dxa-pane-limit, phone .mdxa-pane-limit), hidden when there is nothing to show, five rows and
+  // then "Show all N", and Cancel goes straight to the wallet -- the wallet's own approval is the confirmation.
+  // Rows are { id, sell, amt, px, ctr, note?, btn? } with amt in THIS asset and px in ctr per one of it.
+  function ooCss() {
+    if (document.getElementById('lx-oo-css')) return;
+    var st = document.createElement('style'); st.id = 'lx-oo-css';
+    st.textContent = '.lx-oo{margin-top:14px;padding-top:12px;border-top:1px solid var(--border,rgba(255,255,255,.1))}'
+      + '.lx-oo-h{display:flex;align-items:center;gap:6px;font-weight:700;font-size:13px;margin-bottom:6px;color:var(--text,#e8e8ee)}'
+      + '.lx-oo-n{font:600 11px/1 "JetBrains Mono",monospace;padding:3px 6px;border-radius:6px;background:var(--surface-2,rgba(255,255,255,.06));color:var(--text-muted,#8b90a0)}'
+      + '.lx-oo-row{display:flex;align-items:center;gap:8px;padding:7px 0;border-top:1px solid var(--border,rgba(255,255,255,.06));font-size:12.5px}'
+      + '.lx-oo-row:first-of-type{border-top:0}'
+      + '.lx-oo-side{flex:0 0 auto;font-weight:700;font-size:11px;padding:2px 7px;border-radius:5px}'
+      + '.lx-oo-side.lx-oo-b{color:var(--green,#22c55e);background:rgba(34,197,94,.12)}.lx-oo-side.lx-oo-s{color:var(--red,#ea3943);background:rgba(234,57,67,.12)}'
+      + '.lx-oo-txt{flex:1 1 auto;min-width:0;font-family:"JetBrains Mono",monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text,#e8e8ee)}'
+      + '.lx-oo-txt small{display:block;overflow:hidden;text-overflow:ellipsis;color:var(--text-muted,#8b90a0);font-size:11px}'
+      + '.lx-oo-x{flex:0 0 auto;padding:5px 10px;border-radius:7px;border:1px solid var(--border,rgba(255,255,255,.14));background:transparent;color:var(--text,#e8e8ee);font:600 12px/1 inherit;cursor:pointer}'
+      + '.lx-oo-more{margin-top:4px;padding:4px 0;border:0;background:none;color:var(--accent,#ea6a2c);font:600 12px/1 inherit;cursor:pointer}'
+      + '.lx-oo-x:hover{border-color:var(--red,#ea3943);color:var(--red,#ea3943)}.lx-oo-x[disabled]{opacity:.6;cursor:default}';
+    document.head.appendChild(st);
+  }
+  function ooEsc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function ooNum(n) { if (!(n > 0)) return '0'; if (n >= 1000) return Math.round(n).toLocaleString('en-US'); if (n >= 1) return String(+n.toFixed(4)); return String(+n.toPrecision(6)); }
+  // Prices under a millionth keep the site's subscript-zero form (0.0₉3102), never "3.1e-10".
+  function ooPx(x) {
+    if (!(x > 0)) return '–';
+    if (x >= 1e-6) return String(+x.toPrecision(6));
+    var z = Math.floor(-Math.log10(x)) - 1, d = String(Math.round(x * Math.pow(10, z + 5)));
+    var sub = String(z).split('').map(function (c) { return '₀₁₂₃₄₅₆₇₈₉'.charAt(+c); }).join('');
+    return '0.0' + sub + d.replace(/0+$/, '');
+  }
+  var OO_ROWS = [];
+  function ooPaint(rows, code) {
+    OO_ROWS = rows || [];
+    ooCss();
+    $('[class*="dxa-pane-limit"]').forEach(function (p) {
+      var box = $('.lx-oo', p);
+      if (!OO_ROWS.length) { if (box) box.style.display = 'none'; return; }
+      if (!box) {
+        box = document.createElement('div'); box.className = 'lx-oo';
+        var c = $('[class*="dxa-trade-cta"]', p);
+        if (c && c.parentNode) c.parentNode.insertBefore(box, c.nextSibling); else p.appendChild(box);
+      }
+      box.style.display = '';
+      box.innerHTML = '<div class="lx-oo-h">Your open orders <span class="lx-oo-n">' + OO_ROWS.length + '</span></div>'
+        + OO_ROWS.map(function (o, i) {
+          return '<div class="lx-oo-row"' + (i >= 5 && !box.__lxAll ? ' style="display:none"' : '') + '>'
+            + '<span class="lx-oo-side ' + (o.sell ? 'lx-oo-s' : 'lx-oo-b') + '">' + (o.sell ? 'Sell' : 'Buy') + '</span>'
+            + '<span class="lx-oo-txt">' + ooNum(o.amt) + ' ' + ooEsc(code) + ' <small>@ ' + ooPx(o.px) + ' ' + ooEsc(o.ctr) + (o.note ? ' · ' + ooEsc(o.note) : '') + '</small></span>'
+            + '<button type="button" class="lx-oo-x" data-lxoo="' + ooEsc(o.id) + '" data-lxlbl="' + ooEsc(o.btn || 'Cancel') + '">' + ooEsc(o.btn || 'Cancel') + '</button></div>';
+        }).join('')
+        + (OO_ROWS.length > 5 && !box.__lxAll ? '<button type="button" class="lx-oo-more">Show all ' + OO_ROWS.length + '</button>' : '');
+    });
+    if (window.__lxOOwired) return;
+    window.__lxOOwired = 1;
+    document.addEventListener('click', function (e) {
+      var t = e.target; if (!t || !t.closest) return;
+      var mo = t.closest('.lx-oo-more');
+      if (mo) { e.preventDefault(); e.stopPropagation(); var bx = mo.closest('.lx-oo'); bx.__lxAll = 1; $('.lx-oo-row', bx).forEach(function (r) { r.style.display = ''; }); mo.remove(); return; }
+      var b = t.closest('.lx-oo-x[data-lxoo]');
+      if (!b || b.disabled) return;
+      e.preventDefault(); e.stopPropagation();
+      var id = b.getAttribute('data-lxoo');
+      b.disabled = true; b.textContent = 'Confirm in wallet…';
+      ooCancel(id, function () { b.textContent = 'Cancelling…'; }).then(function () {
+        try { if (typeof window.lxToast === 'function') window.lxToast('Order cancelled'); } catch (x) {}
+        ooPaint(OO_ROWS.filter(function (o) { return String(o.id) !== String(id); }), ooCode());
+        setTimeout(ooLoad, 4000);
+      }).catch(function (err) {
+        b.disabled = false; b.textContent = b.getAttribute('data-lxlbl') || 'Cancel';
+        try { if (typeof window.lxToast === 'function') window.lxToast('Cancel failed — ' + ((err && err.message) || 'try again')); } catch (x) {}
+      });
+    }, true);
+  }
+  // NEAR: Rhea DCL orders from lxnDcl.activeOrders -- the wallet's Open orders source. A sell's sell_token is THIS
+  // token. Price from the order's point and the pool's two decimals, as the wallet's shapeOrder does. Cancel is
+  // lxnDcl.buildCancel + sign, the wallet's Cancel; a fully filled order is "collected" by the same call.
+  function ooCode() { return code(); }
+  function ooLoad() {
+    var a = asset(), who = me(), Dl = D();
+    if (!a || !who || !Dl || !SW()) { ooPaint([], ooCode()); return; }
+    Dl.activeOrders(who).then(function (list) {
+      list = (list || []).filter(function (o) { return o.sell_token === a.id || o.buy_token === a.id; });
+      var ids = {};
+      list.forEach(function (o) { String(o.pool_id).split('|').slice(0, 2).forEach(function (t) { ids[t] = 1; }); ids[o.sell_token] = 1; ids[o.buy_token] = 1; });
+      var keys = Object.keys(ids);
+      return Promise.all(keys.map(function (k) { return SW().tokenInfo(k).catch(function () { return null; }); })).then(function (ms) {
+        var M = {}; keys.forEach(function (k, i) { M[k] = ms[i] || {}; });
+        ooPaint(list.map(function (o) {
+          var sell = o.sell_token === a.id, quo = sell ? o.buy_token : o.sell_token;
+          var xy = String(o.pool_id).split('|'), px = 0;
+          if (M[xy[0]].dec != null && M[xy[1]].dec != null) {
+            var pxy = Math.pow(1.0001, +o.point) * Math.pow(10, M[xy[0]].dec - M[xy[1]].dec);
+            px = xy[0] === a.id ? pxy : 1 / pxy;
+          }
+          // The ORDER's size, with how much has filled: lumos01.near's RHEA buy had 0.00000000006 NEAR left and 8.11 RHEA
+          // bought -- shown from what remained it read "4.9e-9 RHEA". A finished order is Collect (cancel_order sends the
+          // proceeds), as in the wallet.
+          var ds = M[o.sell_token].dec, rem = ds != null ? Number(Dl.fromUnits(o.remain_amount, ds)) : 0;
+          var orig = ds != null ? Number(Dl.fromUnits(o.original_amount, ds)) : 0, left = orig > 0 ? rem / orig : 1;
+          var done = left < 0.001, pct = Math.round((1 - left) * 100);
+          return { id: o.order_id, sell: sell, amt: sell ? orig : (px > 0 ? orig / px : 0), px: px, ctr: quo === 'wrap.near' ? 'NEAR' : (M[quo].code || quo),
+            note: done ? 'filled' : (pct > 0 ? pct + '% filled' : ''), btn: done ? 'Collect' : 'Cancel' };
+        }), ooCode());
+      });
+    }).catch(function () {});
+  }
+  function ooCancel(id, onSigned) {
+    var who = me();
+    if (!who) return Promise.reject(new Error('Connect a NEAR wallet first.'));
+    return D().buildCancel(who, [id]).then(function (b) { return D().sign(b.txs); }).then(function (res) {
+      onSigned();
+      var v = D().verdict ? D().verdict(res) : {};
+      if (v && v.ok === false) throw new Error('The cancel failed on chain. Check your wallet activity.');
+    });
+  }
+
   function boot() {
     var p = pane(), a = asset();
     if (!p || !D() || !SW()) return false;
@@ -617,6 +737,7 @@
       ready();
     });
     load();
+    ooLoad();
     // lx-mobtrade inserts the phone's Total field on its own cadence; repaint when the pane's direct
     // children change (childList only -- an observer reacting to its own text freezes the renderer).
     try { new MutationObserver(function () { paint(); }).observe(p, { childList: true }); } catch (e) {}
