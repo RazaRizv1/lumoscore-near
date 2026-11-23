@@ -2319,7 +2319,7 @@
     // payload knows only the pools its own source answered for; once the Pools tab's fuller list has loaded (PL.list:
     // the live list + the baked whole-chain list), the count and the liquidity sum come from it, so both say the same.
     var full = (PL && PL.i === d.i && PL.list && PL.list.length) ? PL.list : null;
-    var np = full ? full.length : (d.poolTotal != null ? +d.poolTotal : (d.poolCount != null ? +d.poolCount : null));
+    var np = full ? (PL.rows || pairRows(full)).length : (d.poolTotal != null ? +d.poolTotal : (d.poolCount != null ? +d.poolCount : null));
     if (np != null && isFinite(np)) out.push(['Pools', np.toLocaleString('en-US')]);
     var liq = 0, seen = false;
     (full || d.pools || []).forEach(function (p) { if (p && +p.liqUsd > 0) { liq += +p.liqUsd; seen = true; } });
@@ -2783,7 +2783,10 @@
       .sort(function (a, b) { return (b.liqUsd || 0) - (a.liqUsd || 0); });
   }
   function poolCounts() {
-    setTabCount(/pools/i, PL.list ? PL.list.length.toLocaleString('en-US') : '—');
+    // THE COUNT IS THE ROWS (RAZA 2026-11-23: "still says 8 pools while showing only 7"). The list is one row per pair
+    // (RAZA 2026-11-07), so a pair with two pools is one row; the badge, Active pools and the About sheet count rows.
+    var rc = PL.rows || (PL.list ? pairRows(PL.list) : null);
+    setTabCount(/pools/i, rc ? rc.length.toLocaleString('en-US') : '—');
   }
   function poolsReady() {
     PL.rows = pairRows(PL.list || []);
@@ -2865,7 +2868,7 @@
     var stat = function (lbl, val) {
       return '<div class="' + pre + '-hl-stat"><span class="lbl">' + lbl + '</span><span class="val mono lxp" data-logoed="1" data-logo="">' + escH(val) + '</span></div>';
     };
-    var head = stat('Active pools', list.length.toLocaleString('en-US')) + stat('Combined TVL', money0(tvl)) + stat('LP positions', lpsTxt);
+    var head = stat('Active pools', (PL.rows || list).length.toLocaleString('en-US')) + stat('Combined TVL', money0(tvl)) + stat('LP positions', lpsTxt);
     var th = function (t) { return '<th data-logoed="1" data-logo="">' + t + '</th>'; };
     extra.innerHTML = phone
       ? '<div class="mdxa-pl-head">' + head + '</div><div class="mdxa-pl-list"></div><div class="lx-pl-foot"></div>'
