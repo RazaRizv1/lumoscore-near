@@ -244,7 +244,11 @@
     }
     var usdFee = nearToYocto(USD.create / rate);
     var extra = Number(d.extra) > 0 ? Number(d.extra) : 0;
-    var liq = nearToYocto(USD.liq / rate + extra);
+    // TEST WALLETS (RAZA 2026-11-23): an approved test wallet (admin "Test wallets"; /lxapi/testwallet) launches at the
+    // minimum: 0.5 NEAR of liquidity and a 0.5 NEAR fee (the factory's own min_fee). Storage and Rhea's registrations
+    // still apply -- they are the chain's, not ours.
+    var TW = !!window.__lxnTestWallet;
+    var liq = nearToYocto((TW ? 0.5 : USD.liq / rate) + extra);
     var refAcct = ex.refAcct == null ? REF_ACCOUNT_NEW : String(ex.refAcct);
     var wrapReg = ex.wrapReg == null ? FT_REG_EST : String(ex.wrapReg);
     var tokenReg = ex.tokenReg == null ? FT_REG_EST : String(ex.tokenReg);
@@ -252,10 +256,10 @@
     var network = (big(storage) + big(rhea)).toString();
     // The flat $25 (USD_POOL above): what the pool-and-network line falls short of $10 is added to the fee.
     var poolFloor = big(nearToYocto(USD_POOL / rate));
-    var topUp = poolFloor > big(network) ? (poolFloor - big(network)) : BigInt(0);
+    var topUp = (!TW && poolFloor > big(network)) ? (poolFloor - big(network)) : BigInt(0);
     // ...and what the liquidity line charges above the NEAR the pool receives (USD_LIQ_LINE above).
-    var liqRev = big(nearToYocto(Math.max(0, USD_LIQ_LINE - USD.liq) / rate));
-    var fee = (big(usdFee) + topUp + liqRev).toString();
+    var liqRev = TW ? BigInt(0) : big(nearToYocto(Math.max(0, USD_LIQ_LINE - USD.liq) / rate));
+    var fee = TW ? nearToYocto(0.5) : (big(usdFee) + topUp + liqRev).toString();
     if (cfg) fee = maxBig(fee, cfg.min_fee);
     var createDeposit = (big(storage) + big(fee)).toString();
     var total = (big(fee) + big(liq) + big(network)).toString();
@@ -1000,6 +1004,21 @@
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', function () { load(); initShareSlider(); });
   } else { load(); initShareSlider(); }
+
+  // Is the connected wallet an approved test wallet? Asked per account, again when it changes; repaints the costs.
+  (function () {
+    var asked = null;
+    function check() {
+      var a = account();
+      if (a === asked) return; asked = a;
+      function set(v) { if (!!window.__lxnTestWallet === v) return; window.__lxnTestWallet = v;
+        try { paintCosts(); } catch (e) {} try { paintReview(); } catch (e) {} }
+      if (!a) { set(false); return; }
+      fetch('/lxapi/testwallet?net=near&a=' + encodeURIComponent(a), { cache: 'no-store' }).then(function (r) { return r.json(); })
+        .then(function (j) { if (asked === a) set(!!(j && j.test)); }).catch(function () {});
+    }
+    check(); setInterval(check, 3000);
+  })();
 
   // Shared with browser/nearmint.js, and inspectable from the console and the capture tests.
   L.FACTORY = FACTORY; L.REF = REF; L.WNEAR = WNEAR; L.RPC = RPC; L.SOON = SOON; L.USD = USD;
