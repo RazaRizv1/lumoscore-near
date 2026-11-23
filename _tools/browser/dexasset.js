@@ -2315,12 +2315,16 @@
     var out = [];
     if (d.supply != null && isFinite(+d.supply) && +d.supply > 0) out.push(['Circulating supply', miAbbr(d.supply) + ' ' + (d.symbol || '')]);
     if (HL && HL.count != null && isFinite(HL.count)) out.push(['Holders', Math.round(HL.count).toLocaleString('en-US')]);
-    var np = d.poolTotal != null ? +d.poolTotal : (d.poolCount != null ? +d.poolCount : null);
+    // THE SAME POOLS AS THE POOLS TAB (RAZA 2026-11-23, NEAR LUMOS: the tab said 8 pools, About said 1 with $0.535). The
+    // payload knows only the pools its own source answered for; once the Pools tab's fuller list has loaded (PL.list:
+    // the live list + the baked whole-chain list), the count and the liquidity sum come from it, so both say the same.
+    var full = (PL && PL.i === d.i && PL.list && PL.list.length) ? PL.list : null;
+    var np = full ? full.length : (d.poolTotal != null ? +d.poolTotal : (d.poolCount != null ? +d.poolCount : null));
     if (np != null && isFinite(np)) out.push(['Pools', np.toLocaleString('en-US')]);
     var liq = 0, seen = false;
-    (d.pools || []).forEach(function (p) { if (p && +p.liqUsd > 0) { liq += +p.liqUsd; seen = true; } });
+    (full || d.pools || []).forEach(function (p) { if (p && +p.liqUsd > 0) { liq += +p.liqUsd; seen = true; } });
     // A partial sum is labelled as one: the payload lists the largest 30 pools, and USDt has 470.
-    var listed = (d.pools || []).length;
+    var listed = (full || d.pools || []).length;
     if (seen) out.push([np != null && listed < np ? 'Liquidity, top ' + listed + ' pools' : 'Pool liquidity', '$' + miAbbr(liq)]);
     out.push(['Contract', d.i]);
     if (d.web) out.push(['Website', String(d.web).replace(/^https?:[/][/]/, '').replace(/[/]$/, '')]);
