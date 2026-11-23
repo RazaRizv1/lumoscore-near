@@ -23,6 +23,7 @@
 // ft_metadata reads. The answer is kept two minutes. A partial read lists only the unbroken run from the newest down, as
 // /lxapi/nearactivity does. A failure is a 200 { ok:false }, never cached, never "no trades".
 import { CURATED } from './_nearcurated.js';
+import { nearCuratedSync } from './_netcurated.js';
 import { WNEAR, post, decodeNew } from './_nearfeetx.js';
 import { onRequestGet as nearPools } from './nearpools.js';
 
@@ -255,6 +256,8 @@ async function build(cache, id, pool, ctx) {
 }
 
 export async function onRequestGet(context) {
+  // Admin-curated tokens (RAZA 2026-11-24, _netcurated.js) join the built-in list before anything reads it.
+  await nearCuratedSync(context.env, CURATED, (c, on) => { if (on) CUR[c.i] = c; else delete CUR[c.i]; });
   const id = String(new URL(context.request.url).searchParams.get('i') || '').trim().toLowerCase();
   if (!ID_RE.test(id)) return json({ ok: false, error: 'bad token id' }, 0);
   const pool = String(new URL(context.request.url).searchParams.get('pool') || '');

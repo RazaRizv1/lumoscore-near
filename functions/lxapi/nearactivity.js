@@ -16,6 +16,7 @@
 // Logos: the curated list's when it is a url or our own /assets path, else the pool indexer's /icon url -- never a data:
 // icon, which can be 50 KB a token. A failure is never cached and never answers "no activity": it is a 200 {ok:false}.
 import { CURATED } from './_nearcurated.js';
+import { nearCuratedSync } from './_netcurated.js';
 import { FEE, WNEAR, post, feeIndex, decodeNew } from './_nearfeetx.js';
 import { decodeBridge, whLeg } from './nearbridgetx.js';
 import { niDelivery } from './nearoneclick.js';
@@ -376,6 +377,8 @@ async function buildAll(cache, env) {
 }
 
 export async function onRequestGet(context) {
+  // Admin-curated tokens (RAZA 2026-11-24, _netcurated.js) join the built-in list before anything reads it.
+  await nearCuratedSync(context.env, CURATED, (c, on) => { if (on) CUR[c.i] = c; else delete CUR[c.i]; });
   const cache = caches.default;
   if (new URL(context.request.url).searchParams.get('all') === '1') {
     try { const b = await buildAll(cache, context.env); return json(b, b.complete ? 60 : 0); }

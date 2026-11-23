@@ -24,6 +24,7 @@
 // asset against its main market), not a sum over every pool. 24h change is reported only when the token
 // is the BASE of that pair, since that is the side the change describes; otherwise null, not a guess.
 import { CURATED } from './_nearcurated.js';
+import { nearCuratedSync } from './_netcurated.js';
 import { ownPools, ownPrices, ownLiquidity, getPool, getDclPool } from './_nearownpools.js';
 import { MAINPOOL } from './_nearmainpools.js';
 // Our own hourly snapshots of Rhea's price list (workers/near-pool-indexer), the same series the Trade page draws its
@@ -257,6 +258,8 @@ export async function marketBody(context) {
 }
 
 export async function onRequestGet(context) {
+  // Admin-curated tokens (RAZA 2026-11-24, _netcurated.js) join the built-in list before anything reads it.
+  await nearCuratedSync(context.env, CURATED);
   try {
     const body = await marketBody(context);
     return body.stale ? json(body, 200, 15) : json(body);

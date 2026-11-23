@@ -27,6 +27,7 @@
 //
 // Subrequests per miss: market (0 when warm, 4 cold) + 1 DexScreener + 3 RPC = at most 8.
 import { CURATED } from './_nearcurated.js';
+import { nearCuratedSync } from './_netcurated.js';
 import { marketBody } from './nearmarket.js';
 import { ownPools, ownLiquidity } from './_nearownpools.js';
 import { allPools } from './nearpools.js';
@@ -395,6 +396,8 @@ async function build(id, context) {
 }
 
 export async function onRequestGet(context) {
+  // Admin-curated tokens (RAZA 2026-11-24, _netcurated.js) join the built-in list before anything reads it.
+  await nearCuratedSync(context.env, CURATED);
   const url = new URL(context.request.url);
   const id = String(url.searchParams.get('i') || '').trim().toLowerCase();
   if (!ID_RE.test(id)) return json({ ok: false, error: 'invalid contract id' }, 400, 300);

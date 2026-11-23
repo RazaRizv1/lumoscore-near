@@ -39,6 +39,7 @@
 // NEVER CACHE A FAILURE AS AN ANSWER: only a 200 token list is stored (in memory and at the edge); a
 // failed upstream read answers 502 and is asked again next time.
 import { CURATED } from './_nearcurated.js';
+import { nearCuratedSync } from './_netcurated.js';
 
 const API = 'https://1click.chaindefuser.com/v0';
 const TIMEOUT_MS = 12000;
@@ -246,6 +247,8 @@ export async function niDelivery(env, dep) {
 }
 
 export async function onRequestGet({ request, env, waitUntil }) {
+  // Admin-curated tokens (RAZA 2026-11-24, _netcurated.js) join the built-in list before anything reads it.
+  await nearCuratedSync(env, CURATED, (c, on) => { if (on) CURATED_IDS.add(c.i); else CURATED_IDS.delete(c.i); });
   const q = new URL(request.url).searchParams;
   const op = q.get('op');
   try {

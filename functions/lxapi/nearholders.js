@@ -22,6 +22,7 @@
 // Last of all, the count baked into the build from a paced run (_tools/_nearholdercounts.js), so a curated
 // token is never "—" just because NearBlocks was busy -- with its date, as countAt.
 import { CURATED } from './_nearcurated.js';
+import { nearCuratedSync } from './_netcurated.js';
 const TTL = 1800, KEEP = 604800, VER = 'v6';
 const COUNT_TTL = 21600, COUNT_KEEP = 2592000;
 const TOP = 'https://api.fastnear.com/v1/ft/';
@@ -103,6 +104,8 @@ async function cachedCount(cache, base, id, waitUntil) {
 }
 
 export async function onRequestGet(context) {
+  // Admin-curated tokens (RAZA 2026-11-24, _netcurated.js) join the built-in list before anything reads it.
+  await nearCuratedSync(context.env, CURATED);
   const url = new URL(context.request.url);
   const id = String(url.searchParams.get('i') || '').trim().toLowerCase();
   if (!validId(id)) return json({ ok: false, error: 'bad token id' }, 0);

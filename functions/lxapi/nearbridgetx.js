@@ -22,6 +22,7 @@
 // five a call, at most 30 per request; the decoded map is kept a week in one cache entry and the answer a minute. A failure is never cached: the last good answer is kept a day
 // and served marked stale.
 import { CURATED } from './_nearcurated.js';
+import { nearCuratedSync } from './_netcurated.js';
 import { FEE, WNEAR, post, signed, feeIndex, decodeNew } from './_nearfeetx.js';
 
 const RPC = 'https://free.rpc.fastnear.com';
@@ -142,6 +143,8 @@ async function build(cache) {
 }
 
 export async function onRequestGet(context) {
+  // Admin-curated tokens (RAZA 2026-11-24, _netcurated.js) join the built-in list before anything reads it.
+  await nearCuratedSync(context.env, CURATED, (c, on) => { if (on) DEC[c.i] = { d: c.d, s: c.s }; else delete DEC[c.i]; });
   const cache = caches.default;
   const fresh = new Request('https://lumoscore.internal/lxapi/nearbridgetx/' + VER + '/fresh');
   const kept = new Request('https://lumoscore.internal/lxapi/nearbridgetx/' + VER + '/kept');

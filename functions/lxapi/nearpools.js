@@ -24,6 +24,7 @@
 //
 // Cached like nearmarket: versioned key, 2 minutes fresh, last good kept a day, failures never cached.
 import { CURATED } from './_nearcurated.js';
+import { nearCuratedSync } from './_netcurated.js';
 import { ownPools, ownPrices } from './_nearownpools.js';
 
 const TTL = 120, KEEP = 86400, VER = 'v5';   // v3: LumosCore's own pools joined (2026-11-04); v5: every pool since 9001 (2026-11-14)
@@ -303,6 +304,8 @@ async function searchAll(context, body, q, full) {
 }
 
 export async function onRequestGet(context) {
+  // Admin-curated tokens (RAZA 2026-11-24, _netcurated.js) join the built-in list before anything reads it.
+  await nearCuratedSync(context.env, CURATED, (c, on) => { if (on) META[c.i] = c; else delete META[c.i]; });
   const url = new URL(context.request.url);
   const n = Math.max(1, Math.min(200, parseInt(url.searchParams.get('n') || '100', 10) || 100));
   const want = url.searchParams.get('id');
