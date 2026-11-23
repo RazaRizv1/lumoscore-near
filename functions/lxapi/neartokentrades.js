@@ -24,10 +24,11 @@
 // /lxapi/nearactivity does. A failure is a 200 { ok:false }, never cached, never "no trades".
 import { CURATED } from './_nearcurated.js';
 import { WNEAR, post, decodeNew } from './_nearfeetx.js';
+import { onRequestGet as nearPools } from './nearpools.js';
 
 const RPC = 'https://free.rpc.fastnear.com';
 const REF = 'v2.ref-finance.near', DCL = 'dclv2.ref-labs.near';
-const VER = 'v4', TTL = 120, N = 50, NEWEST = 120, PER_RUN = 40;
+const VER = 'v6', TTL = 120, N = 50, NEWEST = 120, PER_RUN = 40;
 const ID_RE = /^(?=.{2,64}$)(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/;
 const CUR = {};
 for (const c of CURATED) CUR[c.i] = c;
@@ -164,7 +165,57 @@ async function ftMeta(id) {
   return META[id];
 }
 
-async function build(cache, id, pool) {
+// OLDER TRADES FROM OUR OWN POOL INDEX (RAZA 2026-11-23: "Why this token's recent transactions not showing up" --
+// BABYBLACKDRAGON). The chain read above covers the token's newest NEWEST transactions only, and a token whose recent
+// history is all transfers (22,574 transactions, the newest 120 none of them swaps) read "No trades found" although it
+// last traded on 11-16. near-pool-indexer keeps every Rhea pool swap since it began; the token's pools come from our
+// own /lxapi/nearpools, called in-process (GeckoTerminal refuses Cloudflare's servers: live answered 0 rows through it,
+// 2026-11-23), GeckoTerminal only if that has none; at most three, by liquidity, newest swaps first. One
+// transaction can pass through two of the token's pools; its legs are netted, and a route that leaves the trader's
+// balance of the token unchanged is not a trade of it -- the same rule the chain read applies.
+const IDX = 'https://near-pool-indexer.usa282.workers.dev';
+async function getJson(u, ttl) {
+  const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 6000);
+  try {
+    const r = await fetch(u, { signal: ctl.signal, headers: { accept: 'application/json' }, cf: { cacheTtl: ttl, cacheEverything: true } });
+    return r.ok ? await r.json() : null;
+  } catch (e) { return null; } finally { clearTimeout(t); }
+}
+async function ownPools(id, ctx) {
+  try {
+    const r = await nearPools({ request: new Request('https://lumoscore.com/lxapi/nearpools?q=' + encodeURIComponent(id) + '&full=1'),
+      env: ctx.env, waitUntil: (p) => { try { ctx.waitUntil(p); } catch (e) {} } });
+    const j = await r.json();
+    return ((j && j.ok && j.rows) || []).filter((p) => /^\d{1,7}$/.test(String(p.id))).map((p) => ({ id: String(p.id), liq: +p.liq || 0 }));
+  } catch (e) { return []; }
+}
+async function indexerRecs(id, ctx) {
+  let pools = await ownPools(id, ctx);
+  if (pools.length) pools = pools.sort((a, b) => b.liq - a.liq).slice(0, 3);
+  else {
+  const g = await getJson('https://api.geckoterminal.com/api/v2/networks/near/tokens/' + encodeURIComponent(id) + '/pools?page=1', 600);
+  pools = ((g && g.data) || []).map((p) => {
+    const m = /^near_refv1-(\d+)$/.exec(String(p.id || '')); const a = p.attributes || {};
+    return m ? { id: m[1], liq: +a.reserve_in_usd || 0 } : null;
+  }).filter(Boolean).sort((a, b) => b.liq - a.liq).slice(0, 3);
+  }
+  const by = {};
+  for (const p of pools) {
+    const j = await getJson(IDX + '/pool?id=' + p.id + '&kind=swap&limit=' + N, 60);
+    for (const x of (j && j.rows) || []) {
+      if (!x.tx || (x.ta !== id && x.tb !== id)) continue;
+      const r = by[x.tx] || (by[x.tx] = { h: x.tx, who: x.who || '', ts: +x.t || 0, net: 0n, oth: null });
+      if (x.tb === id) { r.net += big(x.ab); if (!r.oth && x.ta) r.oth = { c: x.ta, raw: '-' + x.aa }; }
+      if (x.ta === id) { r.net -= big(x.aa); if (!r.oth && x.tb) r.oth = { c: x.tb, raw: x.ab }; }
+    }
+  }
+  return Object.keys(by).map((k) => by[k]).filter((r) => r.net !== 0n).map((r) => ({
+    h: r.h, who: r.who, ts: r.ts, tok: (r.net < 0n ? '-' + (-r.net).toString() : r.net.toString()),
+    oth: r.oth ? { c: r.oth.c === WNEAR ? 'near' : r.oth.c, raw: String(r.oth.raw).replace(/^-/, '') } : null,
+  }));
+}
+
+async function build(cache, id, pool, ctx) {
   const j = await post('account', { account_id: id });
   if (!j || !Array.isArray(j.account_txs)) throw new Error('fastnear: no index');
   const list = j.account_txs.filter((x) => x && x.transaction_hash)
@@ -177,6 +228,11 @@ async function build(cache, id, pool) {
   if (cut < 0) cut = list.length;
   const recs = list.slice(0, cut).filter((x) => x.ok).map((x) => map[x.h])
     .filter((r) => r && (!pool || (r.pools || []).indexOf(pool) >= 0)).sort((a, b) => b.ts - a.ts).slice(0, N);
+  if (!pool && recs.length < N) {
+    const seen = {}; for (const r of recs) seen[r.h] = 1;
+    for (const r of await indexerRecs(id, ctx)) if (!seen[r.h]) { seen[r.h] = 1; recs.push(r); }
+    recs.sort((a, b) => b.ts - a.ts); recs.length = Math.min(recs.length, N);
+  }
   const tm = await ftMeta(id);
   if (!tm) throw new Error('token metadata unread');
   const others = {};
@@ -208,7 +264,7 @@ export async function onRequestGet(context) {
   const hit = await cache.match(key);
   if (hit) return json(await hit.json(), 30);
   try {
-    const body = await build(cache, id, pool);
+    const body = await build(cache, id, pool, context);
     context.waitUntil(cache.put(key, new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json',
       'cache-control': 'public, max-age=' + (body.partial ? 5 : TTL) } })));
     return json(body, body.partial ? 5 : 30);
