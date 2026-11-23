@@ -589,7 +589,7 @@
 
   function clearQuote() {
     sw.quote = null;
-    var out = $('#swapAmtOut'); if (out) plain(out, '');
+    var out = $('#swapAmtOut'); if (out && document.activeElement !== out) plain(out, '');
     var det = $('#swapModal .lx-swapd'); if (det) det.style.display = 'none';
     showRate(spotTxt());
     setGo(false, 'Swap');
@@ -600,14 +600,14 @@
   // exists to avoid. Asked of the MARKET: one quote at a small size through the same Rhea route, keyed on
   // the pair so a repaint does not re-ask, and sequence-guarded so a slow answer for an abandoned pair
   // cannot overwrite a newer one.
-  var spot = { key: '', txt: '', seq: 0 };
+  var spot = { key: '', txt: '', seq: 0, rate: 0 };
   function spotTxt() { return spot.txt; }
   function quoteRate() {
     var f = sw.from, t = sw.to;
     if (!f || !t || !S()) { spot.key = ''; spot.txt = ''; showRate('—'); return; }
     var key = f.id + '>' + t.id;
     if (spot.key === key) { showRate(spot.txt); return; }
-    spot.key = key; spot.txt = ''; showRate('—');
+    spot.key = key; spot.txt = ''; spot.rate = 0; showRate('—');
     var my = ++spot.seq;
     var one;
     try { one = S().toUnits('1', f.dec); } catch (e) { return; }
@@ -615,6 +615,7 @@
       if (my !== spot.seq) return;
       var got = Number(S().fromUnits(q.out, t.dec));
       if (!(got > 0)) return;
+      spot.rate = got;
       spot.txt = '1 ' + f.code + ' ≈ ' + fmtNum(got, got < 1 ? 7 : 4) + ' ' + t.code;
       showRate(spot.txt);
     }, function () { if (my === spot.seq) showRate('—'); });
@@ -635,7 +636,7 @@
     S().quote(f.id, t.id, raw, function () { return my === sw.seq; }).then(function (q) {
       if (my !== sw.seq) return;
       sw.quote = q;
-      var out = $('#swapAmtOut'); if (out) plain(out, show(q.out, t.dec, 6));
+      var out = $('#swapAmtOut'); if (out && document.activeElement !== out) plain(out, show(q.out, t.dec, 6));
       var det = $('#swapModal .lx-swapd'); if (det) det.style.display = '';
       var got = Number(S().fromUnits(q.out, t.dec)), paid = Number(S().fromUnits(q.amount, f.dec));
       detail('rate', paid > 0 ? ('1 ' + f.code + ' ≈ ' + fmtNum(got / paid, (got / paid) < 1 ? 7 : 4) + ' ' + t.code) : '—');
@@ -751,6 +752,11 @@
 
     var out = $('#swapAmtOut');
     if (out) plain(out, '');
+    // YOU RECEIVE IS TYPABLE (RAZA's auditor 2026-11-23: "can't type in the You receive box"; RAZA: "make it typable").
+    // It is a plain <div> in the design; Stellar's and XRPL's dialogs already make it contenteditable. Typing a
+    // receive amount fills You pay at the current rate (the last quote, else the 1-unit market rate), and the
+    // normal exact-in quote then runs on that -- the swap that is signed is unchanged.
+    if (out) { out.setAttribute('contenteditable', 'true'); out.setAttribute('inputmode', 'decimal'); out.setAttribute('role', 'textbox'); out.style.outline = 'none'; }
     showRate('—');
 
     if (!$('.lx-swapd', pane)) {
@@ -846,6 +852,20 @@
 
     var tmr = null;
     pane.addEventListener('input', function (e) {
+      if (e.target && e.target.id === 'swapAmtOut') {
+        e.stopImmediatePropagation();
+        var o = e.target, v = String(o.textContent || '').replace(/[^0-9.]/g, ''), dot = v.indexOf('.');
+        if (dot >= 0) v = v.slice(0, dot + 1) + v.slice(dot + 1).replace(/\./g, '');
+        if (v !== o.textContent) { plain(o, v); try { var rg = document.createRange(); rg.selectNodeContents(o); rg.collapse(false); var sl = getSelection(); sl.removeAllRanges(); sl.addRange(rg); } catch (x) {} }
+        var q0 = sw.quote, rt = 0;
+        if (q0 && sw.from && sw.to) { var g0 = Number(S().fromUnits(q0.out, sw.to.dec)), p0 = Number(S().fromUnits(q0.amount, sw.from.dec)); if (p0 > 0) rt = g0 / p0; }
+        if (!(rt > 0)) rt = spot.rate;
+        var inEl0 = $('#swapAmtIn'), want = Number(v);
+        if (inEl0) inEl0.value = (want > 0 && rt > 0) ? String(+((want / rt).toFixed(6))) : '';
+        sw.quote = null; setGo(false, 'Swap');
+        clearTimeout(tmr); tmr = setTimeout(quoteSwap, 350);
+        return;
+      }
       if (!e.target || e.target.id !== 'swapAmtIn') return;
       e.stopImmediatePropagation();
       clean(e.target, sw.from ? sw.from.dec : null);
