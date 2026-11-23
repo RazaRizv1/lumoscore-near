@@ -861,8 +861,22 @@
         if (q0 && sw.from && sw.to) { var g0 = Number(S().fromUnits(q0.out, sw.to.dec)), p0 = Number(S().fromUnits(q0.amount, sw.from.dec)); if (p0 > 0) rt = g0 / p0; }
         if (!(rt > 0)) rt = spot.rate;
         var inEl0 = $('#swapAmtIn'), want = Number(v);
-        if (inEl0) inEl0.value = (want > 0 && rt > 0) ? String(+((want / rt).toFixed(6))) : '';
         sw.quote = null; setGo(false, 'Swap');
+        // NO RATE YET (typed in the first second or two, before the 1-unit market quote landed): ask for it now and
+        // fill You pay when it comes, if this is still what the box says -- it used to stay empty.
+        if (!(rt > 0) && want > 0 && sw.from && sw.to && S()) {
+          var asked = v, fA = sw.from, tA = sw.to;
+          S().quote(fA.id, tA.id, S().toUnits('1', fA.dec)).then(function (q1) {
+            var g1 = Number(S().fromUnits(q1.out, tA.dec));
+            if (!(g1 > 0) || sw.from !== fA || sw.to !== tA) return;
+            spot.rate = g1;
+            if (String(o.textContent || '') !== asked) return;
+            if (inEl0) inEl0.value = String(+((Number(asked) / g1).toFixed(6)));
+            clearTimeout(tmr); tmr = setTimeout(quoteSwap, 50);
+          }, function () {});
+          return;
+        }
+        if (inEl0) inEl0.value = (want > 0 && rt > 0) ? String(+((want / rt).toFixed(6))) : '';
         clearTimeout(tmr); tmr = setTimeout(quoteSwap, 350);
         return;
       }
