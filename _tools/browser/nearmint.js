@@ -388,6 +388,8 @@
           hashes: { create: hashOf(o) }, blockHash: blockOf(o), at: { create: now }
         };
         L().writeResult(res);
+        try { fetch('/lxapi/minters', { method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ op: 'near-record', token: token, signer: me, txHash: res.hashes.create || '' }) }).catch(function () {}); } catch (e) {}
         step(0, 'Created ' + token, 'done');
         return poolAndLiquidity(res, me);
       });
