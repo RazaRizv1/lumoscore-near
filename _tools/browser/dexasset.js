@@ -485,7 +485,7 @@
   // arrival. They are filled in by loadLongPerf() from the token's own daily close series — a real
   // price history from the same source, not a series this page lacks. Kept here so a later
   // paintPerf() (the Buy/Sell toggle re-runs it) does not blank what has already been computed.
-  var LONG = {}, LASTD = null, PERF = { h1: 'pending', long: 'pending' };
+  var LONG = {}, LASTD = null, PERF = { h1: 'pending', long: 'pending' }, SLAUNCH = {};   // SLAUNCH: cells measured since launch (nperf 2026-11-24)
 
   function paintPerf(d) {
     // `[class*="dxa-perf-cell"]` MATCHES BOTH LAYOUTS, and selecting only `.dxa-perf-cell` is why
@@ -510,6 +510,7 @@
       var label = PERF[i] || (((c.querySelector('.tf') || {}).textContent) || '').trim();
       var v = Object.prototype.hasOwnProperty.call(have, label) ? have[label] : null;
       var ok = (v != null && isFinite(v));
+      try { if (ok && SLAUNCH[label]) c.title = 'Since launch'; else if (c.title === 'Since launch') c.removeAttribute('title'); } catch (e) {}
 
       // Rebuilt, because the healer may have emptied the cell entirely.
       var tf = c.querySelector('.tf') || c.appendChild(el('div', 'tf'));
@@ -576,14 +577,16 @@
         // window longer than its life measures from that opening price rather than em-dashing: there is no older
         // price the box could be missing (RAZA 2026-11-05: "lumos isnt showing its chart and neither the %change
         // boxes"). Any other short series keeps the rule above.
-        var over = function (days) {
+        var lpBorn = pts.born || (String((asset && asset.id) || '').slice(-15) === '.lumoscore.near' && pts.length > 0 && pts[0][0] > Date.now() - 190 * 864e5);
+        var over = function (days, key) {
           var v = changeOver(pts, days), f = pts[0][4], l = pts[pts.length - 1][1];            // f: the first candle's OPEN
-          return (v == null && pts.born && f > 0) ? (l - f) / f * 100 : v;
+          if (lpBorn && f > 0 && (v == null || pts[0][0] > Date.now() - days * 864e5)) { SLAUNCH[key] = 1; return (l - f) / f * 100; }
+          return v;
         };
-        LONG['7d'] = over(7);
-        LONG['1m'] = over(30);
-        LONG['3m'] = over(90);
-        LONG['6m'] = over(180);
+        LONG['7d'] = over(7, '7d');
+        LONG['1m'] = over(30, '1m');
+        LONG['3m'] = over(90, '3m');
+        LONG['6m'] = over(180, '6m');
         PERF.long = 'done'; paintPerf(LASTD);
       }, function (e) {
         var hopeless = /no wNEAR pool|NEAR in NEAR|no token|short|empty/.test(String((e && e.message) || ''));
