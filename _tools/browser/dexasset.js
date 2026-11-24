@@ -3680,7 +3680,16 @@
       ? ' Its price and liquidity are read on chain from its NEAR order-book pool' + (d.srcExtra === 'intear' ? '; 24h change and volume come from Intear’s price index' : '')
         + ', and its supply from the token contract itself.'
       : ' Its price, 24h volume and pools come from NEAR’s on-chain pools and DexScreener, and its supply is read from the token contract itself.';
-    plain(desc, (d && d.desc) ? d.desc : (a.code + nm + ' is a token on NEAR Protocol.' + srcLine));
+    if (String(a.id || '').slice(-15) === '.lumoscore.near' && !window.__lxnAdminAsked) {
+      window.__lxnAdminAsked = 1;
+      var sym = String(a.id).split('.')[0].toUpperCase().replace(/[^A-Z0-9]/g, '');
+      fetch('/lxapi/assetmeta?asset=' + encodeURIComponent(sym + '-' + a.id))
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (j) { var t = (j && j.meta && typeof j.meta.description === 'string') ? j.meta.description.trim() : '';
+          if (t) { window.__lxnAdminDesc = t; plain(desc, t); } })
+        .catch(function () {});
+    }
+    plain(desc, window.__lxnAdminDesc || ((d && d.desc) ? d.desc : (a.code + nm + ' is a token on NEAR Protocol.' + srcLine)));
     // Stellar's settled state: two lines at most, and no 24px held under it for a "Show more" control.
     // Without these the pre-script rule kept that space reserved for good, so NEAR's header stood 22px
     // taller than Stellar's for the same one-line USDC text.
