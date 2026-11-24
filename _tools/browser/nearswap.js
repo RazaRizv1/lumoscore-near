@@ -627,7 +627,7 @@
     function one(i) {
       if (i >= ids.length) return Promise.resolve('');
       return fetch('/lxapi/minters?net=near&id=' + encodeURIComponent(ids[i])).then(function (r) { return r.ok ? r.json() : null; })
-        .then(function (d) { if (!d || !d.minter) return one(i + 1); return d.minter !== me ? d.minter : '=self'; }).catch(function () { return ''; });
+        .then(function (d) { if (!d || !d.minter) return one(i + 1); window.__lxMS = +d.share || 0.3; return d.minter !== me ? d.minter : '=self'; }).catch(function () { return ''; });
     }
     return Promise.race([one(0), new Promise(function (res) { setTimeout(function () { res(''); }, 2500); })]);
   }
@@ -653,11 +653,11 @@
         : (q.feeVia && q.feeVia.out ? big(q.feeVia.out) * BigInt(10000) / BigInt(feeBps()) : null));
       if (_nv !== null && _nv < big('1000000000000000000000000')) mnt = '';
       if (mnt && !router() && big(q.fee) > BigInt(0)) {
-        if (q.from === 'near') { mintNear = big(q.fee) * BigInt(3) / BigInt(10); feeAmt = (big(q.fee) - mintNear).toString(); }
+        if (q.from === 'near') { mintNear = big(q.fee) * BigInt(Math.round(Math.min(0.7, Math.max(0.3, +window.__lxMS || 0.3)) * 100)) / BigInt(100); feeAmt = (big(q.fee) - mintNear).toString(); }
         else if (q.feeVia && big(q.feeVia.min) > BigInt(0)) {
-          var _sh = big(q.fee) * BigInt(3) / BigInt(10);
-          mintNear = big(q.feeVia.out || q.feeVia.min) * BigInt(3) / BigInt(10);
-          feeAmt = (big(q.fee) - _sh).toString(); viaMin = (big(q.feeVia.min) - big(q.feeVia.min) * BigInt(3) / BigInt(10)).toString();
+          var _sh = big(q.fee) * BigInt(Math.round(Math.min(0.7, Math.max(0.3, +window.__lxMS || 0.3)) * 100)) / BigInt(100);
+          mintNear = big(q.feeVia.out || q.feeVia.min) * BigInt(Math.round(Math.min(0.7, Math.max(0.3, +window.__lxMS || 0.3)) * 100)) / BigInt(100);
+          feeAmt = (big(q.fee) - _sh).toString(); viaMin = (big(q.feeVia.min) - big(q.feeVia.min) * BigInt(Math.round(Math.min(0.7, Math.max(0.3, +window.__lxMS || 0.3)) * 100)) / BigInt(100)).toString();
         }
       }
       var wnearBefore = r[3];
