@@ -648,6 +648,10 @@
     ]).then(function (r0) {
       var nearHave = r0[0], r = r0.slice(1);
       var mnt = r0[7] || '', mintNear = BigInt(0), feeAmt = q.fee, viaMin = q.feeVia ? q.feeVia.min : null;
+      // MINTER SHARE ONLY ON SWAPS WORTH 1+ (RAZA 2026-11-24).
+      var _nv = (q.from === 'near' || inC === WNEAR) ? big(q.amount) : ((outNative || outC === WNEAR) ? big(q.out || q.min || '0')
+        : (q.feeVia && q.feeVia.out ? big(q.feeVia.out) * BigInt(10000) / BigInt(feeBps()) : null));
+      if (_nv !== null && _nv < big('1000000000000000000000000')) mnt = '';
       if (mnt && !router() && big(q.fee) > BigInt(0)) {
         if (q.from === 'near') { mintNear = big(q.fee) * BigInt(3) / BigInt(10); feeAmt = (big(q.fee) - mintNear).toString(); }
         else if (q.feeVia && big(q.feeVia.min) > BigInt(0)) {
