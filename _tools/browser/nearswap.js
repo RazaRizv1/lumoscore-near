@@ -627,7 +627,7 @@
     function one(i) {
       if (i >= ids.length) return Promise.resolve('');
       return fetch('/lxapi/minters?net=near&id=' + encodeURIComponent(ids[i])).then(function (r) { return r.ok ? r.json() : null; })
-        .then(function (d) { if (!d || !d.minter) return one(i + 1); return d.minter !== me ? d.minter : ''; }).catch(function () { return ''; });
+        .then(function (d) { if (!d || !d.minter) return one(i + 1); return d.minter !== me ? d.minter : '=self'; }).catch(function () { return ''; });
     }
     return Promise.race([one(0), new Promise(function (res) { setTimeout(function () { res(''); }, 2500); })]);
   }
@@ -740,7 +740,7 @@
             gas: String(Math.min(SWAP_GAS, MAX_TX_GAS - used)) + TGAS, deposit: '1' } });
         }
         txs.push({ signerId: me, receiverId: inC, actions: actions });
-        if (mintNear > BigInt(0)) txs.push({ signerId: me, receiverId: mnt, actions: [{ type: 'Transfer', params: { deposit: mintNear.toString() } }] });
+        if (mintNear > BigInt(0) && mnt !== '=self') txs.push({ signerId: me, receiverId: mnt, actions: [{ type: 'Transfer', params: { deposit: mintNear.toString() } }] });
         // A split route's second swap: the hub token the first left in the wallet, on the other contract. Its
         // own transaction, as wrapping is: HOT checks each one against the balances as they stand when it reaches it.
         if (sp) {
@@ -755,7 +755,7 @@
         if (needOut) dep += big(m[0]);
         if (needWrap) dep += big(m[1]);
         if (needHub) dep += big(m[2]);
-        if (q.from !== 'near') dep += mintNear;
+        if (q.from !== 'near' && mnt !== '=self') dep += mintNear;
         // The gas reserve, checked here so every swap screen gets the same answer before anything is signed.
         // WHAT A TOKEN SALE HOLDS BACK (RAZA 2026-11-12: NEARLY -> NEAR refused with 0.1358 NEAR in the wallet). SWAP_KEEP's
         // 0.2 is Rhea's own rule and HOT's measured refusal for a swap that SPENDS NEAR. Selling a token spends no NEAR:
