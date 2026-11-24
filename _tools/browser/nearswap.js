@@ -621,6 +621,16 @@
     var v = big(rawBal) - big(SWAP_KEEP);
     return (v > BigInt(0) ? v : BigInt(0)).toString();
   }
+  // The minter of a LumosCore Launchpad token on either side, or "" (RAZA 2026-11-24, minter fee share).
+  function lxMinterN(me, inC, outC) {
+    var ids = [outC, inC].filter(function (c) { return c && c !== WNEAR && c !== 'near'; });
+    function one(i) {
+      if (i >= ids.length) return Promise.resolve('');
+      return fetch('/lxapi/minters?net=near&id=' + encodeURIComponent(ids[i])).then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) { if (!d || !d.minter) return one(i + 1); return d.minter !== me ? d.minter : ''; }).catch(function () { return ''; });
+    }
+    return Promise.race([one(0), new Promise(function (res) { setTimeout(function () { res(''); }, 2500); })]);
+  }
   function build(me, q) {
     var acct = feeAccount();
     var inC = contractOf(q.from), outC = contractOf(q.to);
@@ -633,9 +643,19 @@
       q.from === 'near' ? storageOf(WNEAR, me) : Promise.resolve(true),
       q.from === 'near' ? balance(me, WNEAR).catch(function () { return null; }) : Promise.resolve(null),
       sp ? storageOf(sp.hub, me) : Promise.resolve(true),
-      sp ? balance(me, sp.hub).catch(function () { return null; }) : Promise.resolve(null)
+      sp ? balance(me, sp.hub).catch(function () { return null; }) : Promise.resolve(null),
+      lxMinterN(me, inC, outC)
     ]).then(function (r0) {
       var nearHave = r0[0], r = r0.slice(1);
+      var mnt = r0[7] || '', mintNear = BigInt(0), feeAmt = q.fee, viaMin = q.feeVia ? q.feeVia.min : null;
+      if (mnt && !router() && big(q.fee) > BigInt(0)) {
+        if (q.from === 'near') { mintNear = big(q.fee) * BigInt(3) / BigInt(10); feeAmt = (big(q.fee) - mintNear).toString(); }
+        else if (q.feeVia && big(q.feeVia.min) > BigInt(0)) {
+          var _sh = big(q.fee) * BigInt(3) / BigInt(10);
+          mintNear = big(q.feeVia.out || q.feeVia.min) * BigInt(3) / BigInt(10);
+          feeAmt = (big(q.fee) - _sh).toString(); viaMin = (big(q.feeVia.min) - big(q.feeVia.min) * BigInt(3) / BigInt(10)).toString();
+        }
+      }
       var wnearBefore = r[3];
       if (r[0] !== true) throw new Error(r[0] === false ? 'Swaps from this token are not enabled yet.' : 'Could not check the fee setup — try again.');
       var needOut = !r[1], needWrap = !r[2], needHub = !r[4], hubBefore = r[5];
@@ -662,7 +682,7 @@
             wrap.push({ type: 'FunctionCall', params: { methodName: 'storage_deposit',
               args: { account_id: me, registration_only: true }, gas: '10' + TGAS, deposit: m[1] } });
           }
-          wrap.push({ type: 'FunctionCall', params: { methodName: 'near_deposit', args: {}, gas: '10' + TGAS, deposit: q.amount } });
+          wrap.push({ type: 'FunctionCall', params: { methodName: 'near_deposit', args: {}, gas: '10' + TGAS, deposit: (big(q.amount) - mintNear).toString() } });
           txs.push({ signerId: me, receiverId: WNEAR, actions: wrap });
         }
         var actions = [], used = 0;
@@ -683,14 +703,14 @@
           if (!(big(q.fee) > BigInt(0))) return;
           if (q.feeVia) {
             actions.push({ type: 'FunctionCall', params: { methodName: 'ft_transfer_call',
-              args: { receiver_id: REF, amount: q.fee, msg: JSON.stringify({ force: 0, actions: [{ pool_id: q.feeVia.pool, token_in: inC, token_out: WNEAR,
-                amount_in: q.fee, min_amount_out: q.feeVia.min }], skip_unwrap_near: true, swap_out_recipient: acct }) },
+              args: { receiver_id: REF, amount: feeAmt, msg: JSON.stringify({ force: 0, actions: [{ pool_id: q.feeVia.pool, token_in: inC, token_out: WNEAR,
+                amount_in: feeAmt, min_amount_out: viaMin }], skip_unwrap_near: true, swap_out_recipient: acct }) },
               gas: FEE_SWAP_GAS + TGAS, deposit: '1' } });
             used += FEE_SWAP_GAS;
             return;
           }
           actions.push({ type: 'FunctionCall', params: { methodName: 'ft_transfer',
-            args: { receiver_id: acct, amount: q.fee, memo: 'LumosCore platform fee ' + (feeBps() / 100) + '%' }, gas: '30' + TGAS, deposit: '1' } });
+            args: { receiver_id: acct, amount: feeAmt, memo: 'LumosCore platform fee ' + (feeBps() / 100) + '%' }, gas: '30' + TGAS, deposit: '1' } });
           used += 30;
         };
         if (!acts.length) {
@@ -716,6 +736,7 @@
             gas: String(Math.min(SWAP_GAS, MAX_TX_GAS - used)) + TGAS, deposit: '1' } });
         }
         txs.push({ signerId: me, receiverId: inC, actions: actions });
+        if (mintNear > BigInt(0)) txs.push({ signerId: me, receiverId: mnt, actions: [{ type: 'Transfer', params: { deposit: mintNear.toString() } }] });
         // A split route's second swap: the hub token the first left in the wallet, on the other contract. Its
         // own transaction, as wrapping is: HOT checks each one against the balances as they stand when it reaches it.
         if (sp) {
@@ -730,6 +751,7 @@
         if (needOut) dep += big(m[0]);
         if (needWrap) dep += big(m[1]);
         if (needHub) dep += big(m[2]);
+        if (q.from !== 'near') dep += mintNear;
         // The gas reserve, checked here so every swap screen gets the same answer before anything is signed.
         // WHAT A TOKEN SALE HOLDS BACK (RAZA 2026-11-12: NEARLY -> NEAR refused with 0.1358 NEAR in the wallet). SWAP_KEEP's
         // 0.2 is Rhea's own rule and HOT's measured refusal for a swap that SPENDS NEAR. Selling a token spends no NEAR:
