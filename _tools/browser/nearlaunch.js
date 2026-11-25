@@ -901,7 +901,7 @@
     $$('.result-cta').forEach(function (a) {
       a.setAttribute('href', trade);
       var sp = a.querySelector('span');
-      if (sp) setText(sp, 'View Your Token ($' + tick + ') Token Page');
+      if (sp) setText(sp, 'View ' + ((res && res.name) || 'your token') + ' ($' + tick + ') Token Page');
     });
 
     // The phone's sticky "Go to $APT Token Page" is a bare button: its label and its destination both.
