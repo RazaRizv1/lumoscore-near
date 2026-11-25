@@ -13,8 +13,8 @@
 //   /lxapi/nearpools    the Pools box: curated Rhea pools, liquidity, 24h volume (figures in NEAR, x usd)
 //   /lxapi/nearoneclick?op=tokens   the Cross-chain box (since 2026-10-30): destinations NEAR Intents
 //                       serves, and the NEAR tokens it takes plus those only Omni/Wormhole carry
-// WHAT HAS NO NEAR SOURCE says so with the design's em dash: the Launchpad box (no NEAR launchpad
-// deployed yet) and Platform Activity, which shows the design's own "No platform activity yet." row --
+// WHAT HAS NO NEAR SOURCE says so with the design's em dash: Platform Activity (the Launchpad box reads
+// /lxapi/recentmints since 2026-11-26, see launchpad()), which shows the design's own "No platform activity yet." row --
 // until the platform's own NEAR writes are read (activity(), below).
 (function () {
   if (window.__lxnDash) return;
@@ -133,6 +133,22 @@
   // among them. Assets: the NEAR tokens that can be SENT (XRPL's box names XRP, its one source), NEAR
   // Intents' origins plus the Omni/Wormhole-only tokens from the same baked table the bridge uses.
   var BR_IDS = __LX_BR_IDS__;
+  // THE LAUNCHPAD BOX (RAZA 2026-11-26): the NEAR launchpad is live. Tokens = every launch the factory list holds;
+  // Newest / 24h Mints come from the launch times recorded since that day, so they stay a dash until one exists.
+  function launchpad() {
+    j('/lxapi/recentmints?net=near').then(function (d) {
+      if (!d || !d.ok || !(d.total >= 0)) throw new Error('no total');
+      box('ltok', count(d.total));
+      var t = +d.newestAt || 0;
+      if (t > 1e12) {
+        var sec = Math.max(0, Math.floor((Date.now() - t) / 1000));
+        box('lnew', sec < 3600 ? Math.max(1, Math.round(sec / 60)) + 'm' : sec < 86400 ? Math.round(sec / 3600) + 'h'
+          : sec < 2592000 ? Math.round(sec / 86400) + 'd' : Math.round(sec / 2592000) + 'mo');
+        box('lmint', count(+d.mints24 || 0));
+      } else { box('lnew', '—'); box('lmint', '—'); }
+    }).catch(function () { ['ltok', 'lnew', 'lmint'].forEach(function (k) { box(k, '—'); }); });
+  }
+
   function crossChain() {
     box('cvia', 'NEAR Intents · Omni · Wormhole');
     j('/lxapi/nearoneclick?op=tokens').then(function (d) {
@@ -407,7 +423,7 @@
     activityEmpty();
     activity();
     paintStats();
-    ['ltok', 'lnew', 'lmint'].forEach(function (k) { box(k, '—'); });
+    launchpad();
     crossChain();
 
     market().then(function (d) {
