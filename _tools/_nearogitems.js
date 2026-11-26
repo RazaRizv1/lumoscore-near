@@ -210,14 +210,13 @@ async function put(file, png, seen) {
       logos.push(id ? await logoFor(id, CUR_LOGO.get(id)) : '');
     }
     if (logos.some((x) => !x)) monoP.push(pair);
-    const p = sides.length === 2 ? pairPanel(logos[0], logos[1], sides[0], sides[1]) : quadPanel(logos, sides);
-    const png = K.render(K.shell({
-      defs: p.defs,
-      row: K.metaRow([{ chain: 'NEAR' }, { text: 'Liquidity pool' }]).svg,
-      headline: sides.join(' / '),
-      accent: 'Provide liquidity on LumosCore',
-      features: 'Reserves · Activity · Participants',
-      panel: p.svg,
+    // 2026-11-26 redesign: the same pool card as Stellar/XRPL (K.card + K.VIS.group for 2-4 tokens).
+    const png = K.render(K.card({
+      eyebrow: 'Liquidity pool on NEAR',
+      title: sides.join(' / '),
+      sub: ['Add or withdraw liquidity', 'from your own wallet.'],
+      chipList: [{ t: 'NEAR', chain: 'NEAR' }, { t: 'AMM pool' }],
+      visual: K.VIS.group(logos, sides),
     }));
     if (await put(path.join(OUT, 'p-' + pid + '.png'), png, seen)) wP++;
     nP++;

@@ -101,29 +101,28 @@ function panelGrid(items, kind) {
   const okT = tokens.filter(Boolean).length, okB = bridge.filter(Boolean).length;
   const row = K.metaRow([{ chain: 'NEAR' }]).svg;
 
+  // 2026-11-26 redesign: drawn with K.card, the same frame as every Stellar/XRPL card. These are the NEAR
+  // network pages, so each wears the NEAR chip and badge (and only that network). No earning wording.
+  const N = { t: 'NEAR', chain: 'NEAR' };
   const CARDS = [
-    ['trade-near', { row, headline: 'NEAR DEX', accent: 'Trade on LumosCore',
-      features: 'Swaps · Limit orders · Best-price routing',
-      grid: okT === 4 ? panelGrid(tokens, 'quad') : panelMark() }],
-    ['pools-near', { row, headline: 'NEAR Pools', accent: 'Provide liquidity, earn fees',
-      features: 'Create · Add · Withdraw',
-      grid: okT === 4 ? panelGrid(tokens, 'quad') : panelMark() }],
-    ['bridge-near', { row, headline: 'NEAR Bridge', accent: 'Bridge on LumosCore',
-      features: 'NEAR Intents · Omni Bridge · Wormhole',
-      grid: okB === 4 ? panelGrid(bridge, 'quad') : panelMark() }],
-    ['rewards-near', { row, headline: 'LUMOS Rewards', accent: 'Hold or provide liquidity',
-      features: 'Paid from the treasury each round', grid: panelSingle(lumos) }],
-    ['lumos-near', { row: K.metaRow([{ chain: 'NEAR' }, { check: 'LumosCore token' }, { text: 'lumoscore.com' }]).svg,
-      headline: 'LUMOS', accent: 'Trade on LumosCore', features: 'Price · Supply · Holders', grid: panelSingle(lumos) }],
-    ['launchpad-near', { row, headline: 'NEAR Launchpad', accent: 'Launch a token, no code',
-      features: 'Fixed supply · First pool included', grid: panelMark() }],
+    ['trade-near', { eyebrow: 'Markets on NEAR', title: 'Trade', sub: ['Swaps and limit orders', 'on NEAR.'],
+      chipList: [N, { t: 'Swaps' }, { t: 'Limit orders' }], visual: K.VIS.chart('NEAR') }],
+    ['pools-near', { eyebrow: 'Liquidity on NEAR', title: 'Pools', sub: ['Add, remove and manage', 'your liquidity on NEAR.'],
+      chipList: [N, { t: 'Add liquidity' }, { t: 'Withdraw anytime' }], visual: K.VIS.orb('NEAR') }],
+    ['bridge-near', { eyebrow: 'Cross-chain from NEAR', title: 'Bridge', sub: ['Move assets in and out', 'of NEAR.'],
+      chipList: [N, { t: 'NEAR Intents' }, { t: 'Omni Bridge' }], visual: K.VIS.bridge('NEAR') }],
+    ['rewards-near', { eyebrow: 'Rewards on NEAR', title: 'Rewards', sub: ['LUMOS rewards for holders', 'and liquidity providers.'],
+      chipList: [N, { t: 'Paid in LUMOS' }], visual: K.VIS.rewards('NEAR') }],
+    ['lumos-near', { eyebrow: 'Token on NEAR', title: 'LUMOS', titleSize: 108, sub: ['Issued by lumoscore.com'],
+      chipList: [N, { t: 'LumosCore token', tick: true }], visual: K.VIS.token(lumos, 'LU') }],
+    ['launchpad-near', { eyebrow: 'Launchpad on NEAR', title: 'Launchpad', sub: ['Mint your own token', 'on NEAR in a few steps.'],
+      chipList: [N, { t: 'No code' }], visual: K.VIS.launch('NEAR') }],
   ];
 
   fs.mkdirSync(OUT_DIR, { recursive: true });
   let n = 0;
   for (const [name, c] of CARDS) {
-    const png = K.render(K.shell({ defs: c.grid.defs, row: c.row, headline: c.headline, accent: c.accent,
-      features: c.features, panel: c.grid.svg }));
+    const png = K.render(K.card(c));
     const dst = path.join(OUT_DIR, name + '.png');
     if (fs.existsSync(dst) && Buffer.compare(png, fs.readFileSync(dst)) === 0) continue;
     fs.writeFileSync(dst, png); n++;
